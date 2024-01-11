@@ -51,7 +51,7 @@ class Class_Total_Report_System(QMainWindow, Ui_MainWindow):
         print("clicked_send_now_msg")
         pass
     def clicked_program_exit(self):        
-        print("clicked_program_exit")
+        print("clicked_program_exit!")
         if self.msgProcess_thread.is_running == True:
             self.msgProcess_thread.stop()
         else:

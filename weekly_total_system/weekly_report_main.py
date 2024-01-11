@@ -37,7 +37,7 @@ class Class_Total_Report_System(QMainWindow, Ui_MainWindow):
     def __init__(self, parent=None):
         super(Class_Total_Report_System, self).__init__(parent)
         self.setupUi(self)
-        self.setWindowTitle("Total Report System")
+        self.setWindowTitle("Total Report System~")
         self.setFixedSize(QSize(950, 575))
         self.msgProcess_thread = MsgProcess(self)
         
@@ -55,7 +55,7 @@ class Class_Total_Report_System(QMainWindow, Ui_MainWindow):
         if self.msgProcess_thread.is_running == True:
             self.msgProcess_thread.stop()
         else:
-            print("thread is empty")
+            print("thread is empty!")
         self.close()
         
     def clicked_remove_this_week_contents(self):        

@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import QApplication, QMainWindow, QWidget
 from write_page_form import Ui_MainWindow
 from PySide6.QtGui import QPixmap
-from PySide6.QtCore import Qt, QThread, QSize, Signal
+from PySide6.QtCore import Qt, QThread, QSize, Signal, QDateTime
 from PySide6.QtWidgets import QMessageBox
 from socket import *
 
@@ -40,11 +40,23 @@ class Class_Total_Report_System(QMainWindow, Ui_MainWindow):
         self.setWindowTitle("Total Report System~")
         self.setFixedSize(QSize(950, 575))
         self.msgProcess_thread = MsgProcess(self)
-        
+
+    def clicked_remove_this_week_contents(self):        
+        print("clicked_remove_this_week_contents")
+        if self.textEdit_this_week.toPlainText() != None :
+            self.textEdit_this_week.clear()
+            
+        pass
+
     def clicked_remove_next_week_contents(self):
         print("clicked_remove_next_week_contents")
+        if self.textEdit_next_week.toPlainText() != None :
+            self.textEdit_next_week.clear()
         pass
+
     def clicked_send_reserved_msg(self):
+        datetime = QDateTime.currentDateTime()
+        print(datetime.toString())
         print("clicked_send_reserved_msg")
         pass
     def clicked_send_now_msg(self):
@@ -55,12 +67,9 @@ class Class_Total_Report_System(QMainWindow, Ui_MainWindow):
         if self.msgProcess_thread.is_running == True:
             self.msgProcess_thread.stop()
         else:
-            print("thread is empty!")
-        self.close()
-        
-    def clicked_remove_this_week_contents(self):        
-        print("clicked_remove_this_week_contents")
-        pass
+            print("thread is empty!!!")
+        self.close()        
+    
     
 #app = QApplication([])
 #window = QMainWindow()

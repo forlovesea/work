@@ -4,12 +4,12 @@ from PySide6.QtGui import QPixmap
 from PySide6.QtCore import Qt, QThread, QSize, Signal, QDateTime
 from PySide6.QtWidgets import QMessageBox, QDialog, QPushButton, QVBoxLayout, QToolTip
 from socket import *
+import requests, time, inspect, atexit, schedule
 
-import requests
-import time
-import inspect
-import atexit
-import schedule
+report_server_ip = "10.30.41.60"
+report_server_port = 7878
+report_server_addr_port = (report_server_ip, report_server_port)
+
 
 def job(self):
     print("send e-mail~")
@@ -149,6 +149,23 @@ class Class_Total_Report_System(QMainWindow, Ui_MainWindow):
         self.msgProcess_thread.start()
         pass
 
+    def init_socket(self):
+        self.sock = socket(AF_INET, SOCK_DGRAM)
+        self.sock.settimeout(5)
+
+
+    def send_msg_toserver_for_email(self, mText):
+        self.sock.sendto(mText.encode('utf-8'), report_server_addr_port )
+    
+    
+        self.sock.send(mText.encode('utf-8'))
+        
+        data = sock.recv(5000)
+        msg = data.decode()
+        msg = msg.replace(" ", "")
+        #msg = f'|{msg.strip()}|'
+        #print('echo msg: ', msg)        
+        sock.close()
 
 if __name__== '__main__':
     app = QApplication()

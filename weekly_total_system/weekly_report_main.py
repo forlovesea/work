@@ -2,36 +2,48 @@ from PySide6.QtWidgets import QApplication, QMainWindow, QWidget, QLabel, QDateT
 from write_page_form import Ui_MainWindow
 from PySide6.QtGui import QPixmap
 from PySide6.QtCore import Qt, QThread, QSize, Signal, QDateTime
-from PySide6.QtWidgets import QMessageBox, QDialog, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import QMessageBox, QDialog, QPushButton, QVBoxLayout, QToolTip
 from socket import *
 
 import requests
 import time
 import inspect
 import atexit
+import schedule
 
-
+def job(self):
+    print("send e-mail~")
+    self.do_it_schedule_sending_mail = 1    
 
 def handle_exit(report_system):
-    print("called out")
+    print("handle_exit!!!")
     report_system.msgProcess_thread.quit()
     report_system.msgProcess_thread.wait(5000)
 
-class MsgProcess(QThread):
-    signalInA = Signal(str)
+class MsgProcess(QThread):    
     def __init__(self, parent=None):
         super(MsgProcess, self).__init__(parent)
         self.trs = parent
         self.is_running = False    
         
     def run(self):
-        self.is_running = True
-        print("Thread Start~")        
-    
+        self.is_running = True        
+        print("Thread Start~")
+        while True:
+            print("schedul test: "+ QDateTime.currentDateTime().toString())
+            schedule.run_pending()
+            if self.trs.do_it_schedule_sending_mail == 1 :
+                print("cancel schedule_sending_mail~~~")
+                self.trs.do_it_schedule_sending_mail = 0
+                schedule.cancel_job(self.trs.schedule_sending_mail)                
+                
+            time.sleep(5)
+
     def stop(self):
         self.is_running = False
         self.quit()
-        self.wait(5000) #5000ms
+        self.wait(2000) #2000ms
+    print("Thread End")
 
 #==================================================================================================
 #==================================================================================================
@@ -45,6 +57,9 @@ class Class_Total_Report_System(QMainWindow, Ui_MainWindow):
         self.msgProcess_thread = MsgProcess(self)
         self.dialog = QDialog()
         self.datetimeedit = QDateTimeEdit(self.dialog)
+        self.lbl = QLabel(' 예약일정 설정', self.dialog)        
+        self.btnDialog = QPushButton("확인", self.dialog)
+        self.do_it_schedule_sending_mail = 0
 
     def clicked_remove_this_week_contents(self):        
         print("clicked_remove_this_week_contents")
@@ -63,60 +78,77 @@ class Class_Total_Report_System(QMainWindow, Ui_MainWindow):
         datetime = QDateTime.currentDateTime()
         self.dialog.setWindowTitle('예약시간 설정')
         """
-            Qt.NonModal        : 값은 0 이며, 다른 윈도우 화면 입력을 차단하지 않습니다. 모달리스입니다.
-            Qt.WindowModal     : 값은 1 이며, 화면에 있는 모든 윈도우 창의 입력을 차단합니다. 
-                                현재 다이얼로그를 실행시킨 부모 프로그램뿐만 아니라 다른 윈도우들도 제어를 막습니다.
-            Qt.ApplicationModal: 값은 2 이며, 다이얼로그를 실행시킨 부모 프로그램만 제어를 막습니다
+            Qt.NonModal        : 값은 0 이며, 다른 윈도우 화면 입력을 차단하지 않음 - 모달리스
+            Qt.WindowModal     : 값은 1 이며, 화면에 있는 모든 윈도우 창의 입력을 차단 
+                                             현재 다이얼로그를 실행시킨 부모 프로그램뿐만 아니라 다른 윈도우들도 제어를 막음
+            Qt.ApplicationModal: 값은 2 이며, 다이얼로그를 실행시킨 부모 프로그램만 제어를 막을 수 있음
         """        
         #self.dialog.setWindowModality(Qt.NonModal)
         #self.dialog.setWindowModality(Qt.WindowModal)
         self.dialog.setWindowModality(Qt.ApplicationModal)        
         self.dialog.resize(300, 200)
-        lbl = QLabel(' 예약일정 설정', self.dialog)        
+        #lbl = QLabel(' 예약일정 설정', self.dialog)        
         
         self.datetimeedit.setDateTime(QDateTime.currentDateTime())
         self.datetimeedit.setDateTimeRange(QDateTime(2024, 1, 1, 00, 00, 00), QDateTime(2100, 1, 1, 00, 00, 00))
-        self.datetimeedit.setDisplayFormat('yyyy.MM.dd hh:mm:ss')
+        #self.datetimeedit.setDisplayFormat('yyyy.MM.dd hh:mm:ss')
+        #초(sec) 생략
+        self.datetimeedit.setDisplayFormat('yyyy.MM.dd hh:mm')
         self.datetimeedit.move(50,50)
         #datetimeedit.setGeometry(10, 10, 200, 50)
-        btnDialog = QPushButton("확인", self.dialog)
-        btnDialog.move(100, 100)
-        btnDialog.clicked.connect(self.dialog_close)
+        
+        self.btnDialog.move(100, 100)
+        self.btnDialog.clicked.connect(self.dialog_close)
         
         vbox = QVBoxLayout()
-        vbox.addWidget(lbl)
+        vbox.addWidget(self.lbl)
         vbox.addWidget(self.datetimeedit)
         vbox.addStretch()
         self.dialog.setLayout(vbox)
-        
         self.dialog.show()
+        
         print(datetime.toString())
         print("clicked_send_reserved_msg")
         pass
     
-    def dialog_close(self):
+    def dialog_close(self):        
+        cal_trigger_date = self.datetimeedit.date()
+        cal_trigger_time = self.datetimeedit.time()
+        
+        print("Yahoo day: ", cal_trigger_date.year(), cal_trigger_date.month(), cal_trigger_date.day(), cal_trigger_date.weekNumber() )
+        print("Yahoo time: ", cal_trigger_time.hour(), cal_trigger_time.minute())
+        trigger_time  = str(cal_trigger_date.year()) + "." +str(cal_trigger_date.month()) + "."+ str(cal_trigger_date.day())+ " "+ str(cal_trigger_time.hour()).zfill(2)+ ":"+ str(cal_trigger_time.minute()).zfill(2)
+        
+        #self.pushButton_reserve_send.setText("하이") 
+        self.pushButton_reserve_send.setStyleSheet("background-color: yellow")
+        self.pushButton_reserve_send.setToolTip("<font color=""red""<b>"+trigger_time+"</b></font>")
+        self.pushButton_reserve_send.move(50,50)
+        #self.pushButton_reserve_send.setText("예약전송" + self.datetimeedit.dateTime().toString())
+        
+        #schedule.every().month
+        self.reserved_action_timer()
         self.dialog.close()
-        print(self.datetimeedit.dateTime().toString())
         
     def clicked_send_now_msg(self):
         print("clicked_send_now_msg")
         pass
+
     def clicked_program_exit(self):        
         print("clicked_program_exit!")
         if self.msgProcess_thread.is_running == True:
             self.msgProcess_thread.stop()
         else:
             print("thread is empty!!!")
-        self.close()        
-    
-    
-    
-#app = QApplication([])
-#window = QMainWindow()
-#ui = Ui_MainWindow()
-#ui.setupUi(window)
-#window.show()
-#app.exec()
+        self.close()
+
+    def reserved_action_timer(self):
+        cal_trigger_time = self.datetimeedit.time()
+        trigger_time  = str(cal_trigger_time.hour()).zfill(2)+ ":"+ str(cal_trigger_time.minute()).zfill(2)
+        print("***** Trigger time: " + trigger_time)
+        self.schedule_sending_mail = schedule.every().day.at(trigger_time).do(job, self)
+        self.msgProcess_thread.start()
+        pass
+
 
 if __name__== '__main__':
     app = QApplication()

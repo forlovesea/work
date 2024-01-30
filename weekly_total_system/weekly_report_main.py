@@ -33,7 +33,7 @@ class MsgProcess(QThread):
             print("schedul test: "+ QDateTime.currentDateTime().toString())
             schedule.run_pending()
             if self.trs.do_it_schedule_sending_mail == 1 :
-                print("cancel schedule_sending_mail~~~")
+                print("cancel schedule_sending_mail~")
                 self.trs.do_it_schedule_sending_mail = 0
                 schedule.cancel_job(self.trs.schedule_sending_mail)
             

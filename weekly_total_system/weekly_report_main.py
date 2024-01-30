@@ -35,7 +35,14 @@ class MsgProcess(QThread):
             if self.trs.do_it_schedule_sending_mail == 1 :
                 print("cancel schedule_sending_mail~~~")
                 self.trs.do_it_schedule_sending_mail = 0
-                schedule.cancel_job(self.trs.schedule_sending_mail)                
+                schedule.cancel_job(self.trs.schedule_sending_mail)
+            
+            if self.trs.req_send_message == 1:
+                print("print textEdit~")
+                thisWeek_Text = self.trs.textEdit_this_week.toPlainText()
+                nextWeek_Text = self.trs.textEdit_next_week.toPlainText()
+                print(thisWeek_Text + nextWeek_Text)
+                #self.send_msg_toServer(self, "테스트")
                 
             time.sleep(5)
 
@@ -55,17 +62,18 @@ class Class_Total_Report_System(QMainWindow, Ui_MainWindow):
         self.setWindowTitle("Total Report System~")
         self.setFixedSize(QSize(950, 575))
         self.msgProcess_thread = MsgProcess(self)
+        self.msgProcess_thread.start()
         self.dialog = QDialog()
         self.datetimeedit = QDateTimeEdit(self.dialog)
         self.lbl = QLabel(' 예약일정 설정', self.dialog)        
         self.btnDialog = QPushButton("확인", self.dialog)
         self.do_it_schedule_sending_mail = 0
+        self.req_send_message = 0
 
     def clicked_remove_this_week_contents(self):        
         print("clicked_remove_this_week_contents")
         if self.textEdit_this_week.toPlainText() != None :
-            self.textEdit_this_week.clear()
-            
+            self.textEdit_this_week.clear()            
         pass
 
     def clicked_remove_next_week_contents(self):
@@ -131,6 +139,7 @@ class Class_Total_Report_System(QMainWindow, Ui_MainWindow):
         
     def clicked_send_now_msg(self):
         print("clicked_send_now_msg")
+        self.req_send_message = 1
         pass
 
     def clicked_program_exit(self):        
@@ -145,27 +154,32 @@ class Class_Total_Report_System(QMainWindow, Ui_MainWindow):
         cal_trigger_time = self.datetimeedit.time()
         trigger_time  = str(cal_trigger_time.hour()).zfill(2)+ ":"+ str(cal_trigger_time.minute()).zfill(2)
         print("***** Trigger time: " + trigger_time)
-        self.schedule_sending_mail = schedule.every().day.at(trigger_time).do(job, self)
-        self.msgProcess_thread.start()
+        self.schedule_sending_mail = schedule.every().day.at(trigger_time).do(job, self)        
         pass
 
     def init_socket(self):
         self.sock = socket(AF_INET, SOCK_DGRAM)
         self.sock.settimeout(5)
 
+    def send_msg_toServer(self, mText):
+        tx_ok = 1
+        try:
+            self.sock.sendto(mText.encode('utf-8'), report_server_addr_port )
+        except:
+            print("Fail: translate message!")
+            tx_ok = 0
+        return tx_ok    
 
-    def send_msg_toserver_for_email(self, mText):
-        self.sock.sendto(mText.encode('utf-8'), report_server_addr_port )
-    
-    
-        self.sock.send(mText.encode('utf-8'))
-        
-        data = sock.recv(5000)
-        msg = data.decode()
-        msg = msg.replace(" ", "")
-        #msg = f'|{msg.strip()}|'
-        #print('echo msg: ', msg)        
-        sock.close()
+    def recv_msg_fromServer(self):
+        rx_ok = 1
+        try:
+            data = self.sock.recv(1024)
+            msg = data.decode()
+            msg = msg.replace(" ", "")
+        except:
+            print("Fail: receive message!")
+            rx_ok = 0
+        return rx_ok
 
 if __name__== '__main__':
     app = QApplication()

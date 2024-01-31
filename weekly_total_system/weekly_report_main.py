@@ -70,6 +70,9 @@ class Class_Total_Report_System(QMainWindow, Ui_MainWindow):
         self.req_send_message = 0
         self.init_socket()
         self.msgProcess_thread.start()
+        #Tab Focus 창이동으로 변경
+        self.textEdit_this_week.setTabChangesFocus(True)
+        self.textEdit_next_week.setTabChangesFocus(True)
 
     def clicked_remove_this_week_contents(self):        
         print("clicked_remove_this_week_contents")

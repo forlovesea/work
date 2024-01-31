@@ -42,7 +42,7 @@ class MsgProcess(QThread):
                 thisWeek_Text = self.trs.textEdit_this_week.toPlainText()
                 nextWeek_Text = self.trs.textEdit_next_week.toPlainText()
                 print(thisWeek_Text + nextWeek_Text)
-                #self.send_msg_toServer(self, "테스트")
+                self.trs.send_msg_toServer("테스트")
                 
             time.sleep(5)
 
@@ -61,14 +61,15 @@ class Class_Total_Report_System(QMainWindow, Ui_MainWindow):
         self.setupUi(self)
         self.setWindowTitle("Total Report System~")
         self.setFixedSize(QSize(950, 575))
-        self.msgProcess_thread = MsgProcess(self)
-        self.msgProcess_thread.start()
+        self.msgProcess_thread = MsgProcess(self)        
         self.dialog = QDialog()
         self.datetimeedit = QDateTimeEdit(self.dialog)
         self.lbl = QLabel(' 예약일정 설정', self.dialog)        
         self.btnDialog = QPushButton("확인", self.dialog)
         self.do_it_schedule_sending_mail = 0
         self.req_send_message = 0
+        self.init_socket()
+        self.msgProcess_thread.start()
 
     def clicked_remove_this_week_contents(self):        
         print("clicked_remove_this_week_contents")

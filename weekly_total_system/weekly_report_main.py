@@ -20,11 +20,29 @@ def handle_exit(report_system):
     report_system.msgProcess_thread.quit()
     report_system.msgProcess_thread.wait(5000)
 
+class CustomMessageBox(QMessageBox):
+    def __init__(self, *__args):
+        QMessageBox.__init__(self)
+        self.timeout = 0 
+        self.autoclose = False
+        self.currentTime = 0
+        
+    def showEvent(self, QShowEvent):
+        self.currentTime = 0
+        if self.autoclose:
+            self.startTimer(1000)
+    
+    def timerEvent(self, *args, **kwargs):
+        self.currentTime += 1
+        if self.currentTime >= self.timeout:
+            self.done(0)
+
 class MsgProcess(QThread):    
     def __init__(self, parent=None):
         super(MsgProcess, self).__init__(parent)
         self.trs = parent
-        self.is_running = False    
+        self.is_running = False
+        send_ok = 0
         
     def run(self):
         self.is_running = True        
@@ -35,16 +53,32 @@ class MsgProcess(QThread):
             if self.trs.do_it_schedule_sending_mail == 1 :
                 print("cancel schedule_sending_mail~")
                 self.trs.do_it_schedule_sending_mail = 0
-                schedule.cancel_job(self.trs.schedule_sending_mail)
+                schedule.cancel_job(self.trs.schedule_sending_mail)            
             
-            if self.trs.req_send_message == 1:
-                print("print textEdit~")
-                thisWeek_Text = self.trs.textEdit_this_week.toPlainText()
-                nextWeek_Text = self.trs.textEdit_next_week.toPlainText()
-                print(thisWeek_Text + nextWeek_Text)
-                self.trs.send_msg_toServer("테스트")
+            while True:
+                if self.trs.req_send_message == 1:
+                    retry = 0
+                    while (retry < 5):
+                        print("print textEdit~")
+                        thisWeek_Text = self.trs.textEdit_this_week.toPlainText()
+                        nextWeek_Text = self.trs.textEdit_next_week.toPlainText()
+                        contents = thisWeek_Text +"|"+nextWeek_Text
+                        res = self.trs.send_msg_toServer(contents)
+                        if res == 1:
+                            self.trs.req_send_message = 0
+                            break
+                        retry += 1
+                    if res == 0:
+                        print("Fail to send he message!!!")
+                        break
+                    res = self.trs.recv_msg_fromServer()
+                    if  res == 1:
+                        print("메시지 전송 성공")
+                    else:
+                        print("메시지 전송 실패!!!")
+
                 
-            time.sleep(5)
+            time.sleep(1)
 
     def stop(self):
         self.is_running = False
@@ -167,6 +201,7 @@ class Class_Total_Report_System(QMainWindow, Ui_MainWindow):
 
     def send_msg_toServer(self, mText):
         tx_ok = 1
+        
         try:
             self.sock.sendto(mText.encode('utf-8'), report_server_addr_port )
         except:
@@ -184,6 +219,28 @@ class Class_Total_Report_System(QMainWindow, Ui_MainWindow):
             print("Fail: receive message!")
             rx_ok = 0
         return rx_ok
+
+    def view_ok(self, result):
+        print("clicked_send_now_msg")        
+        if result == 1:
+            self.popup_inform("실행 결과", "메시지 전송: 성공", True, 3)
+        else:
+            self.popup_inform("실행 결과", "메시지 전송: 실패", True, 3)
+
+    def popup_inform(self, title, msg, autoclose, timeoutSec):        
+        msgBox = CustomMessageBox()
+        
+        msgBox.autoclose = autoclose
+        msgBox.timeout = timeoutSec # 3seconds
+        
+        msgBox.setStyleSheet
+        msgBox.setWindowTitle(title)
+        msgBox.setText(msg)
+        msgBox.setIcon(QMessageBox.Information)
+        msgBox.setStandardButtons(QMessageBox.Ok)
+        msgBox.setDefaultButton(QMessageBox.Ok)
+        
+        msgBox.exec()
 
 if __name__== '__main__':
     app = QApplication()

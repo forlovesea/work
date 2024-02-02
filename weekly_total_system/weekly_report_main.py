@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import QApplication, QMainWindow, QWidget, QLabel, QDateTimeEdit
 from write_page_form import Ui_MainWindow
 from PySide6.QtGui import QPixmap
-from PySide6.QtCore import Qt, QThread, QSize, Signal, QDateTime
+from PySide6.QtCore import Qt, QThread, QSize, Signal, QDateTime, Slot
 from PySide6.QtWidgets import QMessageBox, QDialog, QPushButton, QVBoxLayout, QToolTip
 from socket import *
 import requests, time, inspect, atexit, schedule
@@ -37,12 +37,14 @@ class CustomMessageBox(QMessageBox):
         if self.currentTime >= self.timeout:
             self.done(0)
 
-class MsgProcess(QThread):    
+class MsgProcess(QThread):
+    user_signal = Signal(int)
     def __init__(self, parent=None):
         super(MsgProcess, self).__init__(parent)
-        self.trs = parent
+        self.trs = parent        
         self.is_running = False
         send_ok = 0
+        
         
     def run(self):
         self.is_running = True        
@@ -74,9 +76,10 @@ class MsgProcess(QThread):
                     res = self.trs.recv_msg_fromServer()
                     if  res == 1:
                         print("메시지 전송 성공")
-                    else:
+                        self.user_signal.emit(1)
+                    else:                        
                         print("메시지 전송 실패!!!")
-
+                        self.user_signal.emit(0)
                 
             time.sleep(1)
 
@@ -96,6 +99,7 @@ class Class_Total_Report_System(QMainWindow, Ui_MainWindow):
         self.setWindowTitle("Total Report System~")
         self.setFixedSize(QSize(950, 575))
         self.msgProcess_thread = MsgProcess(self)        
+        self.msgProcess_thread.user_signal[int].connect(self.user_slot)
         self.dialog = QDialog()
         self.datetimeedit = QDateTimeEdit(self.dialog)
         self.lbl = QLabel(' 예약일정 설정', self.dialog)        
@@ -107,7 +111,7 @@ class Class_Total_Report_System(QMainWindow, Ui_MainWindow):
         #Tab Focus 창이동으로 변경
         self.textEdit_this_week.setTabChangesFocus(True)
         self.textEdit_next_week.setTabChangesFocus(True)
-
+        
     def clicked_remove_this_week_contents(self):        
         print("clicked_remove_this_week_contents")
         if self.textEdit_this_week.toPlainText() != None :
@@ -233,7 +237,7 @@ class Class_Total_Report_System(QMainWindow, Ui_MainWindow):
         msgBox.autoclose = autoclose
         msgBox.timeout = timeoutSec # 3seconds
         
-        msgBox.setStyleSheet
+        msgBox.move(200,200)
         msgBox.setWindowTitle(title)
         msgBox.setText(msg)
         msgBox.setIcon(QMessageBox.Information)
@@ -241,6 +245,9 @@ class Class_Total_Report_System(QMainWindow, Ui_MainWindow):
         msgBox.setDefaultButton(QMessageBox.Ok)
         
         msgBox.exec()
+    @Slot(int)
+    def user_slot(self, arg1):
+        self.view_ok(arg1)        
 
 if __name__== '__main__':
     app = QApplication()

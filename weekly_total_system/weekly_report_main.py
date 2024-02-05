@@ -19,7 +19,7 @@ def job(self):
 def handle_exit(report_system):
     print("handle_exit!!!")
     report_system.msgProcess_thread.quit()
-    report_system.msgProcess_thread.wait(5000)
+    report_system.msgProcess_thread.wait(2000)
 
 class CustomMessageBox(QMessageBox):
     def __init__(self, *__args):
@@ -228,6 +228,8 @@ class Class_Total_Report_System(QMainWindow, Ui_MainWindow):
     def view_ok(self, result):
         print("clicked_send_now_msg")        
         if result == 1:
+            self.textEdit_this_week.clear();
+            self.textEdit_next_week.clear();
             self.popup_inform("실행 결과", "메시지 전송: 성공", True, 3)
         else:
             self.popup_inform("실행 결과", "메시지 전송: 실패", True, 3)

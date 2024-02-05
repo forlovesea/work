@@ -1,10 +1,11 @@
 from PySide6.QtWidgets import QApplication, QMainWindow, QWidget, QLabel, QDateTimeEdit
 from write_page_form import Ui_MainWindow
-from PySide6.QtGui import QPixmap
-from PySide6.QtCore import Qt, QThread, QSize, Signal, QDateTime, Slot
+from PySide6.QtGui import QPixmap, QScreen
+from PySide6.QtCore import Qt, QThread, QSize, Signal, QDateTime, Slot, QRect, QPoint
 from PySide6.QtWidgets import QMessageBox, QDialog, QPushButton, QVBoxLayout, QToolTip
 from socket import *
 import requests, time, inspect, atexit, schedule
+from PySide6 import QtGui
 
 report_server_ip = "10.30.41.60"
 report_server_port = 7878
@@ -108,7 +109,7 @@ class Class_Total_Report_System(QMainWindow, Ui_MainWindow):
         self.req_send_message = 0
         self.init_socket()
         self.msgProcess_thread.start()
-        #Tab Focus 창이동으로 변경
+        #Tab Focus 창이동으로 변경, if False, using edit tab "  "
         self.textEdit_this_week.setTabChangesFocus(True)
         self.textEdit_next_week.setTabChangesFocus(True)
         
@@ -237,7 +238,8 @@ class Class_Total_Report_System(QMainWindow, Ui_MainWindow):
         msgBox.autoclose = autoclose
         msgBox.timeout = timeoutSec # 3seconds
         
-        msgBox.move(200,200)
+        print(self.frameGeometry().topLeft().toPointF, self.frameGeometry().center().toPointF)
+        
         msgBox.setWindowTitle(title)
         msgBox.setText(msg)
         msgBox.setIcon(QMessageBox.Information)
@@ -255,5 +257,11 @@ if __name__== '__main__':
     atexit.register(handle_exit, window)
     window.show()
     window.repaint()
+
+    #center = QScreen.availableGeometry(QApplication.primaryScreen()).center()
+    #geo = window.frameGeometry()
+    #geo.moveCenter(center)
+    #window.move(geo.topLeft())
+
     app.exec()
     

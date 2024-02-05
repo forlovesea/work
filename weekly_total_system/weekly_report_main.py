@@ -238,7 +238,9 @@ class Class_Total_Report_System(QMainWindow, Ui_MainWindow):
         msgBox.autoclose = autoclose
         msgBox.timeout = timeoutSec # 3seconds
         
-        print(self.frameGeometry().topLeft().toPointF, self.frameGeometry().center().toPointF)
+        #print(self.frameGeometry().topLeft().toPointF, self.frameGeometry().center().toPointF)
+        #msgBox.move(self.frameGeometry().topLeft())
+        msgBox.move(self.frameGeometry().center())
         
         msgBox.setWindowTitle(title)
         msgBox.setText(msg)

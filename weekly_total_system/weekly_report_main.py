@@ -1,16 +1,19 @@
 from PySide6.QtWidgets import QApplication, QMainWindow, QWidget, QLabel, QDateTimeEdit
 from write_page_form import Ui_MainWindow
+from login import Ui_LoginForm
 from PySide6.QtGui import QPixmap, QScreen
 from PySide6.QtCore import Qt, QThread, QSize, Signal, QDateTime, Slot, QRect, QPoint
 from PySide6.QtWidgets import QMessageBox, QDialog, QPushButton, QVBoxLayout, QToolTip
 from socket import *
 import requests, time, inspect, atexit, schedule
 from PySide6 import QtGui
+from werkzeug.security import generate_password_hash, check_password_hash
 
 report_server_ip = "10.30.41.60"
 report_server_port = 7878
 report_server_addr_port = (report_server_ip, report_server_port)
 
+team_one = { 'jihyun':'pbkdf2:sha256:600000$F9xFhm45FlQuEbBJ$72968532db2b077748dafc0f476bcf3ea5b49853ae393b7f20d71d5255b854f5'}
 
 def job(self):
     print("send e-mail~")
@@ -18,8 +21,12 @@ def job(self):
 
 def handle_exit(report_system):
     print("handle_exit!!!")
-    report_system.msgProcess_thread.quit()
-    report_system.msgProcess_thread.wait(2000)
+    if report_system.class_id == 0 :
+        pass
+    elif report_system.class_id == 1 :
+        if report_system.msgProcess_thread.is_running == True:
+            report_system.msgProcess_thread.quit()
+            report_system.msgProcess_thread.wait(2000)
 
 class CustomMessageBox(QMessageBox):
     def __init__(self, *__args):
@@ -93,12 +100,64 @@ class MsgProcess(QThread):
 #==================================================================================================
 #==================================================================================================
 #==================================================================================================
+    
+class Class_Login_System(QWidget, Ui_LoginForm):
+    def __init__(self, parent=None):
+        super(Class_Login_System, self).__init__(parent)
+        self.setupUi(self)
+        self.setWindowTitle("--- Total Report System LOGIN ---")
+        self.class_id = 0        
+        #self.setFixedSize(QSize(950, 575))
+
+    def click_login_button(self):
+        print("Login Clicked")
+        login_id = self.lineEdit_id.text()
+        login_passwd = self.lineEdit_passwd.text()
+        encrpyt_passwd = generate_password_hash(login_passwd, method="pbkdf2:sha256", salt_length=16)
+        print("password:"+ login_passwd + "hash:" + encrpyt_passwd)
+        if check_password_hash(team_one['jihyun'], login_passwd):
+            self.popup_inform("로그인 결과", "로그인 성공", True, 1)            
+            self.hide()        
+            self.second = Class_Total_Report_System()
+            atexit.register(handle_exit, self.second)
+            self.second.show()
+            self.second.repaint()
+        else:
+            self.popup_inform("로그인 결과", "로그인 실패패", True, 2)            
+            self.lineEdit_id.clear()
+            self.lineEdit_passwd.clear()        
+    
+    def popup_inform(self, title, msg, autoclose, timeoutSec):        
+        msgBox = CustomMessageBox()
+        
+        msgBox.autoclose = autoclose
+        msgBox.timeout = timeoutSec # 3seconds        
+        
+        msgBox.move(self.frameGeometry().center())
+        
+        msgBox.setWindowTitle(title)
+        msgBox.setText(msg)
+        msgBox.setIcon(QMessageBox.Information)
+        msgBox.setStandardButtons(QMessageBox.Ok)
+        msgBox.setDefaultButton(QMessageBox.Ok)
+        
+        msgBox.exec()
+
+    def click_exit_button(self):
+        print("Exit Cliced")            
+        self.close()
+        pass
+    
+#==================================================================================================
+#==================================================================================================
+#==================================================================================================
 class Class_Total_Report_System(QMainWindow, Ui_MainWindow):
     def __init__(self, parent=None):
         super(Class_Total_Report_System, self).__init__(parent)
         self.setupUi(self)
         self.setWindowTitle("Total Report System~")
         self.setFixedSize(QSize(950, 575))
+        self.class_id = 1
         self.msgProcess_thread = MsgProcess(self)        
         self.msgProcess_thread.user_signal[int].connect(self.user_slot)
         self.dialog = QDialog()
@@ -112,6 +171,7 @@ class Class_Total_Report_System(QMainWindow, Ui_MainWindow):
         #Tab Focus 창이동으로 변경, if False, using edit tab "  "
         self.textEdit_this_week.setTabChangesFocus(True)
         self.textEdit_next_week.setTabChangesFocus(True)
+        
         
     def clicked_remove_this_week_contents(self):        
         print("clicked_remove_this_week_contents")
@@ -257,10 +317,15 @@ class Class_Total_Report_System(QMainWindow, Ui_MainWindow):
 
 if __name__== '__main__':
     app = QApplication()
-    window = Class_Total_Report_System()
-    atexit.register(handle_exit, window)
-    window.show()
-    window.repaint()
+
+    login_widget = Class_Login_System()
+    atexit.register(handle_exit, login_widget)
+    login_widget.show()
+
+    #window = Class_Total_Report_System()
+    #atexit.register(handle_exit, window)
+    #window.show()
+    #window.repaint()
 
     #center = QScreen.availableGeometry(QApplication.primaryScreen()).center()
     #geo = window.frameGeometry()

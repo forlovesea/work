@@ -13,7 +13,7 @@ report_server_ip = "10.30.41.60"
 report_server_port = 7878
 report_server_addr_port = (report_server_ip, report_server_port)
 
-team_one = { 'jihyun':'pbkdf2:sha256:600000$F9xFhm45FlQuEbBJ$72968532db2b077748dafc0f476bcf3ea5b49853ae393b7f20d71d5255b854f5'}
+dict_team_one = { 'jihyun':'pbkdf2:sha256:600000$F9xFhm45FlQuEbBJ$72968532db2b077748dafc0f476bcf3ea5b49853ae393b7f20d71d5255b854f5'}
 
 def job(self):
     print("send e-mail~")
@@ -115,7 +115,14 @@ class Class_Login_System(QWidget, Ui_LoginForm):
         login_passwd = self.lineEdit_passwd.text()
         encrpyt_passwd = generate_password_hash(login_passwd, method="pbkdf2:sha256", salt_length=16)
         print("password:"+ login_passwd + "hash:" + encrpyt_passwd)
-        if check_password_hash(team_one['jihyun'], login_passwd):
+
+        find_key = None
+        for key in dict_team_one:
+            if ( key == login_id ):
+                find_key = key
+                break
+        print("find_key:" , find_key)
+        if find_key != None and check_password_hash(dict_team_one[find_key], login_passwd) == 1 :
             self.popup_inform("로그인 결과", "로그인 성공", True, 1)            
             self.hide()        
             self.second = Class_Total_Report_System()
@@ -123,7 +130,7 @@ class Class_Login_System(QWidget, Ui_LoginForm):
             self.second.show()
             self.second.repaint()
         else:
-            self.popup_inform("로그인 결과", "로그인 실패패", True, 2)            
+            self.popup_inform("로그인 결과", "로그인 실패", True, 2)            
             self.lineEdit_id.clear()
             self.lineEdit_passwd.clear()        
     
@@ -144,7 +151,7 @@ class Class_Login_System(QWidget, Ui_LoginForm):
         msgBox.exec()
 
     def click_exit_button(self):
-        print("Exit Cliced")            
+        print("Exit Clicked")            
         self.close()
         pass
     
@@ -322,10 +329,12 @@ if __name__== '__main__':
     atexit.register(handle_exit, login_widget)
     login_widget.show()
 
+    #if0
     #window = Class_Total_Report_System()
     #atexit.register(handle_exit, window)
     #window.show()
     #window.repaint()
+    #endif
 
     #center = QScreen.availableGeometry(QApplication.primaryScreen()).center()
     #geo = window.frameGeometry()

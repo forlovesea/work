@@ -130,7 +130,10 @@ class Class_Login_System(QWidget, Ui_LoginForm):
             self.second.show()
             self.second.repaint()
         else:
-            self.popup_inform("로그인 결과", "로그인 실패", True, 2)            
+            if find_key == None :
+                self.popup_inform("로그인 결과", "로그인 실패: 등록되지 않은 사용자", True, 2)                
+            else: 
+                self.popup_inform("로그인 결과", "로그인 실패: 패스워드 오류", True, 2)            
             self.lineEdit_id.clear()
             self.lineEdit_passwd.clear()        
     

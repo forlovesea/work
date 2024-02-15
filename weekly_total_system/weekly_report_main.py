@@ -3,7 +3,7 @@ from write_page_form import Ui_MainWindow
 from login import Ui_LoginForm
 from PySide6.QtGui import QPixmap, QScreen
 from PySide6.QtCore import Qt, QThread, QSize, Signal, QDateTime, Slot, QRect, QPoint
-from PySide6.QtWidgets import QMessageBox, QDialog, QPushButton, QVBoxLayout, QToolTip
+from PySide6.QtWidgets import QMessageBox, QDialog, QPushButton, QVBoxLayout, QHBoxLayout, QToolTip
 from socket import *
 import requests, time, inspect, atexit, schedule
 from PySide6 import QtGui
@@ -57,37 +57,42 @@ class MsgProcess(QThread):
     def run(self):
         self.is_running = True        
         print("Thread Start~")
+        retry = 0
+        contents = None
         while True:
             print("schedul test: "+ QDateTime.currentDateTime().toString())
             schedule.run_pending()
             if self.trs.do_it_schedule_sending_mail == 1 :
-                print("cancel schedule_sending_mail~")
-                self.trs.do_it_schedule_sending_mail = 0
+                self.trs.req_send_message = 2
+                print("cancel schedule_sending_mail~")                
+                self.trs.do_it_schedule_sending_mail = 0                
                 schedule.cancel_job(self.trs.schedule_sending_mail)            
             
-            while True:
-                if self.trs.req_send_message == 1:
+            if self.trs.req_send_message > 0:
+                retry = 5
+
+            if retry > 0:
+                print("print textEdit~")
+                if ( contents == None):
+                    thisWeek_Text = self.trs.textEdit_this_week.toPlainText()
+                    nextWeek_Text = self.trs.textEdit_next_week.toPlainText()
+                    contents = self.trs.lid + "|" + thisWeek_Text +"|"+nextWeek_Text
+                res = self.trs.send_msg_toServer(contents)
+                if res == 1:
+                    contents = None                    
+                    print("메시지 전송 성공")
                     retry = 0
-                    while (retry < 5):
-                        print("print textEdit~")
-                        thisWeek_Text = self.trs.textEdit_this_week.toPlainText()
-                        nextWeek_Text = self.trs.textEdit_next_week.toPlainText()
-                        contents = thisWeek_Text +"|"+nextWeek_Text
-                        res = self.trs.send_msg_toServer(contents)
-                        if res == 1:
-                            self.trs.req_send_message = 0
-                            break
-                        retry += 1
-                    if res == 0:
-                        print("Fail to send he message!!!")
-                        break
-                    res = self.trs.recv_msg_fromServer()
-                    if  res == 1:
-                        print("메시지 전송 성공")
-                        self.user_signal.emit(1)
-                    else:                        
-                        print("메시지 전송 실패!!!")
-                        self.user_signal.emit(0)
+                    self.user_signal.emit(self.trs.req_send_message)
+                    self.trs.req_send_message = 0
+                else:
+                    retry -= 1
+            else:
+                if self.trs.req_send_message > 0:
+                    print("메시지 전송 실패!!!")
+                    retry = 0
+                    contents = None                    
+                    self.user_signal.emit(self.trs.req_send_message-2)
+                    self.trs.req_send_message = 0
                 
             time.sleep(1)
 
@@ -125,7 +130,7 @@ class Class_Login_System(QWidget, Ui_LoginForm):
         if find_key != None and check_password_hash(dict_team_one[find_key], login_passwd) == 1 :
             self.popup_inform("로그인 결과", "로그인 성공", True, 1)            
             self.hide()        
-            self.second = Class_Total_Report_System()
+            self.second = Class_Total_Report_System(login_id)
             atexit.register(handle_exit, self.second)
             self.second.show()
             self.second.repaint()
@@ -162,8 +167,8 @@ class Class_Login_System(QWidget, Ui_LoginForm):
 #==================================================================================================
 #==================================================================================================
 class Class_Total_Report_System(QMainWindow, Ui_MainWindow):
-    def __init__(self, parent=None):
-        super(Class_Total_Report_System, self).__init__(parent)
+    def __init__(self, login_ID):
+        super(Class_Total_Report_System, self).__init__()
         self.setupUi(self)
         self.setWindowTitle("Total Report System~")
         self.setFixedSize(QSize(950, 575))
@@ -172,7 +177,7 @@ class Class_Total_Report_System(QMainWindow, Ui_MainWindow):
         self.msgProcess_thread.user_signal[int].connect(self.user_slot)
         self.dialog = QDialog()
         self.datetimeedit = QDateTimeEdit(self.dialog)
-        self.lbl = QLabel(' 예약일정 설정', self.dialog)        
+        self.lbl = QLabel(' 시간 설정 ', self.dialog)        
         self.btnDialog = QPushButton("확인", self.dialog)
         self.do_it_schedule_sending_mail = 0
         self.req_send_message = 0
@@ -181,7 +186,8 @@ class Class_Total_Report_System(QMainWindow, Ui_MainWindow):
         #Tab Focus 창이동으로 변경, if False, using edit tab "  "
         self.textEdit_this_week.setTabChangesFocus(True)
         self.textEdit_next_week.setTabChangesFocus(True)
-        
+        self.lid = login_ID
+        self.reserved_send_check = 0
         
     def clicked_remove_this_week_contents(self):        
         print("clicked_remove_this_week_contents")
@@ -196,41 +202,66 @@ class Class_Total_Report_System(QMainWindow, Ui_MainWindow):
         pass
 
     def clicked_send_reserved_msg(self):
-        datetime = QDateTime.currentDateTime()
-        self.dialog.setWindowTitle('예약시간 설정')
-        """
-            Qt.NonModal        : 값은 0 이며, 다른 윈도우 화면 입력을 차단하지 않음 - 모달리스
-            Qt.WindowModal     : 값은 1 이며, 화면에 있는 모든 윈도우 창의 입력을 차단 
-                                             현재 다이얼로그를 실행시킨 부모 프로그램뿐만 아니라 다른 윈도우들도 제어를 막음
-            Qt.ApplicationModal: 값은 2 이며, 다이얼로그를 실행시킨 부모 프로그램만 제어를 막을 수 있음
-        """        
-        #self.dialog.setWindowModality(Qt.NonModal)
-        #self.dialog.setWindowModality(Qt.WindowModal)
-        self.dialog.setWindowModality(Qt.ApplicationModal)        
-        self.dialog.resize(300, 200)
-        #lbl = QLabel(' 예약일정 설정', self.dialog)        
-        
-        self.datetimeedit.setDateTime(QDateTime.currentDateTime())
-        self.datetimeedit.setDateTimeRange(QDateTime(2024, 1, 1, 00, 00, 00), QDateTime(2100, 1, 1, 00, 00, 00))
-        #self.datetimeedit.setDisplayFormat('yyyy.MM.dd hh:mm:ss')
-        #초(sec) 생략
-        self.datetimeedit.setDisplayFormat('yyyy.MM.dd hh:mm')
-        self.datetimeedit.move(50,50)
-        #datetimeedit.setGeometry(10, 10, 200, 50)
-        
-        self.btnDialog.move(100, 100)
-        self.btnDialog.clicked.connect(self.dialog_close)
-        
-        vbox = QVBoxLayout()
-        vbox.addWidget(self.lbl)
-        vbox.addWidget(self.datetimeedit)
-        vbox.addStretch()
-        self.dialog.setLayout(vbox)
-        self.dialog.show()
-        
-        print(datetime.toString())
-        print("clicked_send_reserved_msg")
-        pass
+        if self.reserved_send_check == 0:
+            datetime = QDateTime.currentDateTime()
+            self.dialog.setWindowTitle('예약전송시간 설정')
+            """
+                Qt.NonModal        : 값은 0 이며, 다른 윈도우 화면 입력을 차단하지 않음 - 모달리스
+                Qt.WindowModal     : 값은 1 이며, 화면에 있는 모든 윈도우 창의 입력을 차단 
+                                                현재 다이얼로그를 실행시킨 부모 프로그램뿐만 아니라 다른 윈도우들도 제어를 막음
+                Qt.ApplicationModal: 값은 2 이며, 다이얼로그를 실행시킨 부모 프로그램만 제어를 막을 수 있음
+            """        
+            #self.dialog.setWindowModality(Qt.NonModal)
+            #self.dialog.setWindowModality(Qt.WindowModal)
+            self.dialog.setWindowModality(Qt.ApplicationModal)        
+            self.dialog.resize(300, 100)
+            #lbl = QLabel(' 예약일정 설정', self.dialog)        
+            
+            self.datetimeedit.setDateTime(QDateTime.currentDateTime())
+            self.datetimeedit.setDateTimeRange(QDateTime(2024, 1, 1, 00, 00, 00), QDateTime(2100, 1, 1, 00, 00, 00))
+            #self.datetimeedit.setDisplayFormat('yyyy.MM.dd hh:mm:ss')
+            #초(sec) 생략
+            self.datetimeedit.setDisplayFormat('yyyy.MM.dd hh:mm')
+            #self.datetimeedit.move(50,50)
+            #datetimeedit.setGeometry(10, 10, 200, 50)
+            
+            #self.btnDialog.move(100, 100)
+            self.btnDialog.clicked.connect(self.dialog_close)
+            
+            #hbox = QHBoxLayout()
+            #hbox.addStretch(1)
+            #hbox.addWidget(self.lbl)        
+            #hbox.addWidget(self.datetimeedit)
+            #hbox.addWidget(self.btnDialog)
+            #hbox.addStretch(1)
+
+            hbox = QHBoxLayout()
+            hbox.addStretch(1)
+            hbox.addWidget(self.lbl)
+            hbox.addStretch(1)
+            vbox = QVBoxLayout()
+            vbox.addStretch(1)
+            #vbox.addWidget(self.lbl)        
+            vbox.addLayout(hbox)
+            vbox.addWidget(self.datetimeedit)
+            vbox.addWidget(self.btnDialog)
+            vbox.addStretch(1)
+
+            self.dialog.setLayout(vbox)
+            #self.dialog.show()
+            self.dialog.exec()
+            
+            print(datetime.toString())
+            print("clicked_send_reserved_msg")
+        else:
+            print("예약 전송 취소")
+            self.reserved_send_check = 0
+            self.do_it_schedule_sending_mail = 0                
+            schedule.cancel_job(self.schedule_sending_mail) 
+            self.pushButton_reserve_send.setStyleSheet("")
+            self.pushButton_reserve_send.setToolTip("")
+            self.pushButton_reserve_send.setText("예약전송")
+            self.popup_inform("실행 결과", "예약 전송이 취소 되었습니다.", True, 3)
     
     def dialog_close(self):        
         cal_trigger_date = self.datetimeedit.date()
@@ -240,7 +271,8 @@ class Class_Total_Report_System(QMainWindow, Ui_MainWindow):
         print("Yahoo time: ", cal_trigger_time.hour(), cal_trigger_time.minute())
         trigger_time  = str(cal_trigger_date.year()) + "." +str(cal_trigger_date.month()) + "."+ str(cal_trigger_date.day())+ " "+ str(cal_trigger_time.hour()).zfill(2)+ ":"+ str(cal_trigger_time.minute()).zfill(2)
         
-        #self.pushButton_reserve_send.setText("하이") 
+        self.reserved_send_check = 1
+        self.pushButton_reserve_send.setText("예약전송 취소") 
         self.pushButton_reserve_send.setStyleSheet("background-color: yellow")
         self.pushButton_reserve_send.setToolTip("<font color=""red""<b>"+trigger_time+"</b></font>")
         self.pushButton_reserve_send.move(50,50)
@@ -252,6 +284,9 @@ class Class_Total_Report_System(QMainWindow, Ui_MainWindow):
         
     def clicked_send_now_msg(self):
         print("clicked_send_now_msg")
+        if ( self.req_send_message > 0 ):
+            self.popup_inform("실행 결과", "이전 메시지 전송 처리중: 실패", True, 2)
+            return -1
         self.req_send_message = 1
         pass
 
@@ -296,13 +331,26 @@ class Class_Total_Report_System(QMainWindow, Ui_MainWindow):
         return rx_ok
 
     def view_ok(self, result):
-        print("clicked_send_now_msg")        
-        if result == 1:
+        print("clicked_send_now_msg")                
+        if result < 1:
+            if result == -1:
+                stype = "메시지 전송: 실패"                
+            else :                
+                stype = "예약 메시지 전송: 실패"
+        else:
             self.textEdit_this_week.clear();
             self.textEdit_next_week.clear();
-            self.popup_inform("실행 결과", "메시지 전송: 성공", True, 3)
-        else:
-            self.popup_inform("실행 결과", "메시지 전송: 실패", True, 3)
+            if result == 1:
+                stype = "메시지 전송: 성공"                
+            else:                
+                stype = "예약 메시지 전송: 성공"
+
+        self.popup_inform("실행 결과", stype, True, 3)
+        if result == 0 or result == 2:
+            self.pushButton_reserve_send.setStyleSheet("")
+            self.pushButton_reserve_send.setToolTip("")
+            self.pushButton_reserve_send.setText("예약전송")
+            self.reserved_send_check = 0
 
     def popup_inform(self, title, msg, autoclose, timeoutSec):        
         msgBox = CustomMessageBox()

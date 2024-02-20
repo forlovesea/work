@@ -20,7 +20,7 @@ def job(self):
     self.do_it_schedule_sending_mail = 1    
 
 def handle_exit(report_system):
-    print("handle_exit!!!")
+    print("handle_exit!")
     if report_system.class_id == 0 :
         pass
     elif report_system.class_id == 1 :

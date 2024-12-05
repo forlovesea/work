@@ -48,6 +48,7 @@ def receive_hex_data():
 """
 7e 00 02 00 00        02 0a323031
 7e 00 02 40 00        42 00 00 00 00
+7e 00 02 40 00        42 00 00 00 00
 """
 
 def send_normal_poll_ack():

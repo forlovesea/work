@@ -106,7 +106,7 @@ ALARM_REGISTERS.update(generate_ssu_pv_regs(max_units=10))
 # 설정: 모듈 수
 # ---------------------------
 MODULE_COUNT = 10
-CELLS_PER_MODULE = 4
+CELLS_PER_MODULE = 15
 
 # 예시 주소 맵
 MODBUS_MODULE_BASE = 0x6000
@@ -126,7 +126,7 @@ class ModuleDetailDialog(QDialog):
         self.setWindowTitle(f"Module {module_number} Details")
         self.resize(400, 200)
         layout = QVBoxLayout(self)
-
+ 
         table = QTableWidget(self)
         table.setColumnCount(3)
         table.setHorizontalHeaderLabels(["Cell #", "Voltage (V)", "Temp (℃)"])
@@ -216,6 +216,7 @@ class ModbusGUI(QWidget):
         self.label_batt.setPixmap(pixmap)
         self.label_batt.setScaledContents(True)
         self.label_batt.setFixedSize(pixmap.width(), pixmap.height())
+        self.label_batt.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         center_layout.addWidget(self.label_batt, alignment=Qt.AlignLeft)
 
         # 이미지 오버레이 버튼
@@ -260,32 +261,89 @@ class ModbusGUI(QWidget):
     def add_battery_overlay_buttons(self):
         label_w = self.label_batt.width()
         label_h = self.label_batt.height()
-        # 10 모듈 + 1 모니터링 시스템 = 11개 구역
         total_sections = MODULE_COUNT + 1
         section_height = max(20, label_h // total_sections)
 
+        font_css = (
+            "color: black;"
+            "font-weight: bold;"
+            "font-size: 14px;"
+            "background-color: rgba(255, 255, 255, 150);"
+            "border-radius: 5px;"
+            "padding-left: 6px;"
+        )
+
         for i in range(total_sections):
+            y = label_h - (i + 1) * section_height  # 아래부터 위로 계산
+
             btn = QPushButton(self.label_batt)
-            y = label_h - (i + 1) * section_height  # 아래부터 1번
             btn.setGeometry(0, y, label_w, section_height)
-            btn.setStyleSheet("background-color: rgba(255, 223, 0, 120); border: 1px solid black;")
+            btn.setStyleSheet("background-color: rgba(255, 223, 0, 80); border: 1px solid black;")
+
             if i < MODULE_COUNT:
                 module_num = i + 1
-                btn.setToolTip(f"Module {module_num}")
+                btn.setToolTip(f"{module_num}번 모듈")
                 btn.clicked.connect(partial(self.on_overlay_clicked, module_num))
+
+                label = QLabel(f"{module_num}번 모듈", self.label_batt)
+                label.setGeometry(10, y, 120, section_height)
+                label.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+                label.setStyleSheet(font_css)
+                label.show()
             else:
-                btn.setToolTip("SMU02C Monitoring System")
+                btn.setToolTip("감시제어장치 (SMU02C)")
                 btn.clicked.connect(partial(self.on_overlay_clicked, MODULE_COUNT + 1))
+
+                label = QLabel("감시제어장치", self.label_batt)
+                label.setGeometry(10, y, 140, section_height)
+                label.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+                label.setStyleSheet(font_css)
+                label.show()
+
             btn.show()
+            btn.raise_()
             self.overlay_buttons.append(btn)
 
-    def on_overlay_clicked(self, module_number):
-        if module_number == MODULE_COUNT + 1:
-            QMessageBox.information(self, "SMU02C", "해당 영역은 SMU02C 모니터링 시스템")
-            return
-        cell_vs, cell_ts, _, _ = self.read_module_data(module_number)
-        dlg = ModuleDetailDialog(self, module_number, cell_vs, cell_ts)
-        dlg.exec()
+    def on_overlay_clicked(self, module_num):
+        print(f"클릭됨! {module_num}번 모듈")  # 로그 확인용
+        """모듈 클릭 시 팝업창 표시"""
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton
+
+        # 모듈 번호에 따른 가상 전압/전류 값 (예시용)
+        # 실제 시스템에서는 BMS 데이터 또는 Modbus에서 읽은 값으로 대체 가능
+        voltage = round(52.0 + (module_num * 0.1), 2)
+        current = round(10.0 + (module_num * 0.05), 2)
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"{module_num}번 모듈 정보")
+        dialog.setFixedSize(250, 180)
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        lbl_title = QLabel(f"🔋 {module_num}번 모듈 상태")
+        lbl_title.setStyleSheet("font-weight: bold; font-size: 16px; color: #003366;")
+
+        lbl_voltage = QLabel(f"전압: {voltage:.2f} V")
+        lbl_voltage.setStyleSheet("font-size: 14px; color: black;")
+
+        lbl_current = QLabel(f"전류: {current:.2f} A")
+        lbl_current.setStyleSheet("font-size: 14px; color: black;")
+
+        btn_close = QPushButton("닫기")
+        btn_close.setStyleSheet("padding: 5px 15px; font-weight: bold;")
+        btn_close.clicked.connect(dialog.close)
+
+        layout.addWidget(lbl_title)
+        layout.addSpacing(8)
+        layout.addWidget(lbl_voltage)
+        layout.addWidget(lbl_current)
+        layout.addStretch()
+        layout.addWidget(btn_close, alignment=Qt.AlignRight)
+
+        dialog.setLayout(layout)
+        dialog.exec()
 
     # ---------------------------
     # 포트 관련
@@ -351,7 +409,7 @@ class ModbusGUI(QWidget):
     # ---------------------------
     # 레지스터 읽기
     # ---------------------------
-    def read_register(self, address, count=1, slave=1, signed=False, scale=1):
+    def read_register(self, address, count=1, slave=33, signed=False, scale=1):
         if not self.client:
             return None
         try:

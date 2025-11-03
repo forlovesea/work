@@ -13,6 +13,20 @@ from PySide6.QtCore import Qt, QTimer
 from pymodbus.client import ModbusSerialClient
 
 # ---------------------------
+# 장치 기본 정보 레지스터
+# ---------------------------
+DEVICE_INFO_REGS = {
+    "Manufacturer code": (0x0000, 1, "UNIT16"),
+    "Equipment type": (0x0001, 1, "UNIT16"),
+    "Protocol version": (0x0002, 1, "UNIT16"),
+    "Software version": (0x0003, 1, "UNIT16"),
+    "Hardware version": (0x0004, 1, "UNIT16"),
+    "System type": (0x0005, 14, "String"),  # 0x0005~0x0012 = 14 words = 28 bytes
+    "Software entire version": (0x0013, 14, "String"),  # 0x0013~0x0020
+}
+
+
+# ---------------------------
 # 알람 레지스터 정의
 # ---------------------------
 ALARM_STATIC = {
@@ -67,26 +81,18 @@ MODBUS_MODULE_TOTAL_VOLTAGE_OFFSET = 0x0F
 MODBUS_MODULE_TEMP_OFFSET = 0x1F
 
 # ---------------------------
-# 팝업: 모듈 상세
+# 세부 팝업창 (셀 1~15)
 # ---------------------------
 class ModuleDetailDialog(QDialog):
-    def __init__(self, parent, module_number, cell_voltages, cell_temps):
+    def __init__(self, parent, module_num, data, mode):
         super().__init__(parent)
-        self.setWindowTitle(f"Module {module_number} Details")
-        self.resize(400, 300)
+        self.setWindowTitle(f"Module {module_num} {'Voltages' if mode == 'v' else 'Temps'} Detail")
         layout = QVBoxLayout(self)
- 
-        table = QTableWidget(self)
-        table.setColumnCount(3)
-        table.setHorizontalHeaderLabels(["Cell #", "Voltage (V)", "Temp (℃)"])
-        table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        table.setRowCount(len(cell_voltages))
-        for i in range(len(cell_voltages)):
-            table.setItem(i, 0, QTableWidgetItem(str(i + 1)))
-            table.setItem(i, 1, QTableWidgetItem(f"{cell_voltages[i]:.4f}" if cell_voltages[i] is not None else "N/A"))
-            table.setItem(i, 2, QTableWidgetItem(f"{cell_temps[i]:.2f}" if cell_temps[i] is not None else "N/A"))
-        layout.addWidget(table)
 
+        for i, val in enumerate(data):
+            label = QLabel(f"Cell {i+1}: {val:.3f} {'V' if mode == 'v' else '℃'}")
+            layout.addWidget(label)
+            
 # ---------------------------
 # 메인 GUI
 # ---------------------------
@@ -111,6 +117,17 @@ class ModbusGUI(QWidget):
         left_v = QVBoxLayout()
         main_layout.addLayout(left_v, stretch=3)
 
+        # ---------------------------
+        # Device Info Table
+        # ---------------------------
+        left_v.addWidget(QLabel("🔹 Device Info"))
+        self.device_table = QTableWidget()
+        self.device_table.setColumnCount(3)
+        self.device_table.setHorizontalHeaderLabels(["Name", "Address", "Value"])
+        self.device_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.device_table.setRowCount(len(DEVICE_INFO_REGS))
+        left_v.addWidget(self.device_table)
+        
         # 포트/설정
         top_port = QHBoxLayout()
         left_v.addLayout(top_port)
@@ -185,10 +202,38 @@ class ModbusGUI(QWidget):
         bottom_buttons.addStretch()
 
         # 초기화
+        self.update_device_info_table()
         self.populate_ports()
         self.update_buttons(False)
         self.update_module_table()
 
+     # ---------------------------
+    # Device Info 읽기
+    # ---------------------------
+    def update_device_info_table(self):
+        if not self.client:
+            for row, (name, (addr, count, dtype)) in enumerate(DEVICE_INFO_REGS.items()):
+                self.device_table.setItem(row, 0, QTableWidgetItem(name))
+                self.device_table.setItem(row, 1, QTableWidgetItem(f"0x{addr:04X}"))
+                self.device_table.setItem(row, 2, QTableWidgetItem("N/A"))
+            return
+
+        for row, (name, (addr, count, dtype)) in enumerate(DEVICE_INFO_REGS.items()):
+            val = None
+            if dtype == "UNIT16":
+                val = self.read_register(addr)
+            elif dtype == "String":
+                chars = []
+                for i in range(count):
+                    word = self.read_register(addr + i)
+                    if word is None:
+                        continue
+                    chars.append(chr((word >> 8) & 0xFF))
+                    chars.append(chr(word & 0xFF))
+                val = "".join(chars).strip()
+            self.device_table.setItem(row, 0, QTableWidgetItem(name))
+            self.device_table.setItem(row, 1, QTableWidgetItem(f"0x{addr:04X}"))
+            self.device_table.setItem(row, 2, QTableWidgetItem(str(val) if val else "N/A"))
     # ---------------------------
     # 이미지 오버레이 버튼
     # ---------------------------

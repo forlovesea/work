@@ -27,46 +27,43 @@ DEVICE_INFO_REGS = {
 
 
 # ---------------------------
-# 알람 레지스터 정의
+# 알람 레지스터 정의 (N=1~10 확장)
 # ---------------------------
-ALARM_STATIC = {
-    "DC Overvoltage": 0x500E,
-    "DC Undervoltage": 0x500F,
-    "Load Fuse Break": 0x5010,
-    # ... 기존과 동일 ...
-}
-
-def generate_di_registers():
-    return {f"DI{i}": 0x5023 + (i - 1) for i in range(1, 13)}
-
-def generate_lithium_battery_regs():
-    return {f"Lithium Battery {n} Abnormal": 0x5036 + (n - 1) for n in range(1, 33)}
-
-def generate_battery_bank_regs():
-    regs = {}
-    for n in range(1, 7):
-        base = 0x5520 + (n - 1) * 16
-        regs[f"Battery Bank {n} Fuse Break"] = base
-        regs[f"Battery Bank {n} Middle Voltage Imbalance"] = base + 1
-    return regs
-
-def generate_ssu_pv_regs(max_units=60):
-    regs = {}
-    for n in range(1, max_units + 1):
-        block = 0x5900 + (n - 1) * 16
-        regs[f"SSU{n} Fault"] = block + 1
-        regs[f"SSU{n} Communication Failure"] = block + 2
-        regs[f"PV{n} Array Fault"] = block + 3
-        regs[f"SSU{n} Protection"] = block + 4
-    return regs
-
 ALARM_REGISTERS = {}
-ALARM_REGISTERS.update(ALARM_STATIC)
-ALARM_REGISTERS.update(generate_di_registers())
-ALARM_REGISTERS.update(generate_lithium_battery_regs())
-ALARM_REGISTERS.update(generate_battery_bank_regs())
-ALARM_REGISTERS.update(generate_ssu_pv_regs(max_units=10))
 
+# 1) 고정 주소 알람
+ALARM_REGISTERS.update({
+    "Battery Missing": 0x5022,  # MA (0x00: normal; 0x01: alarm)
+})
+
+# 2) Lithium Battery 1~10
+for n in range(1, 11):
+    ALARM_REGISTERS[f"Lithium Battery {n} Abnormal"] = 0x5036 + (n - 1) * 1  # MA (0x00: normal; 0x01: Fault; 0x02: Protection; 0x03: Comm Fail)
+
+# 3) 0x8431+(N-1)*64 패턴 (10개씩 확장)
+for n in range(1, 11):
+    base = 0x8431 + (n - 1) * 64
+    ALARM_REGISTERS.update({
+        f"Charge Over Voltage {n}": base,                     # WA
+        f"Charge Over Current {n}": base + 1,                 # WA
+        f"Overdischarge {n}": base + 2,                       # WA
+        f"Heavy Load Warning {n}": base + 3,                  # WA
+        f"Reversely Connection {n}": base + 4,                # MA
+        f"Charge Over/Discharge Over Temp {n}": base + 5,     # MI
+        f"Communication Failure {n}": base + 6,               # MI
+        f"Low Temperature {n}": base + 7,                     # MI
+        f"Discharge/Charge High Temp Protection {n}": base + 8,  # MI
+        f"Low Temperature Protection {n}": base + 9,          # MI
+        f"Overcharge Protection {n}": base + 10,              # MI
+        f"Overdischarge Protection {n}": base + 11,           # MI
+        f"Charge/Discharge Overcurrent Protection {n}": base + 12,  # MI
+    })
+
+
+# 1) 고정 주소 알람
+ALARM_REGISTERS.update({
+    "Battery Missing": 0x5022,  # MA (0x00: normal; 0x01: alarm)
+})
 # ---------------------------
 # 설정
 # ---------------------------
@@ -383,7 +380,16 @@ class ModbusGUI(QWidget):
             return
         self.log_message("=== Reading Alarms ===")
         alarm_found = False
-        for name, addr in sorted(ALARM_REGISTERS.items(), key=lambda kv: kv[1]):
+
+        # 정수 주소만 정렬하고 문자열 주소는 그대로 처리
+        int_items = [(k, v) for k, v in ALARM_REGISTERS.items() if isinstance(v, int)]
+        str_items = [(k, v) for k, v in ALARM_REGISTERS.items() if not isinstance(v, int)]
+
+        for name, addr in sorted(int_items, key=lambda kv: kv[1]) + str_items:
+            if isinstance(addr, str):
+                self.log_message(f"ℹ️ {name} uses calculated address expression: {addr}")
+                continue
+
             val = self.read_register(addr)
             if val is None:
                 continue

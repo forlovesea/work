@@ -13,7 +13,7 @@ report_server_ip = "10.30.41.60"
 report_server_port = 7878
 report_server_addr_port = (report_server_ip, report_server_port)
 
-dict_team_one = { 'jihyun':'pbkdf2:sha256:600000$F9xFhm45FlQuEbBJ$72968532db2b077748dafc0f476bcf3ea5b49853ae393b7f20d71d5255b854f5'}
+dict_team_one = { 'jihyun  ':'pbkdf2:sha256:600000$F9xFhm45FlQuEbBJ$72968532db2b077748dafc0f476bcf3ea5b49853ae393b7f20d71d5255b854f5'}
 
 def job(self):
     print("send e-mail~")

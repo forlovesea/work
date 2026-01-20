@@ -12,6 +12,8 @@ from PySide6.QtGui import QPixmap
 from PySide6.QtCore import Qt, QTimer
 from pymodbus.client import ModbusSerialClient
 
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
 # ---------------------------
 # 장치 기본 정보 레지스터
 # ---------------------------
@@ -38,7 +40,7 @@ ALARM_REGISTERS.update({
 
 # 2) Lithium Battery 1~10
 for n in range(1, 11):
-    ALARM_REGISTERS[f"Lithium Battery {n} Abnormal"] = 0x5036 + (n - 1) * 1  # MA (0x00: normal; 0x01: Fault; 0x02: Protection; 0x03: Comm Fail)
+    ALARM_REGISTERS[f"Lithium Battery {n} Abnormal"] = 0x5036 + (n - 1) * 1  # MA (0x00: normal; 0x01: Fault; 0x02: Protection; *x03: Comm Fail)
 
 # 3) 0x8431+(N-1)*64 패턴 (10개씩 확장)
 for n in range(1, 11):
@@ -59,43 +61,81 @@ for n in range(1, 11):
         f"Charge/Discharge Overcurrent Protection {n}": base + 12,  # MI
     })
 
-
-# 1) 고정 주소 알람
-ALARM_REGISTERS.update({
-    "Battery Missing": 0x5022,  # MA (0x00: normal; 0x01: alarm)
-})
 # ---------------------------
-# 설정
+# 설정 (업데이트된 주소 적용)
 # ---------------------------
 MODULE_COUNT = 10
 CELLS_PER_MODULE = 15
 
-MODBUS_MODULE_BASE = 0x6000
-MODBUS_MODULE_STRIDE = 0x20
-MODBUS_CELL_VOLTAGE_OFFSET = 0x0
-MODBUS_CELL_TEMP_OFFSET = 0x10
-MODBUS_MODULE_TOTAL_VOLTAGE_OFFSET = 0x0F
-MODBUS_MODULE_TEMP_OFFSET = 0x1F
+# 새 테이블 기준:
+# 각 모듈(N:1~32) = 베이스 0xA731 + (N-1)*64
+MODBUS_MODULE_BASE = 0xA731
+MODBUS_MODULE_STRIDE = 0x40  # (64 decimal)
+
+# 새 전압 및 온도 시작 오프셋
+MODBUS_CELL_TEMP_BASE_OFFSET = 0xA73A - MODBUS_MODULE_BASE  # 0x09
+MODBUS_CELL_VOLT_BASE_OFFSET = 0xA750 - MODBUS_MODULE_BASE  # 0x1F
+
+# 각 셀 오프셋 간격 1
+MODBUS_CELL_TEMP_OFFSET_STEP = 1
+MODBUS_CELL_VOLT_OFFSET_STEP = 1
+
+# 배터리 전체 전압 및 온도
+BATTERY_VOLTAGE_OFFSET = 0xA731 - MODBUS_MODULE_BASE  # 0
+BATTERY_CURRENT_OFFSET = 0xA733 - MODBUS_MODULE_BASE  # 2
+BATTERY_SOC_OFFSET = 0xA739 - MODBUS_MODULE_BASE      # 8
 
 # ---------------------------
 # 세부 팝업창 (셀 1~15)
 # ---------------------------
 class ModuleDetailDialog(QDialog):
-    def __init__(self, parent, module_num, data, mode):
+    def __init__(self, parent, module_num, cell_vs, cell_ts):
         super().__init__(parent)
-        self.setWindowTitle(f"Module {module_num} {'Voltages' if mode == 'v' else 'Temps'} Detail")
+        self.setWindowTitle(f"Module {module_num} Detail")
         layout = QVBoxLayout(self)
-
-        for i, val in enumerate(data):
-            label = QLabel(f"Cell {i+1}: {val:.3f} {'V' if mode == 'v' else '℃'}")
-            layout.addWidget(label)
-            
+        header = QLabel(f"📊 Module {module_num} — Cell Voltage & Temperature")
+        layout.addWidget(header)
+        # 그래프 추가
+        fig = Figure(figsize=(6, 3))
+        canvas = FigureCanvas(fig)
+        ax = fig.add_subplot(111)
+        ax.plot(range(1, 1 + len(cell_vs)), cell_vs, "bo-", label="Voltage (V)")
+        ax.set_xlabel("Cell #")
+        ax.set_ylabel("Voltage (V)")
+        ax.set_ylim(3.4, 4.3)
+        ax2 = ax.twinx()
+        ax2.plot(range(1, 1 + len(cell_ts)), cell_ts, "r^-", label="Temp (℃)")
+        ax2.set_ylabel("Temp (℃)")
+        ax2.set_ylim(20, 60)
+        fig.tight_layout()
+        layout.addWidget(canvas)
+        # 셀 테이블
+        table = QTableWidget()
+        table.setColumnCount(2)
+        table.setHorizontalHeaderLabels(["Voltage (V)", "Temperature (°C)"])
+        table.setRowCount(len(cell_vs))
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        for i in range(len(cell_vs)):
+            v = cell_vs[i] if cell_vs[i] is not None else 0
+            t = cell_ts[i] if cell_ts[i] is not None else 0
+            table.setItem(i, 0, QTableWidgetItem(f"{v:.3f}"))
+            table.setItem(i, 1, QTableWidgetItem(f"{t:.1f}"))
+        layout.addWidget(table)
+        self.setLayout(layout)
+        self.resize(500, 600)
+    def closeEvent(self, event):
+        if hasattr(self.parent(), "detail_dialog"):
+            self.parent().detail_dialog = None
+        event.accept()
+        
 # ---------------------------
 # 메인 GUI
 # ---------------------------
 class ModbusGUI(QWidget):
     def __init__(self):
         super().__init__()
+        self.detail_dialog = None   # 🔹 현재 열린 모듈 상세창 추적용
+        
         self.setWindowTitle("Modbus RTU GUI with Alarms + Battery")
         self.resize(1600, 900)
         self.client = None
@@ -180,12 +220,12 @@ class ModbusGUI(QWidget):
         main_layout.addLayout(right_layout, stretch=2)
         right_layout.addWidget(QLabel("🔍 Modules Overview"))
         self.module_table = QTableWidget()
-        self.module_table.setColumnCount(5)
-        self.module_table.setHorizontalHeaderLabels(["Module", "Cell Voltages (V)", "Cell Temps (℃)", "Module Voltage (V)", "Module Temp (℃)"])
+        self.module_table.setColumnCount(3)
+        self.module_table.setHorizontalHeaderLabels(["Module", "Module Voltage (V)", "Module Temp (℃)"])
         self.module_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.module_table.setRowCount(MODULE_COUNT)
         right_layout.addWidget(self.module_table)
-
+        
         # 알람 버튼
         bottom_buttons = QHBoxLayout()
         right_layout.addLayout(bottom_buttons)
@@ -197,11 +237,12 @@ class ModbusGUI(QWidget):
         self.btn_monitor.clicked.connect(self.toggle_alarm_monitor)
         bottom_buttons.addWidget(self.btn_monitor)
         bottom_buttons.addStretch()
-
+        
         # 초기화
         self.update_device_info_table()
         self.populate_ports()
         self.update_buttons(False)
+        self.module_table.cellClicked.connect(self.handle_module_table_click)
         self.update_module_table()
 
      # ---------------------------
@@ -249,10 +290,21 @@ class ModbusGUI(QWidget):
             self.overlay_buttons.append(btn)
 
     def on_overlay_clicked(self, module_num):
-        cell_vs, cell_ts, mod_v, mod_t = self.read_module_data(module_num)
-        dialog = ModuleDetailDialog(self, module_num, cell_vs, cell_ts)
-        dialog.exec()
+        
+        if module_num == 11:
+            self.log_message("⚠️배터리 모듈 영역이 아닙니다.")
+            return 
+        
+        # 🔸 이미 열려 있는 모듈창이 있으면 닫기
+        if self.detail_dialog is not None and self.detail_dialog.isVisible():
+            self.detail_dialog.close()
 
+        # 🔸 새 모듈 데이터 읽기
+        cell_vs, cell_ts, mod_v, mod_t = self.read_module_data(module_num)
+
+        # 🔸 새 다이얼로그 생성 및 표시
+        self.detail_dialog = ModuleDetailDialog(self, module_num, cell_vs, cell_ts)
+        self.detail_dialog.show()   # exec() 대신 show() 사용 → GUI 블록 방지
     # ---------------------------
     # 포트 관련
     # ---------------------------
@@ -330,22 +382,31 @@ class ModbusGUI(QWidget):
             return None
 
     # ---------------------------
-    # 모듈 데이터 읽기
+    # 모듈 데이터 읽기 (주소 체계 반영)
     # ---------------------------
     def read_module_data(self, module_number):
         base = MODBUS_MODULE_BASE + (module_number - 1) * MODBUS_MODULE_STRIDE
         cell_vs, cell_ts = [], []
-        for i in range(CELLS_PER_MODULE):
-            v = self.read_register(base + MODBUS_CELL_VOLTAGE_OFFSET + i, scale=0.001)
-            cell_vs.append(v)
-        for i in range(CELLS_PER_MODULE):
-            t = self.read_register(base + MODBUS_CELL_TEMP_OFFSET + i, signed=True, scale=0.1)
-            cell_ts.append(t)
-        mod_v = self.read_register(base + MODBUS_MODULE_TOTAL_VOLTAGE_OFFSET, scale=0.001)
-        mod_t = self.read_register(base + MODBUS_MODULE_TEMP_OFFSET, signed=True, scale=0.1)
 
-        # 모의 데이터 처리
-        if any(v is None for v in cell_vs) or any(t is None for t in cell_ts) or mod_v is None or mod_t is None:
+        # 전압
+        for i in range(CELLS_PER_MODULE):
+            addr = base + MODBUS_CELL_VOLT_BASE_OFFSET + i * MODBUS_CELL_VOLT_OFFSET_STEP
+            v = self.read_register(addr, scale=0.001)  # mV → V 변환
+            cell_vs.append(v)
+
+        # 온도
+        for i in range(CELLS_PER_MODULE):
+            addr = base + MODBUS_CELL_TEMP_BASE_OFFSET + i * MODBUS_CELL_TEMP_OFFSET_STEP
+            t = self.read_register(addr, signed=True, scale=0.1)
+            cell_ts.append(t)
+
+        # 모듈 총 전압 = 0xA731~0xA732+(N-1)*64
+        mod_v = self.read_register(base + BATTERY_VOLTAGE_OFFSET, count=2, scale=0.001)
+        # 모듈 평균 온도 = 셀 온도 평균 사용
+        mod_t = sum(t for t in cell_ts if t is not None) / len(cell_ts)
+
+        # 모의 데이터 (None 방지)
+        if any(v is None for v in cell_vs) or any(t is None for t in cell_ts) or mod_v is None:
             cell_vs = [3.65 + 0.01 * module_number + 0.001 * i for i in range(CELLS_PER_MODULE)]
             cell_ts = [25.0 + module_number * 0.5 + 0.1 * i for i in range(CELLS_PER_MODULE)]
             mod_v = sum(cell_vs)
@@ -353,6 +414,16 @@ class ModbusGUI(QWidget):
 
         return cell_vs, cell_ts, mod_v, mod_t
 
+    def handle_module_table_click(self, row, col):
+        # 오직 모듈 전압/온도 칼럼만 처리, 11번(10+1) 무시
+        if row + 1 == 11:
+            self.log.append("⚠️ Module 11은 배터리 모듈이 아닙니다.")
+            return
+        if col in [1, 2]:
+            cell_vs, cell_ts, mod_v, mod_t = self.read_module_data(row + 1)
+            self.detail_dialog = ModuleDetailDialog(self, row + 1, cell_vs, cell_ts)
+            self.detail_dialog.show()
+            
     # ---------------------------
     # 모듈 테이블 업데이트
     # ---------------------------
@@ -360,16 +431,10 @@ class ModbusGUI(QWidget):
         for i in range(MODULE_COUNT):
             cell_vs, cell_ts, mod_v, mod_t = self.read_module_data(i + 1)
             self.module_table.setItem(i, 0, QTableWidgetItem(str(i + 1)))
-            self.module_table.setItem(
-                i, 1,
-                QTableWidgetItem(", ".join(f"{v:.2f}" if v is not None else "N/A" for v in cell_vs))
-            )
-            self.module_table.setItem(
-                i, 2,
-                QTableWidgetItem(", ".join(f"{t:.1f}" if t is not None else "N/A" for t in cell_ts))
-            )
-            self.module_table.setItem(i, 3, QTableWidgetItem(f"{mod_v:.2f}" if mod_v is not None else "N/A"))
-            self.module_table.setItem(i, 4, QTableWidgetItem(f"{mod_t:.1f}" if mod_t is not None else "N/A"))
+            self.module_table.setItem(i, 1, QTableWidgetItem(f"{mod_v:.2f}" if mod_v is not None else "N/A"))
+            self.module_table.setItem(i, 2, QTableWidgetItem(f"{mod_t:.1f}" if mod_t is not None else "N/A"))
+        #   self.module_table.setItem(i, 3, QTableWidgetItem(f"{mod_v:.2f}" if mod_v is not None else "N/A"))
+        #   self.module_table.setItem(i, 4, QTableWidgetItem(f"{mod_t:.1f}" if mod_t is not None else "N/A"))
 
     # ---------------------------
     # 알람 읽기

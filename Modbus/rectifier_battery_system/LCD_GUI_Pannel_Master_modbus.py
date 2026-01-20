@@ -179,6 +179,7 @@ class PollWorker(QThread):
         # Barcode
         barcode_base = 0xC670 + (n - 1) * 32
         barcode = self.read_string(barcode_base, 15)
+        barcode = barcode.strip('\x00').strip()
         text_batt_lines.append(f"Battery Barcode : {barcode}")
 
         # Voltage (N) UINT32 /10
@@ -205,7 +206,7 @@ class PollWorker(QThread):
 
             addr_v = 0xA74F + i + (n - 1) * 64
             v = self.read_uint16(addr_v) / 10
-            text_cell_lines.append(f"Cell-{i:2d} Temp : {t} degC / Volt : {v:.1f} V")            
+            text_cell_lines.append(f"Cell-{i:2d} Temp : {t:2d} degC / Volt : {v:.1f} V")            
 
         self.battery_signal.emit("\n".join(text_batt_lines))
         self.cell_signal.emit("\n".join(text_cell_lines))
@@ -339,7 +340,7 @@ class TimeBatteryGui(QWidget):
                     background-color: #1e7e34;
                 }
             """)
-            self.btn_disconnect.setEnabled(True)  # 활성화
+            self.btn_disconnect.setEnabled(True)
             self.btn_disconnect.setStyleSheet("""
                 QPushButton {
                     background-color: #dc3545; 
@@ -356,6 +357,8 @@ class TimeBatteryGui(QWidget):
                 }
             """)
         else:
+            self.btn_connect.setEnabled(True)
+            
             # 연결 안됨: 기본 회색 버튼들
             self.btn_connect.setStyleSheet("""
                 QPushButton {
@@ -517,8 +520,10 @@ class TimeBatteryGui(QWidget):
         if self.worker and self.worker.isRunning():
             QMessageBox.information(self, "Connect", "Already connected")
             return
+        
         if self.is_connected:  # 이미 연결된 상태면 무시
             return
+        
         self.worker = PollWorker(port)
         # 신호 연결[web:14]
         self.worker.log_signal.connect(self.append_log)
@@ -545,8 +550,11 @@ class TimeBatteryGui(QWidget):
     def disconnect_port(self):
         if self.worker:
             self.worker.stop()
-            self.worker.wait(2000)
+            self.worker.wait()
+            
+            self.worker.deleteLater()   # Qt 객체 안전 삭제
             self.worker = None
+            
             self.is_connected = False  # ← 상태 변경
             QMessageBox.information(self, "Disconnect", "Disconnected")
             self.update_button_styles()  # ← 기본 색상으로 복귀
@@ -582,8 +590,12 @@ class TimeBatteryGui(QWidget):
     def closeEvent(self, event):
         if self.worker:
             self.worker.stop()
-            self.worker.wait(2000)
+            #self.worker.wait(2000)            
+            self.worker.wait() #Qt 공식 문서에서도 wait()은 timeout 없이 써야 안전
+            self.worker.deleteLater()
+            self.worker = None
             self.is_connected = False  # ← 상태 초기화
+            
         self.update_button_styles()  # ← 기본 상태로
         super().closeEvent(event)
 

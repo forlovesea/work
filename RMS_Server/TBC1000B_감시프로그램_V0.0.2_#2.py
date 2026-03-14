@@ -48,8 +48,8 @@ TRAP_QUEUE_SIZE = 2000
 
 
 DEBUG_FLAGS = {
-    "SNMP": True,
-    "MODULE": True,
+    "SNMP": False,
+    "MODULE": False,
     "TRAP": False,
     "ALARM": False
 }

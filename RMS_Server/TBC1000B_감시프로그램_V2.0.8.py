@@ -3,7 +3,7 @@
  cd D:\proj\GIT_HUB\work\RMS_Server
  pyinstaller --clean --noconsole --onefile --icon=./battery#2.ico --collect-all PySide6 --name TBC1000B_감시프로그램_V2.0.8 TBC1000B_감시프로그램_V2.0.8.py
 *최적화 실행 파일 옵션
-pyinstaller --noconfirm --onefile --icon=./battery#2.ico --add-data "alarm.wav;." --windowed --add-data "install_battery.png;." --clean --strip --noupx --exclude-module tkinter --exclude-module matplotlib --exclude-module numpy --exclude-module pandas --exclude-module scipy --exclude-module IPython --exclude-module jupyter --exclude-module notebook --exclude-module test --exclude-module unittest --exclude-module email --exclude-module http --exclude-module PyQt5 --exclude-module PyQt5.QtCore --exclude-module PyQt5.QtGui --exclude-module PyQt5.QtWidgets TBC1000B_감시프로그램_V2.0.8.py   
+pyinstaller --noconfirm --onefile --icon=./battery#2.ico --add-data "alarm.wav;." --windowed --add-data "install_battery.png;." --add-data "battery#3.ico;." --clean --strip --noupx --exclude-module tkinter --exclude-module matplotlib --exclude-module numpy --exclude-module pandas --exclude-module scipy --exclude-module IPython --exclude-module jupyter --exclude-module notebook --exclude-module test --exclude-module unittest --exclude-module email --exclude-module http --exclude-module PyQt5 --exclude-module PyQt5.QtCore --exclude-module PyQt5.QtGui --exclude-module PyQt5.QtWidgets TBC1000B_감시프로그램_V2.0.8.py   
 Read : sktlfp48r
 Write : sktlfp48w
 Trap : sktlfp48r

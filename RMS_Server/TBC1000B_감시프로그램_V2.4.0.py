@@ -12,8 +12,8 @@ Trap : sktlfp48r
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! ※프로그램 버전별 목표 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 
-* 날짜 2026.04.10 기준
-※최신버전: v3.0.2
+* 날짜 2026.04.14 기준
+※최신버전: v2.4.0 (정식버전)
  
 V1.1.1 -> Single System Moninor 용
 v1.2.2 -> Multy Instance System Monitor 용
@@ -80,9 +80,9 @@ from PySide6.QtWidgets import QApplication
 # =======================================================================================================================
 APP_NAME = "TBC1000B-NDA1/IoT Gateway Battery Monitoring System(Base SNMPv2)"
 
-VERSION_MAJOR = 3
-VERSION_MINOR = 0
-VERSION_PATCH = 2
+VERSION_MAJOR = 2
+VERSION_MINOR = 4
+VERSION_PATCH = 0
 
 APP_VERSION = f"v{VERSION_MAJOR}.{VERSION_MINOR}.{VERSION_PATCH}"
 #########################################################################################################################
@@ -1260,7 +1260,6 @@ class SNMPThread(QThread):
 class BatteryMonitorUI(QMainWindow):
     def __init__(self, profile_path, mode, new_profile_data=None, forced_slave=False):
         super().__init__()
-        self.cutoff_buttons = {}
 
         self.setWindowTitle(f"{APP_NAME} {APP_VERSION}")
         self.setWindowIcon(QIcon(resource_path("battery#3.ico")))
@@ -2482,8 +2481,6 @@ class BatteryMonitorUI(QMainWindow):
             # -----------------
             if data["status"] is not None:
 
-                status = data["status"]   # 🔥 핵심: 변수로 통일
-
                 status_text, color = status_map.get(
                     data["status"],
                     ("Unknown", "#CED4DA")
@@ -2496,17 +2493,8 @@ class BatteryMonitorUI(QMainWindow):
                 if color in ["#FF6B6B", "#4DABF7"]:
                     item.setForeground(QColor("white"))
                 else:
-                    item.setForeground(QColor("black"))
-                
-                # 🔥 버튼 활성화 조건
-                #print(f"[DEBUG] module_no={module_no}, status={status}, has_btn={module_no in self.cutoff_buttons}")
-                #print(f"[DEBUG] RAW status = {data['status']} ({type(data['status'])})")
-                if module_no in self.cutoff_buttons:
-                    if status in (4, 5, 6):
-                        self.cutoff_buttons[module_no].setEnabled(True)
-                    else:
-                        self.cutoff_buttons[module_no].setEnabled(False)
-                
+                    item.setForeground(QColor("black"))                  
+            
                 # -----------------
                 # 상세 버튼 활성화
                 # -----------------
@@ -4125,43 +4113,6 @@ class BatteryMonitorUI(QMainWindow):
         return main_widget
 
 
-    def execute_cutoff(self, module_no):
-        try:
-            # 🔥 OID (index 포함)
-            oid = f"1.3.6.1.4.1.2011.6.164.1.18.1.1.14.{module_no}"
-
-            # 👉 실제 SNMP SET (기존 함수 사용 가정)
-            # self.snmp_set(oid, 1)
-
-            print(f"[SNMP SET] {oid} = 1")
-
-            QMessageBox.information(
-                self,
-                "전원 차단 완료",
-                f"모듈 {module_no:02d}번에 원격 차단 명령이 실행되었습니다."
-            )
-
-        except Exception as e:
-            QMessageBox.critical(
-                self,
-                "오류",
-                f"전원 차단 실패: {str(e)}"
-            )
-
-    def confirm_cutoff(self, module_no):
-        msg = QMessageBox(self)
-        msg.setIcon(QMessageBox.Warning)
-        msg.setWindowTitle("전원 차단 확인")
-        msg.setText("⚠ 축전지 전원이 강제로 차단됩니다.\n시스템이 즉시 종료될 수 있습니다.\n정말로 실행하시겠습니까?")
-        
-        run_btn = msg.addButton("실행", QMessageBox.AcceptRole)
-        cancel_btn = msg.addButton("취소", QMessageBox.RejectRole)
-
-        msg.exec_()
-
-        if msg.clickedButton() == run_btn:
-            self.execute_cutoff(module_no)
-
     def create_module_table(self):
         """모듈 상태 + 모듈 설치 순서"""
 
@@ -4191,7 +4142,7 @@ class BatteryMonitorUI(QMainWindow):
         module_layout.setContentsMargins(0, 0, 0, 0)
         module_layout.setSpacing(2)
 
-        headers = ["모듈", "모듈 전압", "셀 전압 Max/Min[V]", "셀 온도 Max/Min[℃]", "경보", "통신상태", "모듈(셀)", "EPO"]
+        headers = ["모듈", "모듈 전압", "셀 전압 Max/Min[V]", "셀 온도 Max/Min[℃]", "경보", "통신상태", "모듈(셀)"]
 
         LABEL_BG = QColor("#E7F1FF")
 
@@ -4274,79 +4225,27 @@ class BatteryMonitorUI(QMainWindow):
                 table.setItem(row, 4, QTableWidgetItem("-"))
                 table.setItem(row, 5, QTableWidgetItem("-"))
 
-                # -------------------------
-                # 상세정보 버튼 (컬럼 6)
-                # -------------------------
-                detail_btn = QPushButton("상세정보")
-                detail_btn.clicked.connect(lambda checked, no=module_no: self.show_module_detail(no))
-                detail_btn.setEnabled(False)
-
-                table.setCellWidget(row, 6, detail_btn)
-
-                # -------------------------
-                # 전원차단 버튼 (컬럼 7 = EPO)
-                # -------------------------
-                cutoff_btn = QPushButton("차단")   # 텍스트도 짧게 추천
-                cutoff_btn.setEnabled(False)  # 🔥 기본 비활성화
-
-                cutoff_btn.setStyleSheet("""
-                    QPushButton {
-                        background-color: #E03131;
-                        color: white;
-                        border-radius: 4px;
-                        padding: 2px 6px;   /* 🔥 여기 적용 */
-                        min-width: 0px;
-                    }
-
-                    QPushButton:hover {
-                        background-color: #C92A2A;
-                    }
-
-                    QPushButton:disabled {
-                        background-color: #ADB5BD;
-                        color: #E9ECEF;
-                    }
-                """)
-
-                cutoff_btn.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
-                cutoff_btn.setMinimumWidth(0)
-                cutoff_btn.adjustSize()
-
-                # 🔥 핵심 3종 세트
-                cutoff_btn.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
-                cutoff_btn.setMinimumWidth(0)
-                cutoff_btn.adjustSize()   # 내용 기준으로 줄임
-
-                cutoff_btn.clicked.connect(lambda checked, no=module_no: self.confirm_cutoff(no))
-
-                # 🔥 버튼 저장 (핵심)
-                self.cutoff_buttons[int(module_no)] = cutoff_btn
+                btn = QPushButton("상세정보")
+                btn.clicked.connect(lambda checked, no=module_no: self.show_module_detail(no))
+                table.setCellWidget(row, 6, btn)
+                btn.setEnabled(False)
 
                 # 가운데 정렬
-                btn_container = QWidget()
-                btn_layout = QHBoxLayout(btn_container)
-                btn_layout.setContentsMargins(0, 0, 0, 0)
-                for col in range(1, 7):
+                for col in range(1, 6):
                     item = table.item(row, col)
                     if item:
                         item.setTextAlignment(Qt.AlignCenter)
-                btn_layout.addWidget(cutoff_btn)
 
-                # 🔥 반드시 있어야 함 (빠져있던 핵심)
-                table.setCellWidget(row, 7, btn_container)
             table.resizeColumnsToContents()
             table.resizeRowsToContents()
 
             table.setColumnWidth(2, 120)
             table.setColumnWidth(3, 130)
             table.setColumnWidth(4, 50)
-            table.setColumnWidth(5, 90)
+
             header = table.horizontalHeader()
             header.setSectionResizeMode(6, QHeaderView.Fixed)
-            table.setColumnWidth(6, 80)   # 상세정보
-
-            header.setSectionResizeMode(7, QHeaderView.Fixed)           
-            table.setColumnWidth(7, 60)   # 전원차단
+            table.setColumnWidth(6, 70)
 
             header.setStyleSheet("""
                 QHeaderView::section {

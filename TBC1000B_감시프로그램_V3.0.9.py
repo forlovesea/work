@@ -11,16 +11,16 @@ Trap : sktlfp48r
 
 *Windows PowerShell 실행 후, 
 - 윈도우 TRAP 중지.
-PS C:\Users\Administrator> Stop-Service SNMPTRAP
-PS C:\Users\Administrator> Set-Service SNMPTRAP -StartupType Disabled
-
+Set-Service SNMPTRAP -StartupType Disabled
+Stop-Service SNMPTRAP
+Stop-Process -Name "MgWTrap3" -Force
 @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! ※프로그램 버전별 목표 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+※최신버전
+* 2026.04.10 기준 : v3.0.2
+* 2026.07.28 기준 : v3.0.9
 
-* 날짜 2026.04.10 기준
-※최신버전: v3.0.2
- 
 V1.1.1 -> Single System Moninor 용
 v1.2.2 -> Multy Instance System Monitor 용
 v1.2.2 -> Multy Instance는 (v2.x.x) 버전업  ->v2.0.7
@@ -36,6 +36,8 @@ v3.0.4 -> 프로그램 종료 시, 쓰레드 처리.
 v3.0.5 -> 전체적인 UI 수정 및 Polling 시간 변경.
 v3.0.6 -> SOC 충전전류제한 관련 GET/SET SNMP 적용 
 v3.0.7 -> 원격차단 관련 GET/SET SNMP 적용
+v3.0.8 -> 전체적인 UI 밸런스 수정
+v3.0.9 -> 축전지 원격 차단 적용.
 ############################################################################################################################################
 """
 #
@@ -68,7 +70,8 @@ from PySide6.QtWidgets import (
     QPushButton, QRadioButton, QLineEdit,
     QDialog, QDialogButtonBox, QListWidget,
     QFormLayout, QMessageBox, QSizePolicy, QHeaderView,
-    QComboBox, QToolTip, QScrollArea, QGraphicsDropShadowEffect
+    QComboBox, QToolTip, QScrollArea, QGraphicsDropShadowEffect,
+    QProgressBar
 )
 from PySide6.QtCore import Qt, QTimer, QDateTime, QThread, Signal, QSettings, QEvent, QPoint
 from PySide6.QtGui import QColor, QFont, QPixmap, QFontMetrics, QIcon, QCursor
@@ -1252,13 +1255,17 @@ class EpoCutoffThread(QThread):
     EPO_PREPARE_OID = "1.3.6.1.4.1.2011.6.164.1.2.2.1.1.11.1"
     MODULE_CUTOFF_OID = "1.3.6.1.4.1.2011.6.164.1.18.3.1.2"
 
-    def __init__(self, ip, port, community, row_index, module_no, parent=None):
+    def __init__(
+        self, ip, port, community, row_index, module_no,
+        command_value=2, parent=None
+    ):
         super().__init__(parent)
         self.ip = ip
         self.port = port
         self.community = community
         self.row_index = str(row_index)
         self.module_no = int(module_no)
+        self.command_value = int(command_value)
 
     def set_and_verify(self, snmp_engine, oid, expected_value):
         iterator = setCmd(
@@ -1309,7 +1316,9 @@ class EpoCutoffThread(QThread):
                 return
 
             cutoff_oid = f"{self.MODULE_CUTOFF_OID}.{self.row_index}"
-            success, message = self.set_and_verify(snmp_engine, cutoff_oid, 2)
+            success, message = self.set_and_verify(
+                snmp_engine, cutoff_oid, self.command_value
+            )
             if not success:
                 self.result_signal.emit(False, message, self.module_no)
                 return
@@ -2306,7 +2315,7 @@ class BatteryMonitorUI(QMainWindow):
         dialog = ModuleDetailDialog(module_no, self)
         dialog.exec()
         
-    def show_auto_close_message(self, title, message, duration_ms=3000):
+    def show_auto_close_message(self, title, message, duration_ms=1500):
         msg = QMessageBox(self)
         msg.setWindowTitle(title)
         msg.setText(message)
@@ -2322,10 +2331,24 @@ class BatteryMonitorUI(QMainWindow):
         self.initial_load_message = QMessageBox(self)
         self.initial_load_message.setIcon(QMessageBox.Information)
         self.initial_load_message.setWindowTitle("정보 수신 중")
-        self.initial_load_message.setStandardButtons(QMessageBox.NoButton)
+        self.initial_load_message.setStandardButtons(QMessageBox.Close)
+        close_button = self.initial_load_message.button(QMessageBox.Close)
+        if close_button is not None:
+            close_button.setText("닫기")
+        self.initial_load_message.rejected.connect(
+            self.dismiss_initial_load_message
+        )
         self.update_initial_load_message()
         self.initial_load_message.show()
         self.initial_load_timer.start(1000)
+
+    def dismiss_initial_load_message(self):
+        """안내창만 닫고 실제 SNMP 정보 수신은 계속 진행한다."""
+        self.initial_load_timer.stop()
+        message = self.initial_load_message
+        self.initial_load_message = None
+        if message is not None:
+            message.deleteLater()
 
     def update_initial_load_message(self):
         if self.initial_load_message is None or self.initial_load_started_at is None:
@@ -2954,7 +2977,9 @@ class BatteryMonitorUI(QMainWindow):
                 #print(f"[DEBUG] module_no={module_no}, status={status}, has_btn={module_no in self.cutoff_buttons}")
                 #print(f"[DEBUG] RAW status = {data['status']} ({type(data['status'])})")
                 if module_no in self.cutoff_buttons:
-                    if status in (4, 5, 6):
+                    if getattr(self, "full_cutoff_active", False):
+                        self.cutoff_buttons[module_no].setEnabled(False)
+                    elif status in (4, 5, 6):
                         self.cutoff_buttons[module_no].setEnabled(True)
                     else:
                         self.cutoff_buttons[module_no].setEnabled(False)
@@ -4893,10 +4918,20 @@ class BatteryMonitorUI(QMainWindow):
                     self.soc_charge_limit_button = btn
 
                 elif label_text == "EPO":
-                    btn = QPushButton("전체차단")
-                    btn.setEnabled(False)
-                    btn.setFixedHeight(22)
-                    btn.setStyleSheet("""
+                    epo_widget = QWidget()
+                    epo_layout = QHBoxLayout(epo_widget)
+                    epo_layout.setContentsMargins(0, 0, 0, 0)
+                    epo_layout.setSpacing(3)
+
+                    all_label = QLabel("전체")
+                    all_label.setAlignment(Qt.AlignCenter)
+                    all_label.setStyleSheet(
+                        "font-size: 11px; font-weight: bold; color: #334155;"
+                    )
+                    cutoff_btn = QPushButton("차단")
+                    cutoff_btn.setEnabled(False)
+                    cutoff_btn.setFixedHeight(22)
+                    cutoff_btn.setStyleSheet("""
                     QPushButton {
                         background-color: #E03131;
                         color: white;
@@ -4912,10 +4947,35 @@ class BatteryMonitorUI(QMainWindow):
                         color: #E9ECEF;
                     }
                     """)
-                    btn.clicked.connect(self.confirm_full_cutoff)
+                    cutoff_btn.clicked.connect(self.confirm_full_cutoff)
 
-                    table.setCellWidget(value_row, col, btn)
-                    self.full_cutoff_button = btn
+                    restore_btn = QPushButton("복구")
+                    restore_btn.setEnabled(False)
+                    restore_btn.setFixedHeight(22)
+                    restore_btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: #16A34A;
+                        color: white;
+                        border-radius: 4px;
+                        padding: 2px 6px;
+                        min-width: 0px;
+                    }
+                    QPushButton:hover {
+                        background-color: #15803D;
+                    }
+                    QPushButton:disabled {
+                        background-color: #ADB5BD;
+                        color: #E9ECEF;
+                    }
+                    """)
+                    restore_btn.clicked.connect(self.confirm_full_restore)
+
+                    epo_layout.addWidget(all_label)
+                    epo_layout.addWidget(cutoff_btn)
+                    epo_layout.addWidget(restore_btn)
+                    table.setCellWidget(value_row, col, epo_widget)
+                    self.full_cutoff_button = cutoff_btn
+                    self.full_restore_button = restore_btn
 
                 else:
                     value_item = QTableWidgetItem(values[block][col])
@@ -5071,30 +5131,276 @@ class BatteryMonitorUI(QMainWindow):
         return alive_modules
 
     def update_full_cutoff_button_state(self):
+        operation_active = getattr(self, "full_cutoff_active", False)
         if hasattr(self, "full_cutoff_button"):
-            self.full_cutoff_button.setEnabled(bool(self.get_alive_module_numbers()))
+            self.full_cutoff_button.setEnabled(
+                bool(self.get_alive_module_numbers()) and not operation_active
+            )
+        if hasattr(self, "full_restore_button"):
+            self.full_restore_button.setEnabled(
+                self.is_connected
+                and bool(self.module_map)
+                and not operation_active
+            )
 
 
     def execute_full_cutoff(self):
-        """현재 인식된 모든 모듈에 EPO/차단 명령을 순차 실행한다."""
-        try:
-            module_list = sorted(self.module_map.keys()) if self.module_map else list(range(1, 11))
+        """통신 가능한 모듈을 한 번에 하나씩, 100ms 간격으로 차단한다."""
+        self.execute_full_epo_operation("차단", 2)
 
-            for module_no in module_list:
-                self.execute_cutoff(int(module_no))
+    def execute_full_restore(self):
+        """인식된 모듈을 한 번에 하나씩, 100ms 간격으로 복구한다."""
+        self.execute_full_epo_operation("복구", 1)
 
-            QMessageBox.information(
-                self,
-                "전체차단 명령 완료",
-                f"전체차단 명령을 {len(module_list)}개 모듈에 순차 실행했습니다."
+    def execute_full_epo_operation(self, operation, command_value):
+        if getattr(self, "full_cutoff_active", False):
+            return
+
+        if operation == "차단":
+            module_list = sorted(self.get_alive_module_numbers())
+        else:
+            module_list = sorted(
+                int(no)
+                for no, info in self.module_map.items()
+                if info.get("row_index") is not None
             )
 
-        except Exception as e:
-            QMessageBox.critical(
-                self,
-                "전체차단 오류",
-                f"전체차단 실행 중 오류 발생:\n{str(e)}"
+        if not module_list:
+            self.show_cutoff_result_popup(
+                False, f"{operation} 가능한 모듈이 없습니다.", operation
             )
+            return
+
+        self.full_cutoff_active = True
+        self.full_epo_operation = operation
+        self.full_epo_command_value = int(command_value)
+        self.full_cutoff_queue = deque(int(no) for no in module_list)
+        self.full_cutoff_current_module = None
+        self.full_cutoff_failures = []
+        self.full_cutoff_total_count = len(module_list)
+        self.full_cutoff_completed_count = 0
+
+        self.update_full_cutoff_button_state()
+        for cutoff_btn in self.cutoff_buttons.values():
+            cutoff_btn.setEnabled(False)
+
+        self.show_full_cutoff_progress(module_list, operation)
+        self.start_next_full_cutoff()
+
+    def show_full_cutoff_progress(self, module_list, operation):
+        old_dialog = getattr(self, "full_cutoff_progress_dialog", None)
+        if old_dialog is not None:
+            old_dialog.close()
+            old_dialog.deleteLater()
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"전체{operation} 진행상태")
+        dialog.setModal(False)
+        dialog.setMinimumWidth(390)
+        dialog.resize(390, min(500, 175 + len(module_list) * 30))
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(10)
+
+        title = QLabel(f"모듈별 강제 {operation} 진행상태")
+        title.setStyleSheet(
+            "font-size: 15px; font-weight: bold; color: #1E293B;"
+        )
+        layout.addWidget(title)
+
+        self.full_cutoff_progress_label = QLabel(
+            f"{operation} 준비 중 · 0/{len(module_list)}"
+        )
+        self.full_cutoff_progress_label.setStyleSheet(
+            "color: #475569; font-size: 12px;"
+        )
+        layout.addWidget(self.full_cutoff_progress_label)
+
+        self.full_cutoff_progress_bar = QProgressBar()
+        self.full_cutoff_progress_bar.setRange(0, len(module_list))
+        self.full_cutoff_progress_bar.setValue(0)
+        self.full_cutoff_progress_bar.setTextVisible(True)
+        self.full_cutoff_progress_bar.setFormat("%v / %m 완료")
+        self.full_cutoff_progress_bar.setFixedHeight(18)
+        self.full_cutoff_progress_bar.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #CBD5E1;
+                border-radius: 8px;
+                background: #F1F5F9;
+                text-align: center;
+                color: #334155;
+                font-size: 10px;
+            }
+            QProgressBar::chunk {
+                background-color: #3B82F6;
+                border-radius: 7px;
+            }
+        """)
+        layout.addWidget(self.full_cutoff_progress_bar)
+
+        table = QTableWidget(len(module_list), 3)
+        table.setHorizontalHeaderLabels(["모듈", "진행상태", "처리시각"])
+        table.verticalHeader().setVisible(False)
+        table.setEditTriggers(QTableWidget.NoEditTriggers)
+        table.setSelectionMode(QTableWidget.NoSelection)
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
+        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Fixed)
+        table.setColumnWidth(0, 70)
+        table.setColumnWidth(2, 90)
+
+        self.full_cutoff_progress_rows = {}
+        for row, module_no in enumerate(module_list):
+            self.full_cutoff_progress_rows[module_no] = row
+            module_item = QTableWidgetItem(f"#{module_no:02d}")
+            status_item = QTableWidgetItem("대기")
+            time_item = QTableWidgetItem("-")
+            for item in (module_item, status_item, time_item):
+                item.setTextAlignment(Qt.AlignCenter)
+            status_item.setForeground(QColor("#64748B"))
+            table.setItem(row, 0, module_item)
+            table.setItem(row, 1, status_item)
+            table.setItem(row, 2, time_item)
+
+        table.resizeRowsToContents()
+        self.full_cutoff_progress_table = table
+        layout.addWidget(table)
+
+        self.full_cutoff_progress_close_btn = QPushButton("진행 중...")
+        self.full_cutoff_progress_close_btn.setEnabled(False)
+        self.full_cutoff_progress_close_btn.clicked.connect(dialog.accept)
+        self.full_cutoff_progress_close_btn.setStyleSheet("""
+            QPushButton {
+                background: #2563EB;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 6px 16px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background: #1D4ED8; }
+            QPushButton:disabled {
+                background: #CBD5E1;
+                color: #64748B;
+            }
+        """)
+        layout.addWidget(
+            self.full_cutoff_progress_close_btn,
+            alignment=Qt.AlignRight
+        )
+
+        self.full_cutoff_progress_dialog = dialog
+        dialog.show()
+        dialog.raise_()
+
+    def update_full_cutoff_progress(self, module_no, status, detail=""):
+        table = getattr(self, "full_cutoff_progress_table", None)
+        row = getattr(self, "full_cutoff_progress_rows", {}).get(module_no)
+        if table is None or row is None:
+            return
+
+        status_item = table.item(row, 1)
+        time_item = table.item(row, 2)
+        status_item.setText(status)
+        status_item.setToolTip(detail)
+
+        status_styles = {
+            "대기": ("#64748B", "#FFFFFF"),
+            "진행 중": ("#1D4ED8", "#DBEAFE"),
+            "성공": ("#166534", "#DCFCE7"),
+            "실패": ("#991B1B", "#FEE2E2"),
+        }
+        foreground, background = status_styles.get(
+            status, ("#334155", "#FFFFFF")
+        )
+        status_item.setForeground(QColor(foreground))
+        status_item.setBackground(QColor(background))
+
+        if status in ("성공", "실패"):
+            time_item.setText(datetime.now().strftime("%H:%M:%S"))
+
+        if status == "진행 중":
+            operation = getattr(self, "full_epo_operation", "차단")
+            self.full_cutoff_progress_label.setText(
+                f"모듈 #{module_no:02d} {operation} 진행 중 · "
+                f"{self.full_cutoff_completed_count}/{self.full_cutoff_total_count}"
+            )
+
+    def finish_full_cutoff_progress(self, failures):
+        operation = getattr(self, "full_epo_operation", "차단")
+        progress_bar = getattr(self, "full_cutoff_progress_bar", None)
+        if progress_bar is not None:
+            progress_bar.setValue(self.full_cutoff_total_count)
+
+        label = getattr(self, "full_cutoff_progress_label", None)
+        if label is not None:
+            if failures:
+                label.setText(
+                    f"전체{operation} 완료 · 성공 "
+                    f"{self.full_cutoff_total_count - len(failures)}개 / "
+                    f"실패 {len(failures)}개"
+                )
+                label.setStyleSheet(
+                    "color: #B91C1C; font-size: 12px; font-weight: bold;"
+                )
+            else:
+                label.setText(
+                    f"전체{operation} 완료 · "
+                    f"{self.full_cutoff_total_count}개 모두 성공"
+                )
+                label.setStyleSheet(
+                    "color: #15803D; font-size: 12px; font-weight: bold;"
+                )
+
+        close_btn = getattr(self, "full_cutoff_progress_close_btn", None)
+        if close_btn is not None:
+            close_btn.setText("닫기")
+            close_btn.setEnabled(True)
+
+    def start_next_full_cutoff(self):
+        if not getattr(self, "full_cutoff_active", False):
+            return
+
+        if not self.full_cutoff_queue:
+            failures = list(self.full_cutoff_failures)
+            operation = getattr(self, "full_epo_operation", "차단")
+            self.full_cutoff_active = False
+            self.full_cutoff_current_module = None
+
+            alive_modules = set(self.get_alive_module_numbers())
+            for module_no, cutoff_btn in self.cutoff_buttons.items():
+                cutoff_btn.setEnabled(module_no in alive_modules)
+            self.update_full_cutoff_button_state()
+            self.finish_full_cutoff_progress(failures)
+
+            if failures:
+                failed_modules = ", ".join(f"{no:02d}" for no in failures)
+                self.show_cutoff_result_popup(
+                    False,
+                    f"실패 모듈: {failed_modules}",
+                    operation
+                )
+            else:
+                self.show_cutoff_result_popup(True, operation=operation)
+            return
+
+        module_no = self.full_cutoff_queue.popleft()
+        self.full_cutoff_current_module = module_no
+        self.update_full_cutoff_progress(module_no, "진행 중")
+        if not self.execute_cutoff(module_no):
+            self.full_cutoff_failures.append(module_no)
+            self.full_cutoff_completed_count += 1
+            self.update_full_cutoff_progress(
+                module_no,
+                "실패",
+                f"{getattr(self, 'full_epo_operation', '차단')} 요청을 시작할 수 없습니다."
+            )
+            self.full_cutoff_progress_bar.setValue(
+                self.full_cutoff_completed_count
+            )
+            self.full_cutoff_current_module = None
+            QTimer.singleShot(100, self.start_next_full_cutoff)
 
     def confirm_full_cutoff(self):
         msg = QMessageBox(self)
@@ -5114,23 +5420,41 @@ class BatteryMonitorUI(QMainWindow):
         if msg.clickedButton() == run_btn:
             self.execute_full_cutoff()
 
+    def confirm_full_restore(self):
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Warning)
+        msg.setWindowTitle("전체복구 확인")
+        msg.setText(
+            "모든 축전지 모듈에 복구 명령이 실행됩니다.\n"
+            "정말로 전체복구를 실행하시겠습니까?"
+        )
+
+        run_btn = msg.addButton("복구 실행", QMessageBox.AcceptRole)
+        msg.addButton("취소", QMessageBox.RejectRole)
+        msg.exec_()
+
+        if msg.clickedButton() == run_btn:
+            self.execute_full_restore()
+
     def execute_cutoff(self, module_no):
         module_info = self.module_map.get(module_no)
         row_index = module_info.get("row_index") if module_info else None
         if row_index is None:
-            self.show_cutoff_result_popup(False, "모듈 인덱스를 찾을 수 없습니다.")
-            return
+            if not getattr(self, "full_cutoff_active", False):
+                self.show_cutoff_result_popup(False, "모듈 인덱스를 찾을 수 없습니다.")
+            return False
 
         if not self.is_connected:
-            self.show_cutoff_result_popup(False, "축전지 시스템에 접속되어 있지 않습니다.")
-            return
+            if not getattr(self, "full_cutoff_active", False):
+                self.show_cutoff_result_popup(False, "축전지 시스템에 접속되어 있지 않습니다.")
+            return False
 
         if not hasattr(self, "epo_cutoff_threads"):
             self.epo_cutoff_threads = {}
 
         current_thread = self.epo_cutoff_threads.get(module_no)
         if current_thread is not None and current_thread.isRunning():
-            return
+            return False
 
         ip = self.ip_edit.text().strip()
         community = self.set_comm_edit.text().strip()
@@ -5143,8 +5467,14 @@ class BatteryMonitorUI(QMainWindow):
         if cutoff_btn:
             cutoff_btn.setEnabled(False)
 
+        command_value = (
+            getattr(self, "full_epo_command_value", 2)
+            if getattr(self, "full_cutoff_active", False)
+            else 2
+        )
         thread = EpoCutoffThread(
-            ip, port, community, row_index, module_no, self
+            ip, port, community, row_index, module_no,
+            command_value, self
         )
         self.epo_cutoff_threads[module_no] = thread
         thread.result_signal.connect(self.handle_cutoff_result)
@@ -5152,20 +5482,38 @@ class BatteryMonitorUI(QMainWindow):
             lambda no=module_no: self.finish_cutoff_request(no)
         )
         thread.start()
+        return True
 
     def handle_cutoff_result(self, success, message, module_no):
+        is_full_cutoff = (
+            getattr(self, "full_cutoff_active", False)
+            and self.full_cutoff_current_module == module_no
+        )
+
         if success:
             cutoff_btn = self.cutoff_buttons.get(module_no)
             if cutoff_btn:
-                cutoff_time = datetime.now().strftime("%m.%d %H:%M")
-                cutoff_btn.setText(f"차단\n{cutoff_time}")
-                cutoff_btn.adjustSize()
-                for table in (self.module_table_left, self.module_table_right):
-                    table.resizeRowsToContents()
-            self.show_cutoff_result_popup(True)
+                operation = (
+                    getattr(self, "full_epo_operation", "차단")
+                    if is_full_cutoff else "차단"
+                )
+                if operation == "복구":
+                    cutoff_btn.setText("차단")
+                else:
+                    cutoff_time = datetime.now().strftime("%m.%d %H:%M")
+                    cutoff_btn.setText(f"차단\n({cutoff_time})")
+                self.normalize_module_table_row_heights()
+            if is_full_cutoff:
+                self.update_full_cutoff_progress(module_no, "성공")
+            if not is_full_cutoff:
+                self.show_cutoff_result_popup(True)
         else:
             dprint("EPO", f"[FAIL] module={module_no}, reason={message}")
-            self.show_cutoff_result_popup(False, message)
+            if is_full_cutoff:
+                self.full_cutoff_failures.append(module_no)
+                self.update_full_cutoff_progress(module_no, "실패", message)
+            else:
+                self.show_cutoff_result_popup(False, message)
 
     def finish_cutoff_request(self, module_no):
         thread = getattr(self, "epo_cutoff_threads", {}).pop(module_no, None)
@@ -5173,10 +5521,31 @@ class BatteryMonitorUI(QMainWindow):
             thread.deleteLater()
 
         cutoff_btn = self.cutoff_buttons.get(module_no)
-        if cutoff_btn and self.is_connected:
+        is_full_cutoff = (
+            getattr(self, "full_cutoff_active", False)
+            and self.full_cutoff_current_module == module_no
+        )
+        if cutoff_btn and self.is_connected and not is_full_cutoff:
             cutoff_btn.setEnabled(True)
 
-    def show_cutoff_result_popup(self, success, detail=""):
+        if is_full_cutoff:
+            self.full_cutoff_completed_count += 1
+            progress_bar = getattr(self, "full_cutoff_progress_bar", None)
+            if progress_bar is not None:
+                progress_bar.setValue(self.full_cutoff_completed_count)
+            self.full_cutoff_current_module = None
+            QTimer.singleShot(100, self.start_next_full_cutoff)
+
+    def normalize_module_table_row_heights(self):
+        """차단 시간 표시 여부와 관계없이 좌우 모듈 행 높이를 동일하게 유지한다."""
+        row_height = getattr(self, "module_table_row_height", 44)
+        for table in (self.module_table_left, self.module_table_right):
+            table.verticalHeader().setSectionResizeMode(QHeaderView.Fixed)
+            table.verticalHeader().setDefaultSectionSize(row_height)
+            for row in range(table.rowCount()):
+                table.setRowHeight(row, row_height)
+
+    def show_cutoff_result_popup(self, success, detail="", operation="차단"):
         dialog = QDialog(self)
         dialog.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         dialog.setAttribute(Qt.WA_TranslucentBackground)
@@ -5184,14 +5553,14 @@ class BatteryMonitorUI(QMainWindow):
 
         if success:
             symbol = "✓"
-            title = "축전지 강제 차단 성공"
+            title = f"축전지 강제 {operation} 성공"
             accent = "#22C55E"
             soft_background = "#F0FDF4"
             title_color = "#166534"
             duration_ms = 1000
         else:
             symbol = "!"
-            title = "축전지 강제 차단 실패"
+            title = f"축전지 강제 {operation} 실패"
             accent = "#EF4444"
             soft_background = "#FEF2F2"
             title_color = "#991B1B"
@@ -5316,8 +5685,7 @@ class BatteryMonitorUI(QMainWindow):
             cutoff_btn.setEnabled(False)
             cutoff_btn.setText("차단")
 
-        for table in (self.module_table_left, self.module_table_right):
-            table.resizeRowsToContents()
+        self.normalize_module_table_row_heights()
 
         # 3️⃣ Fault 테이블 초기화
         self.fault_table.setRowCount(0)
@@ -5337,6 +5705,9 @@ class BatteryMonitorUI(QMainWindow):
     
     def create_module_table(self):
         """모듈 상태 + 모듈 설치 순서"""
+
+        # "차단\n(월.일 시:분)" 두 줄이 처음부터 들어갈 수 있는 고정 행 높이
+        self.module_table_row_height = 44
 
         BASE_STYLE = """
         QLabel {
@@ -5457,6 +5828,10 @@ class BatteryMonitorUI(QMainWindow):
             table = QTableWidget(5, len(headers))
             table.setHorizontalHeaderLabels(headers)
             table.verticalHeader().setVisible(False)
+            table.verticalHeader().setSectionResizeMode(QHeaderView.Fixed)
+            table.verticalHeader().setDefaultSectionSize(
+                self.module_table_row_height
+            )
             table.setEditTriggers(QTableWidget.NoEditTriggers)
 
             for col in range(len(headers)):
@@ -5510,14 +5885,9 @@ class BatteryMonitorUI(QMainWindow):
                     }
                 """)
 
-                cutoff_btn.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+                cutoff_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
                 cutoff_btn.setMinimumWidth(0)
-                cutoff_btn.adjustSize()
-
-                # 🔥 핵심 3종 세트
-                cutoff_btn.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
-                cutoff_btn.setMinimumWidth(0)
-                cutoff_btn.adjustSize()   # 내용 기준으로 줄임
+                cutoff_btn.setFixedHeight(self.module_table_row_height - 6)
 
                 cutoff_btn.clicked.connect(lambda checked, no=module_no: self.confirm_cutoff(no))
 
@@ -5527,7 +5897,7 @@ class BatteryMonitorUI(QMainWindow):
                 # 가운데 정렬
                 btn_container = QWidget()
                 btn_layout = QHBoxLayout(btn_container)
-                btn_layout.setContentsMargins(0, 0, 0, 0)
+                btn_layout.setContentsMargins(3, 3, 3, 3)
                 for col in range(1, 7):
                     item = table.item(row, col)
                     if item:
@@ -5537,21 +5907,24 @@ class BatteryMonitorUI(QMainWindow):
                 # 🔥 반드시 있어야 함 (빠져있던 핵심)
                 table.setCellWidget(row, 7, btn_container)
             table.resizeColumnsToContents()
-            table.resizeRowsToContents()
+            for row in range(table.rowCount()):
+                table.setRowHeight(row, self.module_table_row_height)
 
             table.setColumnWidth(2, 120)
             table.setColumnWidth(3, 130)
             table.setColumnWidth(4, 50)
             table.setColumnWidth(5, 90)
             header = table.horizontalHeader()
-            # 전체화면에서 남는 폭은 통신상태 컬럼이 차지한다.
+            # 차단 시간 두 줄 표시 공간을 확보하고 통신상태 칸은 줄인다.
             header.setStretchLastSection(False)
-            header.setSectionResizeMode(5, QHeaderView.Stretch)
+            header.setSectionResizeMode(2, QHeaderView.Stretch)
+            header.setSectionResizeMode(5, QHeaderView.Fixed)
+            table.setColumnWidth(5, 70)
             header.setSectionResizeMode(6, QHeaderView.Fixed)
             table.setColumnWidth(6, 80)   # 상세정보
 
             header.setSectionResizeMode(7, QHeaderView.Fixed)           
-            table.setColumnWidth(7, 80)   # 모듈(셀) 컬럼과 동일한 폭
+            table.setColumnWidth(7, 112)
 
             header.setStyleSheet("""
                 QHeaderView::section {
@@ -6066,6 +6439,17 @@ class BatteryMonitorUI(QMainWindow):
         self.connect_btn.setFixedWidth(80)
         self.connect_btn.clicked.connect(self.on_connect_clicked)
         layout.addWidget(self.connect_btn)
+
+        self.connection_input_fields = [
+            self.ip_edit,
+            self.port_edit,
+            self.get_comm_edit,
+            self.set_comm_edit,
+            self.trap_comm_edit,
+            self.trap_port_edit,
+        ]
+        for field in self.connection_input_fields:
+            field.returnPressed.connect(self.handle_connection_enter)
         
         # 🔵 접속 상태 표시 (접속 버튼 옆)
         layout.addSpacing(10)
@@ -6191,6 +6575,20 @@ class BatteryMonitorUI(QMainWindow):
         layout.addStretch()
         
         return group
+
+    def handle_connection_enter(self):
+        """Enter 입력 시 누락된 접속값으로 이동하거나 접속을 시작한다."""
+        for field in self.connection_input_fields:
+            if not field.text().strip():
+                field.setFocus(Qt.TabFocusReason)
+                return
+
+        if (
+            not self.is_connected
+            and self.connect_btn.isEnabled()
+            and not getattr(self, "connection_start_pending", False)
+        ):
+            self.connect_btn.click()
 
     def save_site_info(self):
 

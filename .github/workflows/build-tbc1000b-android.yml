@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   build-apk:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     timeout-minutes: 120
 
     steps:
@@ -70,6 +70,7 @@ jobs:
       - name: Build Galaxy S25 arm64 debug APK
         working-directory: RMS_Server/android_app
         run: |
+          set +e
           CCACHE_DISABLE=1 pyside6-android-deploy \
             --name "TBC1000B Monitor" \
             --wheel-pyside "$PWD/pyside6-android-aarch64.whl" \
@@ -78,6 +79,13 @@ jobs:
             --keep-deployment-files \
             --force \
             --verbose
+          build_status=$?
+          set -e
+          if [ "$build_status" -ne 0 ]; then
+            find .buildozer -type f -name config.log -print \
+              -exec tail -n 100 {} \; || true
+            exit "$build_status"
+          fi
 
       - name: Collect APK
         if: success()

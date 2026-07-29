@@ -29,8 +29,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            autoconf automake ccache cmake libffi-dev libltdl-dev \
+            autoconf automake cmake libffi-dev libltdl-dev \
             libssl-dev libtool openjdk-17-jdk pkg-config unzip zip zlib1g-dev
+          sudo apt-get remove -y ccache || true
 
       - name: Install Qt for Python deployment tools
         run: |

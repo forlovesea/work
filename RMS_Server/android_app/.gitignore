@@ -1,0 +1,7 @@
+vendor/
+.buildozer/
+bin/
+*.apk
+*.aab
+pysidedeploy.spec
+buildozer.spec

@@ -1,0 +1,97 @@
+name: Build TBC1000B Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "RMS_Server/android_app/**"
+      - ".github/workflows/build-tbc1000b-android.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install Linux and Android build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            autoconf automake ccache cmake libffi-dev libltdl-dev \
+            libssl-dev libtool openjdk-17-jdk pkg-config unzip zip zlib1g-dev
+
+      - name: Install Qt for Python deployment tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "PySide6==6.11.0" buildozer cython
+
+      - name: Download official Android arm64 Qt for Python wheels
+        working-directory: RMS_Server/android_app
+        run: |
+          curl --fail --location --retry 3 \
+            --output pyside6-android-aarch64.whl \
+            https://download.qt.io/official_releases/QtForPython/pyside6/pyside6-6.11.0-6.11.0-cp311-cp311-android_aarch64.whl
+          curl --fail --location --retry 3 \
+            --output shiboken6-android-aarch64.whl \
+            https://download.qt.io/official_releases/QtForPython/shiboken6/shiboken6-6.11.0-6.11.0-cp311-cp311-android_aarch64.whl
+
+      - name: Download matching Android SDK and NDK
+        run: |
+          git clone --depth 1 --branch 6.11 \
+            https://code.qt.io/pyside/pyside-setup.git "$RUNNER_TEMP/pyside-setup"
+          python -m pip install \
+            -r "$RUNNER_TEMP/pyside-setup/tools/cross_compile_android/requirements.txt"
+          python "$RUNNER_TEMP/pyside-setup/tools/cross_compile_android/main.py" \
+            --download-only --skip-update --auto-accept-license
+
+      - name: Vendor pure-Python monitoring dependencies
+        run: |
+          python -m pip install --target RMS_Server/android_app/vendor \
+            "openpyxl==3.1.5" \
+            "pysnmp==4.4.12" \
+            "pyasn1==0.4.8" \
+            "pyasn1-modules==0.2.8"
+          find RMS_Server/android_app/vendor \
+            -type d \( -name "__pycache__" -o -name "*.dist-info" \) \
+            -prune -exec rm -rf {} +
+
+      - name: Build Galaxy S25 arm64 debug APK
+        working-directory: RMS_Server/android_app
+        run: |
+          pyside6-android-deploy \
+            --name "TBC1000B Monitor" \
+            --wheel-pyside "$PWD/pyside6-android-aarch64.whl" \
+            --wheel-shiboken "$PWD/shiboken6-android-aarch64.whl" \
+            --extra-modules Multimedia \
+            --keep-deployment-files \
+            --force \
+            --verbose
+
+      - name: Collect APK
+        if: success()
+        working-directory: RMS_Server/android_app
+        run: |
+          mkdir -p apk-output
+          find . -type f -name "*.apk" -exec cp {} apk-output/TBC1000B-v3.0.11-arm64.apk \;
+          test -s apk-output/TBC1000B-v3.0.11-arm64.apk
+
+      - name: Upload APK artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TBC1000B-GalaxyS25-APK
+          path: RMS_Server/android_app/apk-output/TBC1000B-v3.0.11-arm64.apk
+          if-no-files-found: error
+          retention-days: 30

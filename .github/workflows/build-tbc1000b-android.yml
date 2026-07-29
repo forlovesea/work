@@ -56,6 +56,16 @@ jobs:
           python "$RUNNER_TEMP/pyside-setup/tools/cross_compile_android/main.py" \
             --download-only --skip-update --auto-accept-license
 
+      - name: Verify Android arm64 compiler
+        run: |
+          ndk_root="$HOME/.pyside6_android_deploy/android-ndk/android-ndk-r27c"
+          clang="$ndk_root/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
+          printf 'int main(void) { return 0; }\n' |
+            "$clang" -v -target aarch64-linux-android21 \
+              -fomit-frame-pointer -march=armv8-a -fPIC \
+              -x c - -o "$RUNNER_TEMP/android-arm64-smoke"
+          file "$RUNNER_TEMP/android-arm64-smoke"
+
       - name: Vendor pure-Python monitoring dependencies
         run: |
           python -m pip install --target RMS_Server/android_app/vendor \
@@ -81,11 +91,9 @@ jobs:
             --verbose
           build_status=$?
           set -e
-          if [ "$build_status" -ne 0 ]; then
-            find .buildozer -type f -name config.log -print \
-              -exec tail -n 100 {} \; || true
-            exit "$build_status"
-          fi
+          find .buildozer -type f -name config.log -print \
+            -exec tail -n 100 {} \; || true
+          test "$build_status" -eq 0
 
       - name: Collect APK
         if: success()

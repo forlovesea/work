@@ -70,22 +70,14 @@ jobs:
       - name: Build Galaxy S25 arm64 debug APK
         working-directory: RMS_Server/android_app
         run: |
-          pyside6-android-deploy \
+          CCACHE_DISABLE=1 pyside6-android-deploy \
             --name "TBC1000B Monitor" \
             --wheel-pyside "$PWD/pyside6-android-aarch64.whl" \
             --wheel-shiboken "$PWD/shiboken6-android-aarch64.whl" \
             --extra-modules Multimedia \
             --keep-deployment-files \
             --force \
-            --dry-run \
             --verbose
-          sed -i \
-            's/^p4a.branch =.*/p4a.branch = v2024.01.21/' \
-            buildozer.spec
-          sed -i \
-            's/^requirements =.*/requirements = python3==3.11.9,shiboken6,PySide6/' \
-            buildozer.spec
-          CCACHE_DISABLE=1 python -m buildozer android debug
 
       - name: Collect APK
         if: success()

@@ -1058,7 +1058,7 @@ class SNMPTrapThread(QThread):
         #print(f"[TRAP] Thread run start (listen {self.listen_ip}:{self.port})")
         print(
             #f"[TRAP TEST] 수신 스레드 시작: {self.listen_ip}:{self.port}, "
-            f"community={self.community}",
+            #f"community={self.community}",
             flush=True
         )
         dprint("SNMP", f"[TRAP] Thread run start (listen {self.listen_ip}:{self.port})")

@@ -1,0 +1,23 @@
+# .NET build and release outputs
+**/bin/
+**/obj/
+**/artifacts/
+**/publish/
+**/release-packages/
+
+# Local SDK, package caches, and installer downloads
+.dotnet/
+.nuget/
+.appdata/
+.downloads/
+
+# Runtime data
+profiles/
+Operation data record/
+Trap logs/
+logs/
+app.lock
+
+# Python caches retained only for the legacy reference application
+__pycache__/
+*.pyc

@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <ApplicationIcon>..\battery#2.ico</ApplicationIcon>
+    <RootNamespace>TBC1000B.WinForms</RootNamespace>
+    <AssemblyName>TBC1000B_Monitor</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <Content Include="..\skt_logo.png" Link="Assets\skt_logo.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\pantech.png" Link="Assets\pantech.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\install_battery.png" Link="Assets\install_battery.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\alarm.wav" Link="Assets\alarm.wav" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

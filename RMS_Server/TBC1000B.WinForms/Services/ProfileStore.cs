@@ -27,6 +27,7 @@ public sealed class ProfileStore
         var orderText = Get(values, "General/module_order");
         if (orderText.Length > 0) { var order = orderText.Split(',').Select(token => int.TryParse(token.Trim(), out var n) && n is >= 1 and <= 10 ? n : 0).Take(10).ToList(); while (order.Count < 10) order.Add(0); profile.ModuleOrder = order.ToArray(); }
         for (var module = 1; module <= 10; module++) { var barcode = Get(values, $"module_barcodes/{module}"); if (barcode.Length > 0) profile.ModuleBarcodes[module] = barcode; }
+        for (var module = 1; module <= 10; module++) { var cutoffTime = Get(values, $"epo/cutoff_time\\{module}"); if (cutoffTime.Length > 0) profile.EpoCutoffTimes[module] = cutoffTime; }
         return profile;
     }
 
@@ -46,6 +47,7 @@ public sealed class ProfileStore
         if (profile.LocalTrapPort > 0) Pair("local_trap_port", profile.LocalTrapPort);
         Pair("module_order", string.Join(", ", profile.ModuleOrder));
         text.Append("\r\n[module_barcodes]\r\n"); foreach (var item in profile.ModuleBarcodes.OrderBy(item => item.Key)) Pair(item.Key.ToString(), item.Value);
+        text.Append("\r\n[epo]\r\n"); foreach (var item in profile.EpoCutoffTimes.OrderBy(item => item.Key)) Pair($"cutoff_time\\{item.Key}", item.Value);
         text.Append("\r\n[alarm]\r\n"); Pair("volume", profile.AlarmVolume); foreach (var item in profile.AlarmLevels) Pair($"level\\{item.Key}", item.Value ? "true" : "false");
         File.WriteAllText(profile.FilePath, text.ToString(), new UTF8Encoding(false));
         void Pair(string key, object? value) => text.Append(key).Append('=').Append(value).Append("\r\n");

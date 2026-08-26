@@ -74,7 +74,7 @@ public sealed class MainForm : Form
         var alarmPath = Path.Combine(AppContext.BaseDirectory, "Assets", "alarm.wav"); if (File.Exists(alarmPath)) _alarmPlayer = new SoundPlayer(alarmPath);
         _operationRecorder.Error += (_, message) => BeginInvoke(() => MessageBox.Show(this, message, "운전 데이터 기록 오류", MessageBoxButtons.OK, MessageBoxIcon.Error));
         _service = service ?? new SnmpMonitorService();
-        Text = $"TBC1000B-NDA1/IoT Gateway Battery Monitoring System(Base SNMPv2) v3.2.3  ({mode.ToUpperInvariant()})";
+        Text = $"TBC1000B-NDA1/IoT Gateway Battery Monitoring System(Base SNMPv2) v3.2.4  ({mode.ToUpperInvariant()})";
         Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
         StartPosition = FormStartPosition.CenterScreen;
         WindowState = FormWindowState.Maximized;
@@ -127,8 +127,10 @@ public sealed class MainForm : Form
     private Control CreateConnectionPanel()
     {
         var group = new GroupBox { Text = "축전지 시스템 접속 설정", Dock = DockStyle.Fill };
-        var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(5, 10, 5, 2), WrapContents = false, AutoScroll = true };
-        group.Controls.Add(flow);
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty, Padding = Padding.Empty };
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize)); group.Controls.Add(layout);
+        var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(5, 10, 5, 2), WrapContents = false, AutoScroll = true, Margin = Padding.Empty };
+        layout.Controls.Add(flow, 0, 0);
         AddPair(flow, "IP", _ip); AddPair(flow, "Port", _port); AddPair(flow, "GET", _get);
         AddPair(flow, "SET", _set); AddPair(flow, "TRAP", _trap); AddPair(flow, "TRAP Port", _trapPort);
         _connect.Width = 80; flow.Controls.Add(_connect);
@@ -138,7 +140,8 @@ public sealed class MainForm : Form
         _soundButton.Width = 34; _soundButton.Height = 27; _soundButton.Text = SoundText(); _soundButton.Click += (_, _) => { _profile.AlarmVolume = (_profile.AlarmVolume + 1) % 4; _soundButton.Text = SoundText(); _profileStore.Save(_profile); UpdateAlarmSound(_latestSnapshot); }; flow.Controls.Add(_soundButton);
         var order = UiTheme.Button("모듈 설치 순서 설정", UiTheme.Accent); order.Width = 128;
         order.Click += (_, _) => { using var dialog = new ModuleOrderDialog(_profile, _profileStore, _modules); if (dialog.ShowDialog(this) == DialogResult.OK) UpdateOrderView(); }; flow.Controls.Add(order);
-        AddLogo(flow, "skt_logo.png", 100, 45); AddLogo(flow, "pantech.png", 120, 45);
+        var logos = new FlowLayoutPanel { AutoSize = true, Anchor = AnchorStyles.Top | AnchorStyles.Right, WrapContents = false, Margin = Padding.Empty, Padding = new Padding(3, 0, 5, 0) };
+        AddLogo(logos, "skt_logo.png", 100, 45); AddLogo(logos, "pantech.png", 120, 45); layout.Controls.Add(logos, 1, 0);
         return group;
     }
 
@@ -169,7 +172,7 @@ public sealed class MainForm : Form
         var split = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1 };
         split.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38)); split.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 62));
         UiTheme.ConfigureGrid(_summary); _summary.Dock = DockStyle.Fill; _summary.ReadOnly = true; _summary.ColumnCount = 6; _summary.RowCount = 8;
-        _summary.CellDoubleClick += async (_, e) => { if (e.RowIndex == 7 && e.ColumnIndex == 4) await OpenChargeLimitAsync(); else if (e.RowIndex == 7 && e.ColumnIndex == 5) await OpenSocLimitAsync(); };
+        _summary.CellClick += async (_, e) => { if (e.RowIndex == 7 && e.ColumnIndex == 4) await OpenChargeLimitAsync(); else if (e.RowIndex == 7 && e.ColumnIndex == 5) await OpenSocLimitAsync(); };
         ConfigureFullEpoButtons();
         _summaryGroup.Controls.Add(_summary); split.Controls.Add(_summaryGroup, 0, 0);
         var trapGroup = new Panel { Dock = DockStyle.Fill, BorderStyle = BorderStyle.FixedSingle };
@@ -192,14 +195,14 @@ public sealed class MainForm : Form
         var root = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 2, ColumnCount = 2 };
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 42)); root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 80)); root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20)); group.Controls.Add(root);
-        var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(0, 2, 0, 2), WrapContents = false };
-        var reset = UiTheme.Button("상태 초기화", Color.FromArgb(232, 84, 77)); reset.Width = 118; reset.MinimumSize = new Size(118, 32); actions.Controls.Add(reset);
+        var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(0, 2, 0, 2), WrapContents = false, Margin = Padding.Empty };
+        var reset = UiTheme.Button("상태 초기화", Color.FromArgb(232, 84, 77)); reset.Width = 118; reset.MinimumSize = new Size(118, 32); reset.Click += (_, _) => ResetModuleState(); actions.Controls.Add(reset);
         var record = UiTheme.Button("운전 데이타 기록", Color.FromArgb(41, 111, 215)); record.Width = 165; record.MinimumSize = new Size(165, 32); record.Click += (_, _) => new OperationRecordDialog(_operationRecorder, () => _latestSnapshot).ShowDialog(this); actions.Controls.Add(record);
         var all = UiTheme.Button("전체모듈정보", Color.Teal); all.Width = 142; all.MinimumSize = new Size(142, 32); all.Click += (_, _) => new AllModulesDialog(_modules).Show(this); actions.Controls.Add(all);
-        var allCutoff = UiTheme.Button("전체차단", UiTheme.Critical); allCutoff.Width = 100; allCutoff.MinimumSize = new Size(100, 32); allCutoff.Click += async (_, _) => await ConfirmFullEpoAsync(true); actions.Controls.Add(allCutoff);
-        var allRestore = UiTheme.Button("전체복구", Color.FromArgb(34, 197, 94)); allRestore.Width = 100; allRestore.MinimumSize = new Size(100, 32); allRestore.Click += async (_, _) => await ConfirmFullEpoAsync(false); actions.Controls.Add(allRestore);
+        foreach (var button in actions.Controls.OfType<Button>()) button.MinimumSize = Size.Empty;
+        reset.Width = 105; record.Width = 145; all.Width = 125;
         foreach (var button in actions.Controls.OfType<Button>()) { button.Height = 32; button.MinimumSize = new Size(button.Width, 32); button.Padding = Padding.Empty; button.Margin = new Padding(3, 2, 3, 2); }
-        actions.Controls.Add(new Label { Text = "※경보 색상 기준:", AutoSize = true, Margin = new Padding(20, 10, 3, 0) });
+        actions.Controls.Add(new Label { Text = "※ 경보 색상 기준:", AutoSize = true, Margin = new Padding(18, 10, 3, 0) });
         actions.Controls.Add(UiTheme.LegendChip("Critical", UiTheme.Critical, Color.White));
         actions.Controls.Add(UiTheme.LegendChip("Major", UiTheme.Major, Color.White));
         actions.Controls.Add(UiTheme.LegendChip("Minor", UiTheme.Minor, Color.Black));
@@ -241,7 +244,8 @@ public sealed class MainForm : Form
             };
             _orderList.Controls.Add(item, 0, row);
         }
-        orderLayout.Controls.Add(legend, 0, 0); orderLayout.Controls.Add(_orderList, 0, 1); orderGroup.Controls.Add(orderLayout); root.Controls.Add(orderGroup, 1, 0); root.SetRowSpan(orderGroup, 2);
+        orderLayout.Controls.Add(legend, 0, 0); orderLayout.Controls.Add(_orderList, 0, 1); orderGroup.Controls.Add(orderLayout);
+        root.Controls.Add(orderGroup, 1, 0); root.SetRowSpan(orderGroup, 2);
         return group;
     }
 
@@ -266,15 +270,38 @@ public sealed class MainForm : Form
     {
         var path = Path.Combine(AppContext.BaseDirectory, "Assets", fileName);
         if (!File.Exists(path)) return;
-        panel.Controls.Add(new PictureBox { Image = Image.FromFile(path), SizeMode = PictureBoxSizeMode.Zoom, Width = width, Height = height, Margin = new Padding(15, 0, 0, 0) });
+        panel.Controls.Add(new PictureBox
+        {
+            Image = LoadLogoWithControlBackground(path),
+            BackColor = SystemColors.Control,
+            SizeMode = PictureBoxSizeMode.Zoom,
+            Width = width,
+            Height = height,
+            Margin = new Padding(15, 0, 0, 0)
+        });
+    }
+
+    private static Image LoadLogoWithControlBackground(string path)
+    {
+        using var source = new Bitmap(path);
+        var logo = new Bitmap(source);
+        var imageBackground = logo.GetPixel(0, 0).ToArgb();
+
+        for (var y = 0; y < logo.Height; y++)
+        for (var x = 0; x < logo.Width; x++)
+            if (logo.GetPixel(x, y).ToArgb() == imageBackground)
+                logo.SetPixel(x, y, SystemColors.Control);
+
+        return logo;
     }
 
     private void ConfigureModuleGrid(DataGridView grid, int start)
     {
         UiTheme.ConfigureGrid(grid); grid.Dock = DockStyle.Fill; grid.ReadOnly = true; grid.RowTemplate.Height = 42;
-        foreach (var h in new[] { "모듈", "모듈 전압", "셀 전압 Max/Min[V]", "셀 온도 Max/Min[℃]", "경보", "통신상태", "모듈(셀)", "EPO" }) grid.Columns.Add(h, h);
+        foreach (var h in new[] { "모듈", "모듈 전압", "셀 전압 Max/Min[V]", "셀 온도 Max/Min[℃]", "경보", "통신상태", "모듈(셀)" }) grid.Columns.Add(h, h);
+        grid.Columns.Add(new DataGridViewButtonColumn { Name = "EPO", HeaderText = "EPO", FlatStyle = FlatStyle.Standard });
         grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
-        for (var n = start; n < start + 5; n++) grid.Rows.Add($"#{n:00}", "-", "- / -", "- / -", "-", "-", "상세정보", "차단");
+        for (var n = start; n < start + 5; n++) grid.Rows.Add($"#{n:00}", "-", "- / -", "- / -", "-", "-", "상세정보", GetEpoButtonText(n));
         grid.CellDoubleClick += (_, e) => { if (e.RowIndex < 0 || e.ColumnIndex == 7) return; var module = _modules.FirstOrDefault(m => m.Number == start + e.RowIndex); if (module is not null) new ModuleDetailDialog(module).Show(this); };
         grid.CellClick += async (_, e) => { if (e.RowIndex >= 0 && e.ColumnIndex == 7) await ConfirmEpoAsync(start + e.RowIndex); };
     }
@@ -284,8 +311,42 @@ public sealed class MainForm : Form
         var module = _modules[moduleNumber - 1]; if (!module.Connected) { MessageBox.Show(this, "통신 가능한 모듈이 아닙니다.", "전원 차단", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
         var result = MessageBox.Show(this, $"⚠ 축전지 모듈 #{moduleNumber:00} 전원을 강제로 차단합니다.\n시스템이 즉시 종료될 수 있습니다.\n정말 실행하시겠습니까?", "전원 차단 확인", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
         if (result != DialogResult.OK) return;
-        try { await _service.SetEpoAsync(moduleNumber, true, _lifetime.Token); MessageBox.Show(this, $"모듈 #{moduleNumber:00} 강제 차단 명령이 성공했습니다.", "전원 차단", MessageBoxButtons.OK, MessageBoxIcon.Information); }
+        try { await _service.SetEpoAsync(moduleNumber, true, _lifetime.Token); UpdateEpoCutoffTime(moduleNumber, true); MessageBox.Show(this, $"모듈 #{moduleNumber:00} 강제 차단 명령이 성공했습니다.", "전원 차단", MessageBoxButtons.OK, MessageBoxIcon.Information); }
         catch (Exception ex) { MessageBox.Show(this, ex.Message, "전원 차단 실패", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+    }
+
+    private void ResetModuleState()
+    {
+        _modules = Enumerable.Range(1, 10).Select(number => new ModuleState { Number = number }).ToList();
+        foreach (var grid in _moduleGrids)
+        {
+            for (var row = 0; row < grid.RowCount; row++)
+            {
+                for (var column = 1; column <= 6; column++)
+                {
+                    grid[column, row].Value = "-";
+                    grid[column, row].Style.BackColor = Color.White;
+                    grid[column, row].Style.ForeColor = Color.Black;
+                }
+                var moduleNumber = grid == _moduleGrids[0] ? row + 1 : row + 6;
+                grid[7, row].Value = GetEpoButtonText(moduleNumber);
+            }
+        }
+        _dismissedFaults.Clear();
+        _faultGrid.Rows.Clear();
+        _updated.Text = "최종업데이트시간 : 초기화됨";
+        UpdateOrderView();
+    }
+
+    private string GetEpoButtonText(int moduleNumber) => _profile.EpoCutoffTimes.TryGetValue(moduleNumber, out var cutoffTime) && !string.IsNullOrWhiteSpace(cutoffTime) ? $"차단\n({cutoffTime})" : "차단";
+
+    private void UpdateEpoCutoffTime(int moduleNumber, bool cutoff)
+    {
+        if (cutoff) _profile.EpoCutoffTimes[moduleNumber] = DateTime.Now.ToString("MM.dd HH:mm");
+        else _profile.EpoCutoffTimes.Remove(moduleNumber);
+        _profileStore.Save(_profile);
+        var grid = moduleNumber <= 5 ? _moduleGrids[0] : _moduleGrids[1];
+        grid[7, (moduleNumber - 1) % 5].Value = GetEpoButtonText(moduleNumber);
     }
 
     private async Task ConfirmFullEpoAsync(bool cutoff)
@@ -302,7 +363,7 @@ public sealed class MainForm : Form
         {
             foreach (var module in modules)
             {
-                progress.UpdateModule(module, "진행 중", null); try { await _service.SetEpoAsync(module, cutoff, _lifetime.Token); progress.UpdateModule(module, "성공", null); }
+                progress.UpdateModule(module, "진행 중", null); try { await _service.SetEpoAsync(module, cutoff, _lifetime.Token); UpdateEpoCutoffTime(module, cutoff); progress.UpdateModule(module, "성공", null); }
                 catch (Exception ex) { failures.Add(module); progress.UpdateModule(module, "실패", ex.Message); }
                 await Task.Delay(100, _lifetime.Token);
             }
@@ -348,11 +409,27 @@ public sealed class MainForm : Form
             { "과전압 충전차단", "고온 충전차단", "과전류 충전차단", "차단기 OFF", "충전전류제한[C]", "SOC충전제한[%]" },
             { "-", "-", "-", "-", "-", "-" } };
         for (var r = 0; r < 8; r++) for (var c = 0; c < 6; c++) { _summary[c, r].Value = labels[r, c]; if (r % 2 == 0) _summary[c, r].Style.BackColor = UiTheme.Header; }
+        ConfigureSummaryLimitButton(4);
+        ConfigureSummaryLimitButton(5);
         _summary.Rows[5].Height = 36;
         _summary.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill; _summary.RowHeadersVisible = false; _summary.ColumnHeadersVisible = false;
         for (var column = 0; column < 4; column++) _summary.Columns[column].FillWeight = 92;
         _summary.Columns[4].FillWeight = 125; _summary.Columns[5].FillWeight = 145; _summary.Columns[5].MinimumWidth = 105;
         PositionFullEpoPanel();
+    }
+
+    private void ConfigureSummaryLimitButton(int column)
+    {
+        var button = new DataGridViewButtonCell
+        {
+            FlatStyle = FlatStyle.Standard,
+            Value = "-",
+            ToolTipText = column == 4 ? "충전전류 제한값 설정" : "SOC 충전 제한값 설정"
+        };
+        button.Style.Alignment = DataGridViewContentAlignment.MiddleCenter;
+        button.Style.Font = new Font("맑은 고딕", 9F, FontStyle.Bold);
+        button.Style.Padding = new Padding(3);
+        _summary[column, 7] = button;
     }
 
     private async void ToggleConnectionAsync(object? sender, EventArgs e)
@@ -421,8 +498,37 @@ public sealed class MainForm : Form
     private void ShowTrapListenerFailure(string error)
     {
         var normalized = (error ?? "").ToLowerInvariant(); var reason = normalized.Contains("10048") || normalized.Contains("address already in use") ? "선택한 UDP 포트를 다른 프로그램 또는 서비스가 이미 사용 중입니다." : normalized.Contains("10013") || normalized.Contains("permission") || normalized.Contains("access") ? "UDP 포트를 열 권한이 없거나 보안 정책에서 사용을 차단했습니다." : normalized.Contains("10049") || normalized.Contains("cannot assign requested address") ? "현재 PC에서 사용할 수 없는 수신 주소로 바인딩을 시도했습니다." : "운영체제에서 UDP 수신 포트를 열지 못했습니다.";
-        var message = $"SNMP 접속은 정상이나 Trap 이벤트 수신 포트를 열지 못했습니다.\r\n\r\n수신 포트: 0.0.0.0:{_trapPort.Text.Trim()}/UDP\r\n원인: {reason}\r\n상세 오류: {(!string.IsNullOrWhiteSpace(error) ? error : "원인 정보 없음")}\r\n\r\n영향\r\n주기적인 SNMP 상태 조회는 계속되지만 실시간 알람/복구 Trap은 수신할 수 없습니다.\r\n\r\n확인 및 조치 방법\r\n1. Windows SNMP Trap 서비스 또는 동일 포트를 쓰는 프로그램을 종료합니다.\r\n2. 다른 UDP Trap Port를 사용한다면 장비의 Trap 목적지 포트도 동일하게 변경합니다.\r\n3. Windows 방화벽에서 해당 UDP 포트의 인바운드 수신을 허용합니다.\r\n4. 권한 오류가 계속되면 관리자 권한 및 보안 정책을 확인합니다.\r\n5. 조치 후 프로그램 접속을 종료하고 다시 시작합니다.";
-        MessageBox.Show(this, message, "Trap 수신 포트 실패 - 제한 기능 및 조치 안내", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        var message = $"SNMP 접속은 정상이나 Trap 이벤트 수신 포트를 열지 못했습니다.\r\n\r\n수신 포트: 0.0.0.0:{_trapPort.Text.Trim()}/UDP\r\n원인: {reason}\r\n상세 오류: {(!string.IsNullOrWhiteSpace(error) ? error : "원인 정보 없음")}\r\n\r\n영향\r\n주기적인 SNMP 상태 조회는 계속되지만 실시간 알람/복구 Trap은 수신할 수 없습니다.\r\n\r\n확인 및 조치 방법\r\n1. Windows SNMP Trap 서비스 또는 동일 포트를 쓰는 프로그램을 종료합니다.\r\n2. 다른 UDP Trap Port를 사용한다면 장비의 Trap 목적지 포트도 동일하게 변경합니다.\r\n3. Windows 방화벽에서 해당 UDP 포트의 인바운드 수신을 허용합니다.\r\n4. 권한 오류가 계속되면 관리자 권한 및 보안 정책을 확인합니다.\r\n5. 조치 후 프로그램 접속을 종료하고 다시 시작합니다.\r\n\r\nHOST의 TRAP 포트 점유 해제 방법\r\n관리자 권한으로 PowerShell을 실행한 후 아래 명령을 입력합니다.\r\n\r\nSet-Service SNMPTRAP -StartupType Disabled\r\nStop-Service SNMPTRAP\r\nStop-Process -Name \"MgWTrap3\" -Force\r\n\r\n※ 위 명령은 Windows SNMP Trap 서비스를 중지·비활성화하고 MgWTrap3 프로세스를 강제 종료합니다.";
+        using var dialog = new Form
+        {
+            Text = "Trap 수신 포트 실패 - 제한 기능 및 조치 안내",
+            StartPosition = FormStartPosition.CenterParent,
+            FormBorderStyle = FormBorderStyle.Sizable,
+            MinimizeBox = false,
+            ShowInTaskbar = false,
+            ClientSize = new Size(720, 610),
+            MinimumSize = new Size(620, 480),
+            Font = new Font("맑은 고딕", 9F)
+        };
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 2, Padding = new Padding(12) };
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
+        var guide = new TextBox
+        {
+            Text = message,
+            Dock = DockStyle.Fill,
+            Multiline = true,
+            ReadOnly = true,
+            ScrollBars = ScrollBars.Vertical,
+            BackColor = Color.White,
+            WordWrap = false
+        };
+        var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(0, 6, 0, 0) };
+        var ok = UiTheme.Button("확인"); ok.Width = 85; ok.DialogResult = DialogResult.OK; buttons.Controls.Add(ok);
+        layout.Controls.Add(guide, 0, 0); layout.Controls.Add(buttons, 0, 1); dialog.Controls.Add(layout);
+        dialog.AcceptButton = ok;
+        dialog.Shown += (_, _) => { guide.SelectionLength = 0; guide.Select(0, 0); };
+        dialog.ShowDialog(this);
     }
 
     private void ShowAutoCloseMessage(string title, string message, int durationMilliseconds = 1500)
@@ -443,7 +549,7 @@ public sealed class MainForm : Form
             var cells = module.CellVoltages.Where(v => v.HasValue).Select(v => v!.Value).ToArray(); var temps = module.CellTemperatures.Where(v => v.HasValue).Select(v => v!.Value).ToArray();
             grid[1, row].Value = Format(module.Voltage, "0.0"); grid[2, row].Value = cells.Length == 0 ? "- / -" : $"{cells.Max():0.00} / {cells.Min():0.00}";
             grid[3, row].Value = temps.Length == 0 ? "- / -" : $"{temps.Max():0.0} / {temps.Min():0.0}"; grid[4, row].Value = module.Alarm == AlarmLevel.Normal ? "정상" : "이상"; grid[4, row].Style.BackColor = UiTheme.ForAlarm(module.Alarm);
-            grid[5, row].Value = module.Status; grid[5, row].Style.BackColor = module.Connected ? UiTheme.Mint : UiTheme.Disabled;
+            grid[5, row].Value = module.Status; grid[5, row].Style.BackColor = module.Connected ? UiTheme.Mint : UiTheme.Disabled; grid[6, row].Value = module.Connected ? "상세정보" : "-";
         }
         var summary = SystemSummaryService.Create(snapshot);
         foreach (var item in summary.Values) SetSummary(item.Key, item.Value);

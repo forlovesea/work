@@ -13,24 +13,25 @@ public sealed class OperationRecordDialog : Form
     public OperationRecordDialog(OperationRecordService recorder, Func<MonitorSnapshot?> snapshotProvider)
     {
         _recorder = recorder; _snapshotProvider = snapshotProvider;
-        Text = "운전 데이터 기록 설정"; ClientSize = new Size(390, 555); FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; StartPosition = FormStartPosition.CenterParent;
+        Text = "운전 데이터 기록 설정"; ClientSize = new Size(450, 614); FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; StartPosition = FormStartPosition.CenterParent;
         var root = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(18), RowCount = 8 };
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 32)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 65)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 195)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 72)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 52)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 30)); root.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); Controls.Add(root);
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 195)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 96)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 64)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 34)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 44)); Controls.Add(root);
         root.Controls.Add(new Label { Text = "운전 데이터 기록 주기", Font = new Font("맑은 고딕", 11F, FontStyle.Bold), Dock = DockStyle.Fill });
-        var settings = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 2 }; settings.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 65)); settings.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        settings.Controls.Add(new Label { Text = "기록 간격", TextAlign = ContentAlignment.MiddleLeft }); settings.Controls.Add(new ComboBox { Dock = DockStyle.Fill, Items = { "1분", "5분", "10분", "30분", "60분" }, Text = "5분" });
-        settings.Controls.Add(new Label { Text = "기록 기간", TextAlign = ContentAlignment.MiddleLeft }); settings.Controls.Add(new NumericUpDown { Dock = DockStyle.Fill, Minimum = 1, Maximum = 3650, Value = 30 }); root.Controls.Add(settings);
+        var settings = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 2 }; settings.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 95)); settings.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        settings.Controls.Add(new Label { Text = "기록 간격", Dock = DockStyle.Fill, AutoSize = false, TextAlign = ContentAlignment.MiddleLeft }); settings.Controls.Add(new ComboBox { Dock = DockStyle.Fill, Items = { "1분", "5분", "10분", "30분", "60분" }, Text = "5분" });
+        settings.Controls.Add(new Label { Text = "기록 기간", Dock = DockStyle.Fill, AutoSize = false, TextAlign = ContentAlignment.MiddleLeft }); settings.Controls.Add(new NumericUpDown { Dock = DockStyle.Fill, Minimum = 1, Maximum = 3650, Value = 30 }); root.Controls.Add(settings);
         var title = new FlowLayoutPanel { Dock = DockStyle.Fill }; title.Controls.Add(new Label { Text = "Excel 기록 항목", Font = new Font("맑은 고딕", 10F, FontStyle.Bold), Width = 185 });
-        var all = UiTheme.Button("전체선택"); all.Width = 75; var clear = UiTheme.Button("전체해제"); clear.Width = 75; title.Controls.Add(all); title.Controls.Add(clear); root.Controls.Add(title);
+        var all = UiTheme.Button("전체선택"); all.Width = 90; var clear = UiTheme.Button("전체해제"); clear.Width = 90; title.Controls.Add(all); title.Controls.Add(clear); root.Controls.Add(title);
         var checks = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 7 };
         var boxes = OperationRecordService.FieldSpecs.Select(s => { var box = new CheckBox { Text = s.Label, Checked = true, AutoSize = true }; _fieldBoxes[s.Key] = box; return box; }).ToArray();
         for (var i = 0; i < boxes.Length; i++) checks.Controls.Add(boxes[i], i % 2, i / 2); all.Click += (_, _) => Array.ForEach(boxes, b => b.Checked = true); clear.Click += (_, _) => Array.ForEach(boxes, b => b.Checked = false);
         root.Controls.Add(checks);
-        root.Controls.Add(new Label { Text = $"저장 위치\n{Path.Combine(Environment.CurrentDirectory, "Operation data record")}", Dock = DockStyle.Fill, BackColor = Color.FromArgb(245, 249, 253), ForeColor = Color.SlateGray, Padding = new Padding(8) });
-        root.Controls.Add(new Label { Text = "예상 기록량: 86,400행 / 48열\n권장 최소 여유 공간: 138 MB", Dock = DockStyle.Fill, BackColor = Color.FromArgb(241, 247, 255), ForeColor = Color.RoyalBlue, BorderStyle = BorderStyle.FixedSingle, Padding = new Padding(8) });
-        _status.Text = "기록이 중지되어 있습니다."; _status.ForeColor = Color.Gray; _status.Dock = DockStyle.Fill; root.Controls.Add(_status);
-        var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill }; var start = UiTheme.Button("기록시작", Color.FromArgb(16, 164, 83)); start.Width = 75; var stop = UiTheme.Button("기록중지"); stop.Width = 75; stop.Enabled = false; var close = UiTheme.Button("닫기"); close.Width = 75; close.Margin = new Padding(110, 0, 0, 0); close.Click += (_, _) => Close(); buttons.Controls.AddRange([start, stop, close]); root.Controls.Add(buttons);
+        var recordPath = Path.Combine(Environment.CurrentDirectory, "Operation data record");
+        root.Controls.Add(new Label { Text = $"저장 위치\n{WrapPath(recordPath)}", Dock = DockStyle.Fill, BackColor = Color.FromArgb(245, 249, 253), ForeColor = Color.SlateGray, Padding = new Padding(8, 6, 8, 6), AutoSize = false, TextAlign = ContentAlignment.MiddleLeft });
+        root.Controls.Add(new Label { Text = "예상 기록량: 86,400행 / 48열\n권장 최소 여유 공간: 138 MB", Dock = DockStyle.Fill, BackColor = Color.FromArgb(241, 247, 255), ForeColor = Color.RoyalBlue, BorderStyle = BorderStyle.FixedSingle, Padding = new Padding(8, 7, 8, 7), TextAlign = ContentAlignment.MiddleLeft });
+        _status.Text = "기록이 중지되어 있습니다."; _status.ForeColor = Color.Gray; _status.Dock = DockStyle.Fill; _status.TextAlign = ContentAlignment.MiddleLeft; root.Controls.Add(_status);
+        var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(0, 3, 0, 4), Margin = Padding.Empty, WrapContents = false }; var start = UiTheme.Button("기록시작", Color.FromArgb(16, 164, 83)); start.Width = 90; start.Height = 30; var stop = UiTheme.Button("기록중지"); stop.Width = 90; stop.Height = 30; stop.Enabled = false; var close = UiTheme.Button("닫기"); close.Width = 90; close.Height = 30; close.Margin = new Padding(120, 3, 0, 3); close.Click += (_, _) => Close(); buttons.Controls.AddRange([start, stop, close]); root.Controls.Add(buttons);
         start.Click += (_, _) =>
         {
             if (_snapshotProvider()?.Connection != ConnectionState.Connected) { MessageBox.Show(this, "먼저 축전지 시스템에 접속해 주세요.", "기록 시작 불가", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
@@ -43,6 +44,17 @@ public sealed class OperationRecordDialog : Form
         FormClosed += (_, _) => { _statusTimer.Stop(); _recorder.FileSaved -= OnSaved; _recorder.Error -= OnError; };
     }
     private void UpdateState(Button start, Button stop, IEnumerable<CheckBox> boxes) { start.Enabled = !_recorder.IsRecording; stop.Enabled = _recorder.IsRecording; foreach (var box in boxes) box.Enabled = !_recorder.IsRecording; UpdateStatus(); }
+    private static string WrapPath(string path, int maximumLineLength = 42)
+    {
+        var parts = path.Split(Path.DirectorySeparatorChar); var lines = new List<string>(); var current = "";
+        foreach (var part in parts)
+        {
+            var candidate = current.Length == 0 ? part : $"{current}/{part}";
+            if (current.Length > 0 && candidate.Length > maximumLineLength) { lines.Add(current + "/"); current = part; }
+            else current = candidate;
+        }
+        if (current.Length > 0) lines.Add(current); return string.Join(Environment.NewLine, lines);
+    }
     private void UpdateStatus() { _status.Text = _recorder.IsRecording ? $"● 기록 중 · 종료 {_recorder.EndsAt:MM.dd HH:mm}" : "기록이 중지되어 있습니다."; _status.ForeColor = _recorder.IsRecording ? Color.Green : Color.Gray; }
     private void OnSaved(object? sender, string path) { if (!IsDisposed) BeginInvoke(() => { _status.Text = $"● {DateTime.Now:HH:mm:ss} 저장 완료"; _status.Tag = path; }); }
     private void OnError(object? sender, string message) { if (!IsDisposed) BeginInvoke(() => { _status.Text = message; _status.ForeColor = Color.Red; }); }
@@ -78,14 +90,63 @@ public sealed class AllModulesDialog : Form
     public AllModulesDialog(IReadOnlyList<ModuleState> modules)
     {
         _modules = modules; Text = "전체 모듈 상세정보"; WindowState = FormWindowState.Maximized; MinimumSize = new Size(1000, 520);
-        var root = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(10), RowCount = 3 }; root.RowStyles.Add(new RowStyle(SizeType.Absolute, 35)); root.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 38)); Controls.Add(root);
-        root.Controls.Add(new Label { Text = $"전체 모듈 상세정보                                      업데이트: {DateTime.Now:yyyy-MM-dd HH:mm:ss}\n※ 셀 전압: 최고 초록 / 최저 빨강   ※ 온도: 최고 60℃ 이상", Dock = DockStyle.Fill, Font = new Font("맑은 고딕", 9F, FontStyle.Bold) });
+        var root = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(10), RowCount = 4 }; root.RowStyles.Add(new RowStyle(SizeType.Absolute, 28)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 30)); root.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 38)); Controls.Add(root);
+        var heading = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2 }; heading.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50)); heading.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        heading.Controls.Add(new Label { Text = "전체 모듈 상세정보", Dock = DockStyle.Fill, Font = new Font("맑은 고딕", 11F, FontStyle.Bold), TextAlign = ContentAlignment.MiddleLeft });
+        heading.Controls.Add(new Label { Text = $"업데이트: {DateTime.Now:yyyy-MM-dd HH:mm:ss}", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleRight }); root.Controls.Add(heading);
+        var legend = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
+        legend.Controls.Add(new Label { Text = "셀 전압:", AutoSize = true, Margin = new Padding(0, 6, 3, 0) });
+        legend.Controls.Add(LegendLabel(" 최고 ", Color.FromArgb(211, 249, 216), Color.Black));
+        legend.Controls.Add(LegendLabel(" 최저 ", Color.FromArgb(255, 227, 227), Color.Black));
+        legend.Controls.Add(new Label { Text = "   셀 온도:", AutoSize = true, Margin = new Padding(8, 6, 3, 0) });
+        legend.Controls.Add(LegendLabel(" 최고 ", Color.FromArgb(255, 249, 196), Color.Black));
+        legend.Controls.Add(LegendLabel(" 60℃ 이상 ", Color.FromArgb(255, 77, 77), Color.White)); root.Controls.Add(legend);
         var grid = new DataGridView { Dock = DockStyle.Fill, ReadOnly = true }; UiTheme.ConfigureGrid(grid);
         var headers = new List<string> { "모듈", "SW버전", "Equip ID", "모델", "바코드", "전압[V]", "전류[A]", "상태", "SOC[%]", "SOH[%]" }; headers.AddRange(Enumerable.Range(1, 15).Select(n => $"셀{n} 전압[V]")); headers.AddRange(Enumerable.Range(1, 15).Select(n => $"셀{n} 온도[℃]"));
-        foreach (var h in headers) grid.Columns.Add(h, h); grid.ColumnHeadersHeight = 34;
-        foreach (var m in _modules) { var row = new List<object?> { $"#{m.Number:00}", m.SoftwareVersion, m.EquipmentId, m.Model, m.Barcode, m.Voltage, m.Current, m.Status, m.Soc, m.Soh }; row.AddRange(m.CellVoltages.Cast<object?>()); row.AddRange(m.CellTemperatures.Cast<object?>()); grid.Rows.Add(row.ToArray()); }
+        foreach (var h in headers) grid.Columns.Add(h, h);
+        grid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing; grid.ColumnHeadersHeight = 38;
+        grid.ColumnHeadersDefaultCellStyle.WrapMode = DataGridViewTriState.False; grid.DefaultCellStyle.WrapMode = DataGridViewTriState.False;
+        grid.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.None; grid.RowTemplate.Height = 26; grid.ScrollBars = ScrollBars.Both;
+        grid.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(248, 248, 248);
+        for (var column = 0; column < grid.Columns.Count; column++)
+        {
+            grid.Columns[column].AutoSizeMode = DataGridViewAutoSizeColumnMode.None;
+            grid.Columns[column].Width = column switch
+            {
+                0 => 70,
+                1 => 95,
+                2 => 110,
+                3 => 115,
+                4 => 180,
+                5 or 6 => 90,
+                7 => 105,
+                8 or 9 => 80,
+                >= 10 and < 25 => 108,
+                _ => 108
+            };
+            grid.Columns[column].HeaderCell.Style.BackColor = column < 10 ? Color.FromArgb(231, 241, 255) : column < 25 ? Color.FromArgb(220, 238, 255) : Color.FromArgb(255, 231, 209);
+        }
+        foreach (var m in _modules)
+        {
+            var rowValues = new List<object?> { $"#{m.Number:00}", m.SoftwareVersion, m.EquipmentId, m.Model, m.Barcode, m.Voltage, m.Current, m.Status, m.Soc, m.Soh }; rowValues.AddRange(m.CellVoltages.Cast<object?>()); rowValues.AddRange(m.CellTemperatures.Cast<object?>());
+            var row = grid.Rows.Add(rowValues.ToArray());
+            var voltages = m.CellVoltages.Where(value => value.HasValue).Select(value => value!.Value).ToArray();
+            var temperatures = m.CellTemperatures.Where(value => value.HasValue).Select(value => value!.Value).ToArray();
+            double? maximumVoltage = voltages.Length == 0 ? null : voltages.Max(), minimumVoltage = voltages.Length == 0 ? null : voltages.Min(), maximumTemperature = temperatures.Length == 0 ? null : temperatures.Max();
+            for (var index = 0; index < 15; index++)
+            {
+                var voltageCell = grid[10 + index, row]; voltageCell.Style.BackColor = Color.FromArgb(238, 246, 255);
+                if (maximumVoltage.HasValue && m.CellVoltages[index] == maximumVoltage) voltageCell.Style.BackColor = Color.FromArgb(211, 249, 216);
+                else if (minimumVoltage.HasValue && m.CellVoltages[index] == minimumVoltage) voltageCell.Style.BackColor = Color.FromArgb(255, 227, 227);
+                var temperatureCell = grid[25 + index, row]; temperatureCell.Style.BackColor = Color.FromArgb(255, 247, 237);
+                if (m.CellTemperatures[index] >= 60) { temperatureCell.Style.BackColor = Color.FromArgb(255, 77, 77); temperatureCell.Style.ForeColor = Color.White; }
+                else if (maximumTemperature.HasValue && m.CellTemperatures[index] == maximumTemperature) temperatureCell.Style.BackColor = Color.FromArgb(255, 249, 196);
+            }
+        }
         root.Controls.Add(grid); var ok = UiTheme.Button("OK"); ok.Width = 75; ok.Anchor = AnchorStyles.Right; ok.Click += (_, _) => Close(); root.Controls.Add(ok);
     }
+
+    private static Label LegendLabel(string text, Color background, Color foreground) => new() { Text = text, AutoSize = true, BackColor = background, ForeColor = foreground, Margin = new Padding(0, 4, 4, 0), Padding = new Padding(2) };
 }
 
 public sealed class ModuleDetailDialog : Form

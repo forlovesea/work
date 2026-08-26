@@ -19,6 +19,7 @@ public sealed class Profile
     public int LocalTrapPort { get; set; }
     public int[] ModuleOrder { get; set; } = Enumerable.Range(1, 10).ToArray();
     public Dictionary<int, string> ModuleBarcodes { get; } = [];
+    public Dictionary<int, string> EpoCutoffTimes { get; } = [];
     public int AlarmVolume { get; set; }
     public Dictionary<int, bool> AlarmLevels { get; } = new() { [1] = true, [2] = true, [3] = true, [4] = false, [255] = false };
 }

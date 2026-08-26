@@ -23,8 +23,11 @@ public sealed class SlaveCoordinator : IAsyncDisposable
     public int StartSlave(string targetIp, int requestedPort, string profile, string system, CancellationToken token)
     {
         Stop(); _cts = CancellationTokenSource.CreateLinkedTokenSource(token); _targetIp = targetIp; _profile = Path.GetFileName(profile); _system = system;
-        _localPort = requestedPort is >= MinLocalPort and <= MaxLocalPort ? requestedPort : FindAvailablePort(); _localTrapSocket = new UdpClient(new IPEndPoint(IPAddress.Loopback, _localPort)); _receiveTask = ReceiveForwardedTrapsAsync(_cts.Token);
-        SendRegistration("register"); _heartbeat = new System.Threading.Timer(_ => SendRegistration("heartbeat"), null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5)); return _localPort;
+        _localPort = requestedPort is >= MinLocalPort and <= MaxLocalPort && IsPortAvailable(requestedPort) ? requestedPort : FindAvailablePort();
+        _localTrapSocket = new UdpClient(new IPEndPoint(IPAddress.Loopback, _localPort)); _receiveTask = ReceiveForwardedTrapsAsync(_cts.Token);
+        SendRegistration("register");
+        _heartbeat = new System.Threading.Timer(_ => SendRegistration("heartbeat"), null, TimeSpan.FromMilliseconds(500), TimeSpan.FromSeconds(5));
+        return _localPort;
     }
     public async Task<IReadOnlyList<string>> ForwardAsync(IReadOnlyDictionary<string, string> trap)
     {
@@ -40,11 +43,24 @@ public sealed class SlaveCoordinator : IAsyncDisposable
             var type = Text(message, "type"); var profile = Path.GetFileName(Text(message, "profile")); var ip = Text(message, "ip"); var system = Text(message, "system"); var port = Number(message, "port");
             if (profile.Length == 0 || ip.Length == 0 || port is < MinLocalPort or > MaxLocalPort || type is not ("register" or "heartbeat" or "unregister")) continue;
             lock (_gate) { if (type == "unregister") _registry.Remove(profile); else _registry[profile] = new SlaveStatus(profile, ip, port, system, DateTime.UtcNow); }
-        } catch (OperationCanceledException) when (token.IsCancellationRequested) { break; } catch (SocketException) when (token.IsCancellationRequested) { break; }
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { break; }
+        catch (SocketException) when (token.IsCancellationRequested) { break; }
+        catch (SocketException) { await Task.Delay(250, token); }
+        catch (JsonException) { }
     }
     private async Task ReceiveForwardedTrapsAsync(CancellationToken token)
     {
-        while (!token.IsCancellationRequested) try { var result = await _localTrapSocket!.ReceiveAsync(token); var trap = JsonSerializer.Deserialize<Dictionary<string, string>>(result.Buffer); if (trap is not null) ForwardedTrapReceived?.Invoke(this, trap); } catch (OperationCanceledException) when (token.IsCancellationRequested) { break; } catch (SocketException) when (token.IsCancellationRequested) { break; } catch (JsonException) { }
+        while (!token.IsCancellationRequested) try
+        {
+            var result = await _localTrapSocket!.ReceiveAsync(token);
+            var trap = JsonSerializer.Deserialize<Dictionary<string, string>>(result.Buffer);
+            if (trap is not null && trap.ContainsKey("_source_ip")) ForwardedTrapReceived?.Invoke(this, trap);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { break; }
+        catch (SocketException) when (token.IsCancellationRequested) { break; }
+        catch (SocketException) { await Task.Delay(250, token); }
+        catch (JsonException) { }
     }
     private void SendRegistration(string type)
     {
@@ -53,7 +69,8 @@ public sealed class SlaveCoordinator : IAsyncDisposable
     private static string Text(IReadOnlyDictionary<string, JsonElement> data, string key) => data.TryGetValue(key, out var value) ? value.ToString() : "";
     private static int Number(IReadOnlyDictionary<string, JsonElement> data, string key) => data.TryGetValue(key, out var value) && value.TryGetInt32(out var number) ? number : 0;
     private static string NormalizeIp(string value) { if (value.StartsWith("::ffff:", StringComparison.OrdinalIgnoreCase)) value = value[7..]; var colon = value.IndexOf(':'); return colon > 0 ? value[..colon] : value; }
-    private static int FindAvailablePort() { var ports = Enumerable.Range(MinLocalPort, MaxLocalPort - MinLocalPort + 1).OrderBy(_ => Random.Shared.Next()); foreach (var port in ports) try { using var udp = new UdpClient(new IPEndPoint(IPAddress.Loopback, port)); return port; } catch (SocketException) { } throw new IOException("51000~52000 범위에 사용 가능한 UDP 포트가 없습니다."); }
+    private static bool IsPortAvailable(int port) { try { using var udp = new UdpClient(new IPEndPoint(IPAddress.Loopback, port)); return true; } catch (SocketException) { return false; } }
+    private static int FindAvailablePort() { var ports = Enumerable.Range(MinLocalPort, MaxLocalPort - MinLocalPort + 1).OrderBy(_ => Random.Shared.Next()); foreach (var port in ports) if (IsPortAvailable(port)) return port; throw new IOException("51000~52000 범위에 사용 가능한 UDP 포트가 없습니다."); }
     public void Stop() { if (_localPort > 0) SendRegistration("unregister"); _heartbeat?.Dispose(); _heartbeat = null; _cts?.Cancel(); _registrationSocket?.Dispose(); _localTrapSocket?.Dispose(); _registrationSocket = null; _localTrapSocket = null; _cts?.Dispose(); _cts = null; _localPort = 0; }
     public ValueTask DisposeAsync() { Stop(); return ValueTask.CompletedTask; }
 }

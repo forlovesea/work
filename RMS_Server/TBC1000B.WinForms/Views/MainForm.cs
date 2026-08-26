@@ -58,6 +58,8 @@ public sealed class MainForm : Form
     private IReadOnlyList<ModuleState> _modules = Enumerable.Range(1, 10).Select(n => new ModuleState { Number = n }).ToList();
     private MonitorSnapshot? _latestSnapshot;
     private bool _slaveStarted;
+    private bool _ownsMasterMarker;
+    private readonly string _masterMarkerPath;
     private bool _fullEpoOperationActive;
     private bool _timeoutWarningShown, _timeoutDisconnectedShown;
     private readonly HashSet<string> _dismissedFaults = new(StringComparer.OrdinalIgnoreCase);
@@ -69,12 +71,23 @@ public sealed class MainForm : Form
         _mode = mode;
         _profile = profile;
         _profileStore = new ProfileStore(Path.GetDirectoryName(profile.FilePath)!);
+        _masterMarkerPath = Path.Combine(Path.GetDirectoryName(profile.FilePath)!, "master_profile.txt");
         _operationRecorder = new OperationRecordService(Path.Combine(Environment.CurrentDirectory, "Operation data record"));
         _trapLogger = new TrapLogService(Path.Combine(Environment.CurrentDirectory, "Trap logs"), profile.FilePath);
         var alarmPath = Path.Combine(AppContext.BaseDirectory, "Assets", "alarm.wav"); if (File.Exists(alarmPath)) _alarmPlayer = new SoundPlayer(alarmPath);
         _operationRecorder.Error += (_, message) => BeginInvoke(() => MessageBox.Show(this, message, "운전 데이터 기록 오류", MessageBoxButtons.OK, MessageBoxIcon.Error));
         _service = service ?? new SnmpMonitorService();
-        Text = $"TBC1000B-NDA1/IoT Gateway Battery Monitoring System(Base SNMPv2) v3.2.4  ({mode.ToUpperInvariant()})";
+        if (_mode.Equals("Master", StringComparison.OrdinalIgnoreCase))
+        {
+            try { _slaveCoordinator.StartMaster(_lifetime.Token); File.WriteAllText(_masterMarkerPath, Path.GetFullPath(_profile.FilePath)); _ownsMasterMarker = true; }
+            catch (Exception ex) when (ex is SocketException or IOException or UnauthorizedAccessException)
+            {
+                _slaveCoordinator.Stop(); _mode = "Slave";
+                MessageBox.Show(this, $"Master 등록을 시작할 수 없어 Slave 모드로 전환합니다.\n{ex.Message}", "Master 시작 오류", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+        var version = typeof(MainForm).Assembly.GetName().Version?.ToString(3) ?? "3.2.4";
+        Text = $"TBC1000B-NDA1/IoT Gateway Battery Monitoring System(Base SNMPv2) v{version}  ({_mode.ToUpperInvariant()})";
         Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
         StartPosition = FormStartPosition.CenterScreen;
         WindowState = FormWindowState.Maximized;
@@ -89,10 +102,6 @@ public sealed class MainForm : Form
         _service.RawTrapReceived += async (_, trap) => { if (_mode.Equals("Master", StringComparison.OrdinalIgnoreCase)) await _slaveCoordinator.ForwardAsync(trap); };
         _service.TrapListenerFailed += (_, error) => BeginInvoke(() => ShowTrapListenerFailure(error));
         _slaveCoordinator.ForwardedTrapReceived += (_, trap) => OnTrapReceived(this, TrapDataParser.Parse(trap));
-        if (_mode.Equals("Master", StringComparison.OrdinalIgnoreCase))
-        {
-            try { _slaveCoordinator.StartMaster(_lifetime.Token); } catch (SocketException ex) { MessageBox.Show(this, $"Master 등록 포트 UDP 50000을 열 수 없습니다.\n{ex.Message}", "Master 시작 오류", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
-        }
         _connect.Click += ToggleConnectionAsync;
         _resourceTimer.Tick += (_, _) => UpdateResourceLabel();
         _resourceTimer.Start();
@@ -105,7 +114,10 @@ public sealed class MainForm : Form
     private void ApplyProfile()
     {
         _ip.Text = _profile.Address; _port.Text = _profile.Port.ToString(); _get.Text = _profile.GetCommunity;
-        _set.Text = _profile.SetCommunity; _trap.Text = _profile.TrapCommunity; _trapPort.Text = _profile.TrapPort.ToString();
+        _set.Text = _profile.SetCommunity; _trap.Text = _profile.TrapCommunity;
+        _trapPort.Text = _mode.Equals("Slave", StringComparison.OrdinalIgnoreCase)
+            ? (_profile.LocalTrapPort is >= SlaveCoordinator.MinLocalPort and <= SlaveCoordinator.MaxLocalPort ? _profile.LocalTrapPort : 0).ToString()
+            : _profile.TrapPort.ToString();
     }
 
     private void BuildUi()
@@ -437,13 +449,22 @@ public sealed class MainForm : Form
         try
         {
             if (_connect.Text == "접속종료") { CloseConnectionProgress(); _connect.Enabled = false; await _service.DisconnectAsync(); _connect.Enabled = true; ShowAutoCloseMessage("접속 종료", "축전지 시스템 연결 종료."); return; }
-            if (!int.TryParse(_port.Text, out var snmpPort) || snmpPort is < 1 or > 65535 || !int.TryParse(_trapPort.Text, out var trapPort) || trapPort is < 1 or > 65535) { MessageBox.Show(this, "SNMP Port와 TRAP Port는 1~65535 범위의 숫자로 입력하세요.", "포트 입력 오류", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            var isSlave = _mode.Equals("Slave", StringComparison.OrdinalIgnoreCase);
+            if (!int.TryParse(_port.Text, out var snmpPort) || snmpPort is < 1 or > 65535 ||
+                !int.TryParse(_trapPort.Text, out var trapPort) || (isSlave ? trapPort is < 0 or > 65535 : trapPort is < 1 or > 65535))
+            {
+                MessageBox.Show(this, isSlave
+                    ? "SNMP Port는 1~65535, Slave TRAP Port는 0(자동 할당) 또는 1~65535 범위의 숫자로 입력하세요."
+                    : "SNMP Port와 TRAP Port는 1~65535 범위의 숫자로 입력하세요.", "포트 입력 오류", MessageBoxButtons.OK, MessageBoxIcon.Warning); return;
+            }
             var options = new ConnectionOptions(_ip.Text.Trim(), snmpPort, _get.Text, _set.Text, _trap.Text, trapPort, _mode.Equals("Master", StringComparison.OrdinalIgnoreCase));
             ShowConnectionProgress($"1/3  SNMP 접속 시험 중...\r\n\r\n대상: {options.Address}:{options.Port}/UDP\r\n장비의 응답을 기다리고 있습니다."); _connect.Enabled = false; _connect.Text = "접속시험중";
             await _service.ConnectAsync(options, _lifetime.Token);
             UpdateConnectionProgress("2/3  SNMP 접속 성공\r\n\r\n3/3  축전지 시스템 정보를 수신 중입니다...\r\n초기 정보 수신이 끝나면 이 창은 자동으로 닫힙니다."); _connect.Enabled = true; _connect.Text = "접속종료";
             _profile.Address = options.Address; _profile.Port = options.Port; _profile.GetCommunity = options.GetCommunity; _profile.SetCommunity = options.SetCommunity;
-            _profile.TrapCommunity = options.TrapCommunity; _profile.TrapPort = options.TrapPort; _profileStore.Save(_profile);
+            _profile.TrapCommunity = options.TrapCommunity;
+            if (!isSlave) _profile.TrapPort = options.TrapPort;
+            _profileStore.Save(_profile);
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
         catch (Exception ex) { CloseConnectionProgress(); _connect.Enabled = true; _connect.Text = "접속시작"; ShowSnmpConnectionFailure(ex.Message); }
@@ -652,11 +673,25 @@ public sealed class MainForm : Form
 
     private async void OnFormClosingAsync(object? sender, FormClosingEventArgs e)
     {
+        RemoveOwnedMasterMarker();
         _lifetime.Cancel(); _resourceTimer.Stop(); _alarmBlinkTimer.Stop();
         await _service.DisconnectAsync(); await _service.DisposeAsync(); _lifetime.Dispose();
         await _operationRecorder.DisposeAsync();
         await _slaveCoordinator.DisposeAsync();
         _alarmPlayer?.Stop(); _alarmPlayer?.Dispose(); _alarmBlinkTimer.Dispose();
+    }
+
+    private void RemoveOwnedMasterMarker()
+    {
+        if (!_ownsMasterMarker) return;
+        try
+        {
+            var markedProfile = File.Exists(_masterMarkerPath) ? File.ReadAllText(_masterMarkerPath).Trim() : "";
+            if (markedProfile.Length > 0 && Path.GetFullPath(markedProfile).Equals(Path.GetFullPath(_profile.FilePath), StringComparison.OrdinalIgnoreCase)) File.Delete(_masterMarkerPath);
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+        finally { _ownsMasterMarker = false; }
     }
 }
 

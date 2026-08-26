@@ -8,12 +8,17 @@ public sealed class ProfileDialog : Form
     private readonly ListBox _profiles = new();
     private readonly ComboBox _mode = new();
     private readonly ProfileStore _store;
+    private readonly string? _masterProfilePath;
+    private readonly bool _forcedSlave;
     public string SelectedMode => _mode.SelectedItem?.ToString() ?? "Master";
     public Profile SelectedProfile { get; private set; } = null!;
 
-    public ProfileDialog()
+    public ProfileDialog(string? profileDirectory = null, bool forcedSlave = false)
     {
-        _store = new ProfileStore(Path.Combine(Environment.CurrentDirectory, "profiles"));
+        var directory = profileDirectory ?? Path.Combine(Environment.CurrentDirectory, "profiles");
+        _store = new ProfileStore(directory);
+        _masterProfilePath = ReadMasterProfilePath(directory);
+        _forcedSlave = forcedSlave || _masterProfilePath is not null;
         Text = "프로파일 선택";
         ClientSize = new Size(278, 374);
         FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -41,7 +46,8 @@ public sealed class ProfileDialog : Form
         _mode.Dock = DockStyle.Fill;
         _mode.DropDownStyle = ComboBoxStyle.DropDownList;
         _mode.Items.AddRange(["Master", "Slave"]);
-        _mode.SelectedIndex = 0;
+        _mode.SelectedItem = _forcedSlave ? "Slave" : "Master";
+        _mode.Enabled = !_forcedSlave;
         modePanel.Controls.Add(_mode);
         root.Controls.Add(modePanel, 0, 2);
 
@@ -60,11 +66,12 @@ public sealed class ProfileDialog : Form
         ok.Click += (_, e) => { if (!SelectProfile()) DialogResult = DialogResult.None; };
         _profiles.DoubleClick += (_, _) => { if (SelectProfile()) { DialogResult = DialogResult.OK; Close(); } };
         AcceptButton = ok; CancelButton = cancel;
+        if (_forcedSlave) Shown += (_, _) => ShowForcedSlaveNotice();
     }
 
     private void ReloadProfiles()
     {
-        _profiles.Items.Clear(); foreach (var path in _store.ListProfiles()) _profiles.Items.Add(new ProfileItem(path)); if (_profiles.Items.Count > 0) _profiles.SelectedIndex = 0;
+        _profiles.Items.Clear(); foreach (var path in _store.ListProfiles()) if (!SamePath(path, _masterProfilePath)) _profiles.Items.Add(new ProfileItem(path)); if (_profiles.Items.Count > 0) _profiles.SelectedIndex = 0;
     }
     private bool SelectProfile()
     {
@@ -78,6 +85,19 @@ public sealed class ProfileDialog : Form
     private void DeleteProfile()
     {
         if (_profiles.SelectedItem is not ProfileItem item) return; if (MessageBox.Show(this, $"{item} 프로파일을 삭제합니까?", "삭제", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return; _store.Delete(item.Path); ReloadProfiles();
+    }
+    private static string? ReadMasterProfilePath(string directory)
+    {
+        try { var marker = Path.Combine(directory, "master_profile.txt"); var path = File.Exists(marker) ? File.ReadAllText(marker).Trim() : ""; return path.Length > 0 ? Path.GetFullPath(path) : null; }
+        catch (IOException) { return null; }
+        catch (UnauthorizedAccessException) { return null; }
+    }
+    private static bool SamePath(string path, string? other) => other is not null && Path.GetFullPath(path).Equals(Path.GetFullPath(other), StringComparison.OrdinalIgnoreCase);
+    private void ShowForcedSlaveNotice()
+    {
+        using var notice = new Form { Text = "안내", StartPosition = FormStartPosition.CenterParent, FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false, ShowInTaskbar = false, ClientSize = new Size(340, 115), Font = Font };
+        notice.Controls.Add(new Label { Text = "이미 Master가 실행 중입니다.\r\nSlave 모드로 실행됩니다.", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter });
+        var timer = new System.Windows.Forms.Timer { Interval = 3000 }; timer.Tick += (_, _) => { timer.Stop(); notice.Close(); }; notice.FormClosed += (_, _) => timer.Dispose(); timer.Start(); notice.ShowDialog(this);
     }
     private sealed record ProfileItem(string Path) { public override string ToString() => System.IO.Path.GetFileName(Path); }
 }

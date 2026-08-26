@@ -5,9 +5,10 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <VersionPrefix>3.2.4</VersionPrefix>
     <ApplicationIcon>..\battery#2.ico</ApplicationIcon>
     <RootNamespace>TBC1000B.WinForms</RootNamespace>
-    <AssemblyName>TBC1000B_Monitor</AssemblyName>
+    <AssemblyName>TBC1000B_Monitor_v$(VersionPrefix)</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
     <Content Include="skt_logo.png" Link="Assets\skt_logo.png" CopyToOutputDirectory="PreserveNewest" />

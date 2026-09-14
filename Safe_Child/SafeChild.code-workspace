@@ -1,0 +1,8 @@
+{
+  "folders": [
+    { "name": "SafeChild", "path": "." }
+  ],
+  "settings": {
+    "dotnet.defaultSolution": "SafeChild.sln"
+  }
+}

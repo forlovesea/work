@@ -1,0 +1,27 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build",
+      "type": "process",
+      "command": "${env:ProgramFiles}/dotnet/dotnet.exe",
+      "args": ["build", "${workspaceFolder}/SafeChild.csproj", "--configuration", "Debug"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": "$msCompile",
+      "group": { "kind": "build", "isDefault": true }
+    },
+    {
+      "label": "run (administrator)",
+      "type": "process",
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-Command",
+        "Start-Process -FilePath './bin/Debug/net8.0-windows/SafeChild.exe' -Verb RunAs -Wait"
+      ],
+      "options": { "cwd": "${workspaceFolder}" },
+      "dependsOn": "build",
+      "problemMatcher": []
+    }
+  ]
+}

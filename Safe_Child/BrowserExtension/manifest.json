@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "SafeChild 전달 메시지",
+  "version": "1.0.0",
+  "description": "차단된 사이트 접속 시 PC의 SafeChild 앱에 보호자의 메시지 표시를 요청합니다.",
+  "minimum_chrome_version": "116",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtcvPermTEVSxIaigtxRBtwqWRgHKmqppnxbsoEKTZL6wL1oUg4QID56X6vTHfGIUvSHu5Ivte27Qc9k+d3pE0KRuxj5JRlel2zNPUcZRMonBqLUUjaHMa9lDDuTmyogs5F0eR05x90mfZA5sq8MdBs+EkDPcmtygGzY8tIfNDU9Nbopefa20Qg8ifUC2y0Qjpf18upfZnG71+RPS68K6dcAqbzelsRu/8p7oBY3lO7IC1rXGrAabmLaz0u4ojvgODUM5KGYmG4yEyaSGnY3FHQflV1KbkWdOvoiLP9wLKOMLG5d1dEVPD+NX02UD7nmxHp9RYihocEN8y7P1pRPvHwIDAQAB",
+  "permissions": ["webNavigation", "alarms"],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "background": { "service_worker": "background.js" },
+  "content_security_policy": { "extension_pages": "script-src 'self'; object-src 'self'; connect-src ws://127.0.0.1:47832" }
+}

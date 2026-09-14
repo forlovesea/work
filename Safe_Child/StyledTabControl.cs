@@ -16,8 +16,6 @@ internal sealed class StyledTabControl : TabControl
         Color.FromArgb(191, 219, 254), Color.FromArgb(153, 246, 228),
         Color.FromArgb(221, 214, 254), Color.FromArgb(186, 230, 253), Color.FromArgb(253, 230, 138), Color.FromArgb(254, 205, 211)
     ];
-    private int _hovered = -1;
-
     public StyledTabControl()
     {
         Appearance = TabAppearance.Normal;
@@ -42,16 +40,6 @@ internal sealed class StyledTabControl : TabControl
     protected override void OnDpiChangedAfterParent(EventArgs e) { base.OnDpiChangedAfterParent(e); UpdateTabSize(); }
     protected override void OnSelectedIndexChanged(EventArgs e) { base.OnSelectedIndexChanged(e); Invalidate(); }
     protected override bool ShowFocusCues => false;
-    protected override void OnMouseMove(MouseEventArgs e)
-    {
-        base.OnMouseMove(e);
-        var hovered = -1;
-        for (var i = 0; i < TabCount; i++) if (GetTabRect(i).Contains(e.Location)) { hovered = i; break; }
-        if (_hovered == hovered) return;
-        _hovered = hovered; Invalidate();
-    }
-    protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); _hovered = -1; Invalidate(); }
-
     protected override void OnDrawItem(DrawItemEventArgs e)
     {
         if (e.Index < 0 || e.Index >= TabCount) return;
@@ -103,11 +91,6 @@ internal sealed class StyledTabControl : TabControl
         graphics.SmoothingMode = SmoothingMode.AntiAlias;
         using var fill = new SolidBrush(selected ? accent : tint);
         graphics.FillPath(fill, shape);
-        if (!selected && index == _hovered)
-        {
-            using var hoverFill = new SolidBrush(ControlPaint.Light(tint, 0.16f));
-            graphics.FillPath(hoverFill, shape);
-        }
         var textBounds = card;
         if (selected)
         {

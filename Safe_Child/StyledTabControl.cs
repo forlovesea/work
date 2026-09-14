@@ -18,9 +18,10 @@ internal sealed class StyledTabControl : TabControl
 
     public StyledTabControl()
     {
-        Appearance = TabAppearance.FlatButtons;
+        Appearance = TabAppearance.Normal;
         DrawMode = TabDrawMode.OwnerDrawFixed;
         SizeMode = TabSizeMode.Fixed;
+        SetStyle(ControlStyles.ResizeRedraw | ControlStyles.OptimizedDoubleBuffer, true);
         UpdateTabSize();
     }
 
@@ -31,7 +32,7 @@ internal sealed class StyledTabControl : TabControl
         using var selectedFont = new Font(Font, FontStyle.Bold);
         foreach (TabPage page in TabPages)
             width = Math.Max(width, TextRenderer.MeasureText(page.Text, selectedFont).Width + (int)(48 * scale));
-        ItemSize = new Size(width, selectedFont.Height + (int)Math.Ceiling(12 * scale));
+        ItemSize = new Size(width, selectedFont.Height + (int)Math.Ceiling(22 * scale));
     }
 
     protected override void OnControlAdded(ControlEventArgs e) { base.OnControlAdded(e); UpdateTabSize(); }
@@ -57,8 +58,8 @@ internal sealed class StyledTabControl : TabControl
         var scale = DeviceDpi / 96f;
         var bounds = GetTabRect(e.Index);
         using var backdrop = new SolidBrush(SystemColors.Control);
-        e.Graphics.FillRectangle(backdrop, Rectangle.Inflate(bounds, 2, 2));
-        var card = Rectangle.Inflate(bounds, -(int)(3 * scale), -(int)(3 * scale));
+        e.Graphics.FillRectangle(backdrop, Rectangle.Inflate(bounds, (int)Math.Ceiling(4 * scale), (int)Math.Ceiling(4 * scale)));
+        var card = Rectangle.Inflate(bounds, -(int)(3 * scale), -(int)(4 * scale));
         var radius = Math.Min(10 * scale, card.Height / 2f);
         using var shape = new GraphicsPath();
         var diameter = radius * 2;
@@ -72,11 +73,28 @@ internal sealed class StyledTabControl : TabControl
         e.Graphics.FillPath(fill, shape);
         if (!selected && e.Index == _hovered)
         {
-            using var border = new Pen(accent, 1.2f * scale);
-            e.Graphics.DrawPath(border, shape);
+            using var hoverFill = new SolidBrush(ControlPaint.Light(tint, 0.16f));
+            e.Graphics.FillPath(hoverFill, shape);
+        }
+        var textBounds = card;
+        if (selected)
+        {
+            var arrowWidth = 9 * scale;
+            var arrowHeight = 6 * scale;
+            var centerX = card.Left + (card.Width / 2f);
+            var top = card.Top + (4 * scale);
+            PointF[] arrow =
+            [
+                new(centerX - (arrowWidth / 2f), top),
+                new(centerX + (arrowWidth / 2f), top),
+                new(centerX, top + arrowHeight)
+            ];
+            using var arrowBrush = new SolidBrush(Color.White);
+            e.Graphics.FillPolygon(arrowBrush, arrow);
+            textBounds = new Rectangle(card.Left, card.Top + (int)Math.Ceiling(8 * scale), card.Width, card.Height - (int)Math.Ceiling(8 * scale));
         }
         using var font = new Font(Font, selected ? FontStyle.Bold : FontStyle.Regular);
-        TextRenderer.DrawText(e.Graphics, TabPages[e.Index].Text, font, card,
+        TextRenderer.DrawText(e.Graphics, TabPages[e.Index].Text, font, textBounds,
             selected ? Color.White : accent, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
         if (selected && Focused && ShowFocusCues)
             ControlPaint.DrawFocusRectangle(e.Graphics, Rectangle.Inflate(card, -(int)(6 * scale), -(int)(6 * scale)), Color.White, accent);

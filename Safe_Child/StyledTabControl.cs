@@ -4,6 +4,8 @@ namespace SafeChild;
 
 internal sealed class StyledTabControl : TabControl
 {
+    private const int WmPaint = 0x000F;
+
     private readonly Color[] _accents =
     [
         Color.FromArgb(30, 58, 138), Color.FromArgb(17, 94, 89),
@@ -39,6 +41,7 @@ internal sealed class StyledTabControl : TabControl
     protected override void OnFontChanged(EventArgs e) { base.OnFontChanged(e); UpdateTabSize(); }
     protected override void OnDpiChangedAfterParent(EventArgs e) { base.OnDpiChangedAfterParent(e); UpdateTabSize(); }
     protected override void OnSelectedIndexChanged(EventArgs e) { base.OnSelectedIndexChanged(e); Invalidate(); }
+    protected override bool ShowFocusCues => false;
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
@@ -52,13 +55,37 @@ internal sealed class StyledTabControl : TabControl
     protected override void OnDrawItem(DrawItemEventArgs e)
     {
         if (e.Index < 0 || e.Index >= TabCount) return;
-        var selected = e.Index == SelectedIndex;
-        var accent = _accents[e.Index % _accents.Length];
-        var tint = _tints[e.Index % _tints.Length];
+        DrawTab(e.Graphics, e.Index);
+    }
+
+    protected override void WndProc(ref Message m)
+    {
+        base.WndProc(ref m);
+        if (m.Msg != WmPaint || TabCount == 0 || IsDisposed) return;
+        using var graphics = CreateGraphics();
+        DrawTabStrip(graphics);
+    }
+
+    private void DrawTabStrip(Graphics graphics)
+    {
         var scale = DeviceDpi / 96f;
-        var bounds = GetTabRect(e.Index);
+        var stripHeight = Math.Max(DisplayRectangle.Top, ItemSize.Height + (int)Math.Ceiling(8 * scale));
         using var backdrop = new SolidBrush(SystemColors.Control);
-        e.Graphics.FillRectangle(backdrop, Rectangle.Inflate(bounds, (int)Math.Ceiling(8 * scale), (int)Math.Ceiling(6 * scale)));
+        graphics.FillRectangle(backdrop, new Rectangle(0, 0, Width, stripHeight));
+        for (var i = 0; i < TabCount; i++)
+            if (i != SelectedIndex) DrawTab(graphics, i);
+        if (SelectedIndex >= 0 && SelectedIndex < TabCount) DrawTab(graphics, SelectedIndex);
+    }
+
+    private void DrawTab(Graphics graphics, int index)
+    {
+        var selected = index == SelectedIndex;
+        var accent = _accents[index % _accents.Length];
+        var tint = _tints[index % _tints.Length];
+        var scale = DeviceDpi / 96f;
+        var bounds = GetTabRect(index);
+        using var backdrop = new SolidBrush(SystemColors.Control);
+        graphics.FillRectangle(backdrop, Rectangle.Inflate(bounds, (int)Math.Ceiling(8 * scale), (int)Math.Ceiling(6 * scale)));
         var sideInset = selected ? (int)Math.Ceiling(4 * scale) : (int)Math.Ceiling(12 * scale);
         var card = new Rectangle(
             bounds.Left + sideInset,
@@ -73,13 +100,13 @@ internal sealed class StyledTabControl : TabControl
         shape.AddArc(card.Right - diameter, card.Bottom - diameter, diameter, diameter, 0, 90);
         shape.AddArc(card.Left, card.Bottom - diameter, diameter, diameter, 90, 90);
         shape.CloseFigure();
-        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        graphics.SmoothingMode = SmoothingMode.AntiAlias;
         using var fill = new SolidBrush(selected ? accent : tint);
-        e.Graphics.FillPath(fill, shape);
-        if (!selected && e.Index == _hovered)
+        graphics.FillPath(fill, shape);
+        if (!selected && index == _hovered)
         {
             using var hoverFill = new SolidBrush(ControlPaint.Light(tint, 0.16f));
-            e.Graphics.FillPath(hoverFill, shape);
+            graphics.FillPath(hoverFill, shape);
         }
         var textBounds = card;
         if (selected)
@@ -95,10 +122,10 @@ internal sealed class StyledTabControl : TabControl
                 new(centerX, top + arrowHeight)
             ];
             using var arrowBrush = new SolidBrush(accent);
-            e.Graphics.FillPolygon(arrowBrush, arrow);
+            graphics.FillPolygon(arrowBrush, arrow);
         }
         using var font = new Font(Font, selected ? FontStyle.Bold : FontStyle.Regular);
-        TextRenderer.DrawText(e.Graphics, TabPages[e.Index].Text, font, textBounds,
+        TextRenderer.DrawText(graphics, TabPages[index].Text, font, textBounds,
             selected ? Color.White : accent, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
     }
 }

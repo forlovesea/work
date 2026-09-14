@@ -18,6 +18,7 @@ internal sealed class StyledTabControl : TabControl
 
     public StyledTabControl()
     {
+        Appearance = TabAppearance.FlatButtons;
         DrawMode = TabDrawMode.OwnerDrawFixed;
         SizeMode = TabSizeMode.Fixed;
         UpdateTabSize();
@@ -56,7 +57,7 @@ internal sealed class StyledTabControl : TabControl
         var scale = DeviceDpi / 96f;
         var bounds = GetTabRect(e.Index);
         using var backdrop = new SolidBrush(SystemColors.Control);
-        e.Graphics.FillRectangle(backdrop, bounds);
+        e.Graphics.FillRectangle(backdrop, Rectangle.Inflate(bounds, 2, 2));
         var card = Rectangle.Inflate(bounds, -(int)(3 * scale), -(int)(3 * scale));
         var radius = Math.Min(10 * scale, card.Height / 2f);
         using var shape = new GraphicsPath();

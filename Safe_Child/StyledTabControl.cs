@@ -32,7 +32,7 @@ internal sealed class StyledTabControl : TabControl
         using var selectedFont = new Font(Font, FontStyle.Bold);
         foreach (TabPage page in TabPages)
             width = Math.Max(width, TextRenderer.MeasureText(page.Text, selectedFont).Width + (int)(48 * scale));
-        ItemSize = new Size(width, selectedFont.Height + (int)Math.Ceiling(22 * scale));
+        ItemSize = new Size(width, selectedFont.Height + (int)Math.Ceiling(28 * scale));
     }
 
     protected override void OnControlAdded(ControlEventArgs e) { base.OnControlAdded(e); UpdateTabSize(); }
@@ -58,8 +58,13 @@ internal sealed class StyledTabControl : TabControl
         var scale = DeviceDpi / 96f;
         var bounds = GetTabRect(e.Index);
         using var backdrop = new SolidBrush(SystemColors.Control);
-        e.Graphics.FillRectangle(backdrop, Rectangle.Inflate(bounds, (int)Math.Ceiling(4 * scale), (int)Math.Ceiling(4 * scale)));
-        var card = Rectangle.Inflate(bounds, -(int)(3 * scale), -(int)(4 * scale));
+        e.Graphics.FillRectangle(backdrop, Rectangle.Inflate(bounds, (int)Math.Ceiling(8 * scale), (int)Math.Ceiling(6 * scale)));
+        var sideInset = selected ? (int)Math.Ceiling(4 * scale) : (int)Math.Ceiling(12 * scale);
+        var card = new Rectangle(
+            bounds.Left + sideInset,
+            bounds.Top + (int)Math.Ceiling(9 * scale),
+            Math.Max(1, bounds.Width - (sideInset * 2)),
+            Math.Max(1, bounds.Height - (int)Math.Ceiling(13 * scale)));
         var radius = Math.Min(10 * scale, card.Height / 2f);
         using var shape = new GraphicsPath();
         var diameter = radius * 2;
@@ -79,24 +84,21 @@ internal sealed class StyledTabControl : TabControl
         var textBounds = card;
         if (selected)
         {
-            var arrowWidth = 9 * scale;
-            var arrowHeight = 6 * scale;
+            var arrowWidth = 11 * scale;
+            var arrowHeight = 7 * scale;
             var centerX = card.Left + (card.Width / 2f);
-            var top = card.Top + (4 * scale);
+            var top = bounds.Top + (1.5f * scale);
             PointF[] arrow =
             [
                 new(centerX - (arrowWidth / 2f), top),
                 new(centerX + (arrowWidth / 2f), top),
                 new(centerX, top + arrowHeight)
             ];
-            using var arrowBrush = new SolidBrush(Color.White);
+            using var arrowBrush = new SolidBrush(accent);
             e.Graphics.FillPolygon(arrowBrush, arrow);
-            textBounds = new Rectangle(card.Left, card.Top + (int)Math.Ceiling(8 * scale), card.Width, card.Height - (int)Math.Ceiling(8 * scale));
         }
         using var font = new Font(Font, selected ? FontStyle.Bold : FontStyle.Regular);
         TextRenderer.DrawText(e.Graphics, TabPages[e.Index].Text, font, textBounds,
             selected ? Color.White : accent, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
-        if (selected && Focused && ShowFocusCues)
-            ControlPaint.DrawFocusRectangle(e.Graphics, Rectangle.Inflate(card, -(int)(6 * scale), -(int)(6 * scale)), Color.White, accent);
     }
 }

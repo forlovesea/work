@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text.RegularExpressions;
 using TBC1000B.WinForms.Models;
 
@@ -9,18 +9,22 @@ public static class SnmpDataMapper
     private const string Root = "1.3.6.1.4.1.2011.6.164.1";
     public static void Apply(MonitorSnapshot snapshot, IReadOnlyDictionary<string, string> raw)
     {
+        // Match the Python receiver: discard the device sentinel and rebuild each cycle.
+        raw = raw.Where(item => !SnmpValueValidation.IsUnavailable(item.Value))
+            .ToDictionary(item => item.Key, item => item.Value, StringComparer.Ordinal);
+        foreach (var module in snapshot.Modules) Reset(module);
         var rowToModule = new Dictionary<string, int>(); var infoRows = new Dictionary<string, ModuleState>();
         foreach (var item in raw.Where(x => x.Key.StartsWith(Root + ".18.1.1.2.", StringComparison.Ordinal)))
         {
             var row = Last(item.Key); if (!TryInt(raw, $"{Root}.18.1.1.4.{row}", out var number) || number is < 1 or > 10) continue;
-            var module = snapshot.Modules[number - 1]; module.RowIndex = row; module.EquipmentId = item.Value; module.SoftwareVersion = Get(raw, $"{Root}.18.1.1.5.{row}"); module.Model = Get(raw, $"{Root}.18.1.1.12.{row}"); module.Barcode = Get(raw, $"{Root}.18.1.1.13.{row}"); module.Connected = true;
+            var module = snapshot.Modules[number - 1]; module.RowIndex = row; module.EquipmentId = item.Value; module.SoftwareVersion = Get(raw, $"{Root}.18.1.1.5.{row}"); module.Model = Get(raw, $"{Root}.18.1.1.12.{row}"); module.Barcode = Get(raw, $"{Root}.18.1.1.13.{row}"); module.Connected = true; module.Status = "-";
             rowToModule[row] = number; infoRows[row] = module;
         }
         foreach (var module in snapshot.Modules.Where(m => !rowToModule.ContainsValue(m.Number))) Reset(module);
         foreach (var item in raw.Where(x => x.Key.StartsWith(Root + ".18.2.1.", StringComparison.Ordinal)))
         {
             var parts = item.Key.Split('.'); if (parts.Length < 2 || !int.TryParse(parts[^2], out var column) || !infoRows.TryGetValue(parts[^1], out var module)) continue;
-            if (!long.TryParse(item.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) || value == int.MaxValue) continue;
+            if (!SnmpValueValidation.TryInteger(item.Value, out var value)) continue;
             switch (column)
             {
                 case 1: module.Voltage = value / 10d; break; case 2: module.Current = value / 10d; break;
@@ -41,7 +45,7 @@ public static class SnmpDataMapper
             snapshot.Faults.Add(new FaultEntry(alarm.Value, faultModule, cell, voltage, temperature));
         }
     }
-    private static void Reset(ModuleState m) { m.RowIndex = ""; m.Connected = false; m.Voltage = null; m.Current = null; m.Status = "-"; m.Soc = null; m.Soh = null; m.Alarm = AlarmLevel.Normal; Array.Clear(m.CellVoltages); Array.Clear(m.CellTemperatures); }
+    private static void Reset(ModuleState m) { m.Connected = false; m.Voltage = null; m.Current = null; m.Status = "Disconnect"; m.Soc = null; m.Soh = null; m.Alarm = AlarmLevel.Normal; Array.Clear(m.CellVoltages); Array.Clear(m.CellTemperatures); }
     private static string StatusText(int value) => value switch { 0 => "Online", 1 => "Offline", 2 => "Sleep", 3 => "Disconnect", 4 => "충전중", 5 => "방전중", 6 => "Standby", _ => "Unknown" };
     private static AlarmLevel Level(int value) => value switch { 1 => AlarmLevel.Critical, 2 => AlarmLevel.Major, 3 => AlarmLevel.Minor, 4 => AlarmLevel.Warning, _ => AlarmLevel.Normal };
     private static bool IsFault(string text) => text.Equals("Board hardware fault", StringComparison.OrdinalIgnoreCase) || Regex.IsMatch(text, @"^Cell\s*(?:[1-9]|1[0-5])\s*Fault$", RegexOptions.IgnoreCase);

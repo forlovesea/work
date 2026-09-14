@@ -110,8 +110,8 @@ internal sealed class NewProfileDialog : Form
     {
         Text = "신규 프로파일 생성"; ClientSize = new Size(340, 140); FormBorderStyle = FormBorderStyle.FixedDialog; StartPosition = FormStartPosition.CenterParent; MaximizeBox = false;
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(12), ColumnCount = 2, RowCount = 3 }; layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 90)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); Controls.Add(layout);
-        layout.Controls.Add(new Label { Text = "설치 장소", TextAlign = ContentAlignment.MiddleLeft, Dock = DockStyle.Fill }); _site.Dock = DockStyle.Fill; layout.Controls.Add(_site);
-        layout.Controls.Add(new Label { Text = "축전지명", TextAlign = ContentAlignment.MiddleLeft, Dock = DockStyle.Fill }); _system.Dock = DockStyle.Fill; layout.Controls.Add(_system);
+        layout.Controls.Add(new Label { Text = "설치 장소", TextAlign = ContentAlignment.MiddleLeft, Dock = DockStyle.Fill }); var siteInput = UiTheme.CenteredInput(_site, Font); siteInput.Dock = DockStyle.Fill; layout.Controls.Add(siteInput);
+        layout.Controls.Add(new Label { Text = "축전지명", TextAlign = ContentAlignment.MiddleLeft, Dock = DockStyle.Fill }); var systemInput = UiTheme.CenteredInput(_system, Font); systemInput.Dock = DockStyle.Fill; layout.Controls.Add(systemInput);
         var ok = UiTheme.Button("OK"); ok.DialogResult = DialogResult.OK; var cancel = UiTheme.Button("Cancel"); cancel.DialogResult = DialogResult.Cancel; var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill }; buttons.Controls.AddRange([ok, cancel]); layout.Controls.Add(buttons, 1, 2);
         ok.Click += (_, _) => { if (SiteName.Length == 0 || SystemName.Length == 0) { DialogResult = DialogResult.None; MessageBox.Show(this, "설치 장소와 축전지명을 입력하세요."); } }; AcceptButton = ok; CancelButton = cancel;
     }

@@ -5,7 +5,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <VersionPrefix>3.2.4</VersionPrefix>
+    <VersionPrefix>3.2.6</VersionPrefix>
     <ApplicationIcon>..\battery#2.ico</ApplicationIcon>
     <RootNamespace>TBC1000B.WinForms</RootNamespace>
     <AssemblyName>TBC1000B_Monitor_v$(VersionPrefix)</AssemblyName>

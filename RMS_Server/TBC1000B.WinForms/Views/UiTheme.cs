@@ -1,4 +1,4 @@
-using TBC1000B.WinForms.Models;
+﻿using TBC1000B.WinForms.Models;
 
 namespace TBC1000B.WinForms.Views;
 
@@ -39,6 +39,44 @@ internal static class UiTheme
         grid.DefaultCellStyle.Font = new Font("맑은 고딕", 9F);
         grid.EnableHeadersVisualStyles = false;
         grid.SelectionMode = DataGridViewSelectionMode.CellSelect;
+    }
+
+    public static Control CenteredInput(TextBox input, Font font)
+    {
+        var frame = new Panel
+        {
+            Width = input.Width, Height = Math.Max(28, font.Height + 12),
+            BackColor = SystemColors.Window, BorderStyle = BorderStyle.FixedSingle,
+            Font = font, TabStop = false
+        };
+        input.Font = font;
+        input.Multiline = false;
+        input.AutoSize = true;
+        input.TextAlign = HorizontalAlignment.Center;
+        input.BorderStyle = BorderStyle.None;
+        input.Dock = DockStyle.None;
+        input.Margin = Padding.Empty;
+        frame.Controls.Add(input);
+        void Center()
+        {
+            input.SetBounds(3, Math.Max(0, (frame.ClientSize.Height - input.PreferredHeight) / 2),
+                Math.Max(0, frame.ClientSize.Width - 6), input.PreferredHeight);
+        }
+        frame.Resize += (_, _) => Center();
+        input.FontChanged += (_, _) => Center();
+        frame.Click += (_, _) => input.Focus();
+        Center();
+        return frame;
+    }
+
+    public static void PreserveCellSelectionColors(DataGridView grid)
+    {
+        grid.CellFormatting += (_, e) =>
+        {
+            if (e.CellStyle is not { } style) return;
+            style.SelectionBackColor = style.BackColor;
+            style.SelectionForeColor = style.ForeColor;
+        };
     }
 
     public static Button Button(string text, Color? color = null)

@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using TBC1000B.WinForms.Models;
 
 namespace TBC1000B.WinForms.Services;
@@ -39,9 +39,9 @@ public static class SystemSummaryService
         return new SystemSummary(values, title);
     }
 
-    private static string Raw(MonitorSnapshot snapshot, string oid) => snapshot.RawValues.TryGetValue(oid, out var value) ? value : "-";
+    private static string Raw(MonitorSnapshot snapshot, string oid) => snapshot.RawValues.TryGetValue(oid, out var value) && SnmpValueValidation.TryInteger(value, out var number) ? number.ToString(CultureInfo.InvariantCulture) : "-";
     private static string Scaled(MonitorSnapshot snapshot, string oid, double divisor, string format) =>
-        double.TryParse(Raw(snapshot, oid), NumberStyles.Number, CultureInfo.InvariantCulture, out var value)
+        SnmpValueValidation.TryInteger(Raw(snapshot, oid), out var value)
             ? (value / divisor).ToString(format, CultureInfo.InvariantCulture) : "-";
     private static string Aggregate(double[] values, Func<IEnumerable<double>, double> aggregate) =>
         values.Length == 0 ? "-" : aggregate(values).ToString("0.0", CultureInfo.InvariantCulture);

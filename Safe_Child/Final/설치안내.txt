@@ -1,0 +1,37 @@
+﻿SafeChild - Windows 10/11 x64 최종 배포본
+작성일: 2026-09-21
+
+1. _Release\SafeChild-Setup-Win10-x64.exe 파일을 대상 PC로 복사합니다.
+   설치 파일 하나만 전달하면 됩니다. 크기: 약 79.1 MiB.
+2. 설치 파일을 실행하고 관리자 권한 요청을 허용합니다.
+3. 바탕화면의 SafeChild를 실행합니다.
+   기존 설치를 업데이트할 때는 먼저 앱의 관리자 모드에서 프로그램을 종료하세요.
+   기존 설정과 접속 기록은 유지됩니다.
+
+이번 변경
+- 설정 상태와 hosts 실제 상태를 별도로 표시합니다.
+- 적용 직후 및 5초마다 hosts 파일을 읽고, 수동 새로고침을 제공합니다.
+- 차단/해제/일부 차단/충돌/확인 실패와 설정 불일치를 구분합니다.
+- 실제 상태를 굵은 글씨와 배경색으로 강조하고 새로고침 버튼에 청록색 스타일을 적용했습니다.
+- hosts 상태는 파일 기준이며 브라우저의 실제 접속 여부를 보장하지 않습니다.
+
+대상: Windows 10/11 64비트(x64).
+.NET 런타임을 포함하여 별도 SDK/런타임 설치 없이 오프라인 설치가 가능합니다.
+설치 위치: C:\Program Files\SafeChild
+설정 및 기록: C:\ProgramData\SafeChild
+개발 PC의 설정, 접속 기록, 개인 인증서는 배포본에 포함하지 않습니다.
+
+재부팅 후 자동실행은 앱 관리자 모드의 '재부팅후 자동실행' 버튼으로 설정합니다.
+브라우저 방문 감지/전달 메시지는 Chrome 또는 Edge에 BrowserExtension을 추가해야 합니다.
+자세한 설치, 업데이트, 제거 안내: _Release\README-ko.md
+스마트폰 외부 접속 안내: _Release\App\REMOTE_ACCESS.md
+파일 무결성 확인: _Release\SHA256SUMS.txt
+
+검증 결과
+- Release / win-x64 / self-contained 게시 및 통합 설치 파일 생성 완료.
+- 설치 파일 내부 Payload.zip 일치 및 SHA256SUMS.txt 무결성 확인 완료.
+- 앱, .NET/Windows Desktop/ASP.NET Core, SQLite, 브라우저 확장 포함 확인.
+- HostsChecks 15개, TimingChecks 58개, MessageChecks 27개, MobileChecks 72개, MobileUiChecks 10개, GridBindingChecks 통과.
+- NuGet 취약성 정보 조회는 SSL 연결 오류로 완료하지 못했습니다(NU1900). 게시 및 패키징은 성공했습니다.
+- 대상 PC의 실제 설치, 차단 및 재부팅 동작은 검증하지 않았습니다.
+- 설치 파일은 코드 서명되지 않았습니다.

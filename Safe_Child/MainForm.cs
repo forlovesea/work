@@ -65,6 +65,7 @@ public sealed partial class MainForm : Form
         {
             SaveTimerCheckpoint();
             ApplyScheduledDomains();
+            RefreshHostsStatus();
             UpdateAllowanceLabel();
             UpdateMessageConnection();
             _domainGrid.InvalidateColumn(_domainGrid.Columns[nameof(BlockEntry.RemainingTime)]!.Index);
@@ -192,17 +193,20 @@ public sealed partial class MainForm : Form
         var toggle = new Button { Text = "선택 항목 차단/해제", AutoSize = true, Tag = "admin" };
         var remove = new Button { Text = "선택 삭제", AutoSize = true, Tag = "admin" };
         var timeSettings = new Button { Text = "시간 설정", AutoSize = true, Tag = "admin" };
+        var refreshHosts = new Button { Text = "hosts 상태 새로고침", AutoSize = true };
         StyleDomainAction(add, Color.FromArgb(37, 99, 235), Color.White, Color.FromArgb(37, 99, 235));
         StyleDomainAction(toggle, Color.FromArgb(240, 253, 250), Color.FromArgb(15, 118, 110), Color.FromArgb(153, 246, 228));
         StyleDomainAction(remove, Color.FromArgb(255, 241, 242), Color.FromArgb(190, 18, 60), Color.FromArgb(254, 205, 211));
         StyleDomainAction(timeSettings, Color.FromArgb(245, 243, 255), Color.FromArgb(109, 40, 217), Color.FromArgb(221, 214, 254));
+        StyleDomainAction(refreshHosts, Color.FromArgb(236, 254, 255), Color.FromArgb(14, 116, 144), Color.FromArgb(165, 243, 252));
+        refreshHosts.Click += (_, _) => RefreshHostsStatus(true);
         timeSettings.Click += (_, _) => EditDomainSchedule();
         add.Click += (_, _) => AddDomain(); toggle.Click += (_, _) => ToggleDomain(); remove.Click += (_, _) => RemoveDomain();
         var selectAll = new Button { Text = "전체 선택", AutoSize = true, Tag = "admin" };
         var clearAll = new Button { Text = "전체 해제", AutoSize = true, Tag = "admin" };
         StyleDomainAction(selectAll, Color.FromArgb(241, 245, 249), Color.FromArgb(51, 65, 85), Color.FromArgb(203, 213, 225));
         StyleDomainAction(clearAll, Color.FromArgb(241, 245, 249), Color.FromArgb(51, 65, 85), Color.FromArgb(203, 213, 225));
-        Button[] domainButtons = [add, toggle, remove, timeSettings, selectAll, clearAll];
+        Button[] domainButtons = [add, toggle, remove, timeSettings, refreshHosts, selectAll, clearAll];
         var actionHeight = domainButtons.Max(button => button.GetPreferredSize(Size.Empty).Height);
         foreach (var button in domainButtons) button.MinimumSize = new Size(0, actionHeight);
         var inputFrame = new Panel
@@ -238,7 +242,7 @@ public sealed partial class MainForm : Form
         };
         actions.Controls.AddRange([inputFrame, add]);
         var selectionActions = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = true, Margin = Padding.Empty };
-        selectionActions.Controls.AddRange([toggle, remove, timeSettings]);
+        selectionActions.Controls.AddRange([toggle, remove, timeSettings, refreshHosts]);
         bulkActions.Controls.AddRange([selectAll, clearAll]);
         top.Controls.Add(actions, 0, 0);
         top.Controls.Add(bulkActions, 1, 0);
@@ -248,9 +252,20 @@ public sealed partial class MainForm : Form
         _domainGrid.Columns.Add(new DataGridViewCheckBoxColumn { DataPropertyName = nameof(BlockEntry.Active), HeaderText = "차단 선택", Width = 85, AutoSizeMode = DataGridViewAutoSizeColumnMode.None });
         _domainGrid.Columns.Add(new DataGridViewCheckBoxColumn { DataPropertyName = nameof(BlockEntry.TimeEnabled), HeaderText = "시간 적용", Width = 85, AutoSizeMode = DataGridViewAutoSizeColumnMode.None });
         _domainGrid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(BlockEntry.TimeDescription), HeaderText = "시간 설정", FillWeight = 65 });
-        _domainGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(BlockEntry.CurrentState), DataPropertyName = nameof(BlockEntry.CurrentState), HeaderText = "현재 상태", Width = 85, AutoSizeMode = DataGridViewAutoSizeColumnMode.None });
+        _domainGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(BlockEntry.CurrentState), DataPropertyName = nameof(BlockEntry.CurrentState), HeaderText = "설정 상태", Width = 85, AutoSizeMode = DataGridViewAutoSizeColumnMode.None });
         _domainGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(BlockEntry.RemainingTime), DataPropertyName = nameof(BlockEntry.RemainingTime), HeaderText = "남은 시간", Width = 190, AutoSizeMode = DataGridViewAutoSizeColumnMode.None, SortMode = DataGridViewColumnSortMode.NotSortable });
         _domainGrid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(BlockEntry.CreatedAt), HeaderText = "등록 일시", Width = 150, AutoSizeMode = DataGridViewAutoSizeColumnMode.None, DefaultCellStyle = new DataGridViewCellStyle { Format = "yyyy-MM-dd HH:mm" } });
+        _domainGrid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            Name = "HostsActualState", HeaderText = "hosts 실제 상태", Width = 240,
+            AutoSizeMode = DataGridViewAutoSizeColumnMode.None, SortMode = DataGridViewColumnSortMode.NotSortable,
+            DefaultCellStyle = new DataGridViewCellStyle
+            {
+                Font = new Font(Font, FontStyle.Bold), Alignment = DataGridViewContentAlignment.MiddleCenter,
+                Padding = new Padding(6, 0, 6, 0)
+            }
+        });
+        _domainGrid.CellFormatting += FormatHostsStatus;
         _domainGrid.CellFormatting += (_, e) =>
         {
             if (!_store.Settings.IsAllowAllActive(DateTimeOffset.UtcNow)) return;
@@ -263,8 +278,10 @@ public sealed partial class MainForm : Form
             }
         };
         _domainStatus.Text = "시간 적용은 ‘시간 설정’에서 변경합니다. 시간 밖에는 차단이 해제됩니다.";
-        var statusBar = new Panel { Dock = DockStyle.Bottom, Height = 36 };
+        var statusBar = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 100, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true };
         statusBar.Controls.Add(_domainStatus);
+        statusBar.Controls.Add(_hostsCheckLabel);
+        statusBar.Controls.Add(new Label { AutoSize = true, Padding = new Padding(8, 0, 8, 0), Text = "hosts 기준 상태이며 실제 브라우저 접속 여부를 검사하지 않습니다. 해제는 hosts 차단 항목이 없다는 뜻입니다." });
         page.Controls.Add(_domainGrid); page.Controls.Add(top); page.Controls.Add(statusBar);
         return page;
     }
@@ -473,6 +490,7 @@ public sealed partial class MainForm : Form
                 _allowExit = true; Close(); return;
             }
             _store.SetPassword(password);
+            _mobileServer?.RevokeSessions();
             MessageBox.Show("관리자 비밀번호가 설정되었습니다. 분실 시 마스터 비밀번호로 인증하여 초기화할 수 있습니다.", "설정 완료");
         }
         RefreshRules();
@@ -529,6 +547,8 @@ public sealed partial class MainForm : Form
         _exitButton.Visible = unlocked;
         foreach (Control page in _tabs.TabPages)
             SetTaggedControls(page, unlocked);
+        if (!unlocked) _certificatePassword.Clear();
+        UpdateMobileControls();
     }
 
     private async Task ResetSettingsAsync()
@@ -543,6 +563,7 @@ public sealed partial class MainForm : Form
             "도메인·포트 차단 목록과 시간 설정, 모든 사이트 일시 허용을 초기화합니다.\n스마트폰 연결을 종료하고 자동 수집·조회 조건을 기본값으로 되돌립니다.\n현재 Windows 계정의 재부팅후 자동실행 등록도 해제합니다.\n\n관리자·마스터 비밀번호와 수집된 방문 기록은 유지됩니다.\n설정을 초기화하시겠습니까?",
             "설정초기화 확인", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
         _resettingSettings = true;
+        UpdateMobileControls();
         _resetSettingsButton.Enabled = false;
         _autoStartButton.Enabled = _removeAutoStartButton.Enabled = false;
         try
@@ -550,6 +571,7 @@ public sealed partial class MainForm : Form
             if (_mobileServer is not null) await StopMobileAsync();
             await AutoStartService.ConfigureAsync(false);
             _store.ResetSettings();
+            LoadMobilePreferences();
             _childMessagePopup?.Close(); _messageCooldowns.Clear();
             _domainInput.Clear(); _portInput.Value = 1; _portEndInput.Value = 1; _portRangeEnabled.Checked = false; _protocol.SelectedIndex = 0;
             _from.Value = DateTime.Today.AddDays(-7); _to.Value = DateTime.Today; _search.Clear();
@@ -572,6 +594,7 @@ public sealed partial class MainForm : Form
         finally
         {
             _resettingSettings = false;
+            UpdateMobileControls();
             _resetSettingsButton.Enabled = _adminUnlocked;
             _autoStartButton.Enabled = _removeAutoStartButton.Enabled = _adminUnlocked && !_autoStartBusy && !_shutdownInProgress;
         }
@@ -622,8 +645,14 @@ public sealed partial class MainForm : Form
     private void EditDomainSchedule()
     {
         if (!_adminUnlocked || _domainGrid.CurrentRow?.DataBoundItem is not BlockEntry item) return;
+        var version = MobileRules.Version(item);
         using var dialog = new DomainScheduleDialog(item.Domain, item.Schedule);
         if (dialog.ShowDialog(this) != DialogResult.OK || dialog.Result is null) return;
+        if (!_store.Settings.Domains.Contains(item) || MobileRules.Version(item) != version)
+        {
+            MessageBox.Show(this, "편집 중 사이트 설정이 변경되었습니다. 최신 목록에서 다시 편집하세요.", "설정 변경 확인");
+            return;
+        }
         var previous = item.Schedule;
         item.Schedule = dialog.Result;
         try { _store.Save(); }
@@ -677,6 +706,7 @@ public sealed partial class MainForm : Form
             _domainStatus.Text = $"차단 적용 실패 (자동 재시도): {ex.Message}";
             _domainStatus.ForeColor = Color.Firebrick;
         }
+        finally { RefreshHostsStatus(true); }
     }
 
     private void AddPort()

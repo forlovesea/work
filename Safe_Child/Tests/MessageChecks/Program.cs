@@ -46,6 +46,21 @@ internal static class Program
         }
         SynchronizationContext.SetSynchronizationContext(null);
         MainForm.CheckEditor();
+        using (var dialog = new DomainScheduleDialog("daily.example.com", new DomainSchedule
+        {
+            Enabled = true, Type = DomainTimeType.Weekly,
+            Days = Enumerable.Range(0, 7).Select(i => new DailyBlockWindow
+                { Enabled = i == 1, Start = TimeSpan.FromHours(20), End = TimeSpan.FromHours(7) }).ToArray()
+        }))
+        {
+            var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+            dialog.CreateControl(); dialog.PerformLayout();
+            var individual = (CheckBox)typeof(DomainScheduleDialog).GetField("_individual", flags)!.GetValue(dialog)!;
+            Check(individual.Checked, "daily mode restored from mobile settings");
+            typeof(DomainScheduleDialog).GetMethod("SaveSchedule", flags)!.Invoke(dialog, null);
+            Check(dialog.Result?.Days is { Length: 7 } days && days[1].Enabled && !days[0].Enabled &&
+                days[1].Start == TimeSpan.FromHours(20) && days[1].End == TimeSpan.FromHours(7), "desktop preserves mobile daily schedule");
+        }
         using (var dialog = new DomainScheduleDialog("example.com", new DomainSchedule { Enabled = true, Type = DomainTimeType.Weekly }))
         {
             var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;

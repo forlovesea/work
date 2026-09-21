@@ -19,6 +19,7 @@
     <PackageReference Include="QRCoder" Version="1.6.0" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <EmbeddedResource Include="MobileControl.html" />
+    <Content Include="REMOTE_ACCESS.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="BrowserExtension/**/*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 

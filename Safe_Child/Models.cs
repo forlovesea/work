@@ -9,6 +9,7 @@ public sealed class AppSettings
     public string PasswordHash { get; set; } = "";
     public List<BlockEntry> Domains { get; set; } = [];
     public List<PortEntry> Ports { get; set; } = [];
+    public MobileConnectionSettings MobileConnection { get; set; } = new();
     public DateTimeOffset? AllowAllUntil { get; set; }
     public ElapsedCountdown? AllowAllCountdown { get; set; }
     public DateTimeOffset? LastCheckpointUtc { get; set; }
@@ -42,6 +43,15 @@ public sealed class AppSettings
         AllowAllCountdown?.Checkpoint(ticks);
         LastCheckpointUtc = DateTimeOffset.UtcNow; // Diagnostic only; never used to grant time.
     }
+}
+
+public sealed class MobileConnectionSettings
+{
+    public bool ExternalEnabled { get; set; }
+    public string PublicOrigin { get; set; } = "";
+    public string CertificatePath { get; set; } = "";
+    public string AccessToken { get; set; } = "";
+    // Certificate passwords stay in memory and are never serialized.
 }
 
 public sealed class BlockEntry : ScheduledBlockEntry
@@ -122,18 +132,22 @@ public sealed class DomainSchedule
     public ElapsedCountdown? Countdown { get; set; }
     public DailyBlockWindow Weekdays { get; set; } = new();
     public DailyBlockWindow Weekends { get; set; } = new() { Start = TimeSpan.FromHours(9), End = TimeSpan.FromHours(21) };
+    // Optional Sunday-first overrides. Null preserves older weekday/weekend settings.
+    public DailyBlockWindow[]? Days { get; set; }
+    public DailyBlockWindow WindowFor(DayOfWeek day) => Days is { Length: 7 }
+        ? Days[(int)day] : day is DayOfWeek.Saturday or DayOfWeek.Sunday ? Weekends : Weekdays;
 
     // Windows belong to the day on which they start. Merge touching/overlapping
     // windows so Friday/Saturday and Sunday/Monday never cause a spurious release.
     public WeeklyScheduleState GetWeeklyState(DateTime localNow)
     {
-        if (Weekdays.Enabled && Weekends.Enabled && Weekdays.Start == Weekdays.End && Weekends.Start == Weekends.End)
+        if (Enumerable.Range(0, 7).Select(i => WindowFor((DayOfWeek)i)).All(w => w.Enabled && w.Start == w.End))
             return new(true, null);
         var windows = new List<(DateTime Start, DateTime End)>();
         for (var day = -1; day <= 8; day++)
         {
             var date = localNow.Date.AddDays(day);
-            var window = date.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday ? Weekends : Weekdays;
+            var window = WindowFor(date.DayOfWeek);
             if (!window.Enabled || window.Start < TimeSpan.Zero || window.Start >= TimeSpan.FromDays(1) ||
                 window.End < TimeSpan.Zero || window.End >= TimeSpan.FromDays(1)) continue;
             // Equal clock times mean the entire calendar day, independent of clock value.
@@ -169,7 +183,9 @@ public sealed class DomainSchedule
     [System.Text.Json.Serialization.JsonIgnore]
     public string Description => !Enabled ? "시간 미적용 (수동 차단)"
         : Type == DomainTimeType.Absolute ? $"절대 시간: {Start.LocalDateTime:yyyy-MM-dd HH:mm} ~ {End.LocalDateTime:yyyy-MM-dd HH:mm}"
-        : Type == DomainTimeType.Weekly ? $"반복 · 평일 {Weekdays.Description} / 주말 {Weekends.Description}"
+        : Type == DomainTimeType.Weekly ? Days is { Length: 7 }
+            ? "반복 · " + string.Join(" / ", new[] { 1, 2, 3, 4, 5, 6, 0 }.Select(i => $"{"일월화수목금토"[i]} {Days[i].Description}"))
+            : $"반복 · 평일 {Weekdays.Description} / 주말 {Weekends.Description}"
         : $"Walltime: {WalltimeMinutes}분 · 경과 시간 기준";
 }
 
@@ -248,6 +264,11 @@ public sealed class SettingsStore
     {
         if (CryptographicOperations.FixedTimeEquals(
             Convert.FromBase64String(MasterHash), Hash(password, Convert.FromBase64String(MasterSalt)))) return true;
+        return VerifyAdministratorPassword(password);
+    }
+
+    public bool VerifyAdministratorPassword(string password)
+    {
         if (!HasPassword) return false;
         var salt = Convert.FromBase64String(Settings.PasswordSalt);
         return CryptographicOperations.FixedTimeEquals(

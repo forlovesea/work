@@ -20,7 +20,7 @@ public static class BlockingService
 
     public static void ApplyDomains(IEnumerable<BlockEntry> entries, DateTimeOffset? at = null)
     {
-        var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), @"drivers\etc\hosts");
+        var path = HostsStatus.FilePath;
         var text = File.ReadAllText(path);
         var start = text.IndexOf(Start, StringComparison.Ordinal);
         var end = text.IndexOf(End, StringComparison.Ordinal);

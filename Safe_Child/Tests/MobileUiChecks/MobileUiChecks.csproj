@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0-windows</TargetFramework><UseWindowsForms>true</UseWindowsForms><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
+  <!-- The linked partial intentionally omits production protection fields and their consumers. -->
+  <PropertyGroup><NoWarn>$(NoWarn);CS0169;CS0649</NoWarn></PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="QRCoder" Version="1.6.0" />
+    <Compile Include="../../Models.cs" Link="Models.cs" />
+    <Compile Include="../../ElapsedCountdown.cs" Link="ElapsedCountdown.cs" />
+    <Compile Include="../../MobileRules.cs" Link="MobileRules.cs" />
+    <Compile Include="../../MobileConnectionOptions.cs" Link="MobileConnectionOptions.cs" />
+    <Compile Include="../../MobileControlServer.cs" Link="MobileControlServer.cs" />
+    <Compile Include="../../MobileFirewall.cs" Link="MobileFirewall.cs" />
+    <Compile Include="../../MainForm.Mobile.cs" Link="MainForm.Mobile.cs" />
+  </ItemGroup>
+</Project>

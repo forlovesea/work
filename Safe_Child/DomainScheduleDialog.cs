@@ -15,6 +15,9 @@ internal sealed class DomainScheduleDialog : Form
     private readonly DateTimePicker _weekdayEnd = TimePicker();
     private readonly DateTimePicker _weekendStart = TimePicker();
     private readonly DateTimePicker _weekendEnd = TimePicker();
+    private readonly CheckBox _individual = new() { Text = "월~일 각각 설정", AutoSize = true };
+    private readonly List<(CheckBox Enabled, DateTimePicker Start, DateTimePicker End)> _days = [];
+    private readonly FlowLayoutPanel _dailyPanel = new() { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false };
     private readonly List<(Control Label, Control Input, int Type)> _typeRows = [];
     private Control _walltimeHelp = null!;
     private Control _restartHelp = null!;
@@ -29,14 +32,14 @@ internal sealed class DomainScheduleDialog : Form
         StartPosition = FormStartPosition.CenterParent;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false; MinimizeBox = false; ShowInTaskbar = false;
-        ClientSize = new Size(650, 640);
+        ClientSize = new Size(690, 780);
         BackColor = Color.White;
         ForeColor = Color.FromArgb(30, 41, 59);
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 9, Padding = new Padding(20), AutoScroll = true };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 190));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         for (var row = 0; row < 9; row++) layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        _type.Items.AddRange(["절대 시간 (시작 ~ 종료)", "Walltime (경과 시간)", "반복 시간 (평일·주말)"]);
+        _type.Items.AddRange(["절대 시간 (시작 ~ 종료)", "Walltime (경과 시간)", "반복 시간 (요일별)"]);
         _enabled.Checked = original.Enabled;
         _type.SelectedIndex = Math.Clamp((int)original.Type, 0, 2);
         _start.Value = original.Start.LocalDateTime;
@@ -50,10 +53,22 @@ internal sealed class DomainScheduleDialog : Form
         AddTypeRow(layout, 5, "다시 시작", _restart, 1);
         AddTypeRow(layout, 6, "평일 (월~금)", WindowInputs(_weekdayEnabled, _weekdayStart, _weekdayEnd, original.Weekdays), 2);
         AddTypeRow(layout, 7, "주말 (토·일)", WindowInputs(_weekendEnabled, _weekendStart, _weekendEnd, original.Weekends), 2);
+        var weekly = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false };
+        _individual.Checked = original.Days is { Length: 7 };
+        weekly.Controls.Add(_individual);
+        for (var i = 0; i < 7; i++)
+        {
+            var enabled = new CheckBox { Text = "일월화수목금토"[i] + "요일", AutoSize = true };
+            var start = TimePicker(); var end = TimePicker();
+            _days.Add((enabled, start, end));
+            _dailyPanel.Controls.Add(WindowInputs(enabled, start, end, original.WindowFor((DayOfWeek)i)));
+            enabled.CheckedChanged += (_, _) => UpdateInputs();
+        }
+        weekly.Controls.Add(_dailyPanel);
         var help = new TableLayoutPanel
         {
             AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Dock = DockStyle.Top,
-            ColumnCount = 1, RowCount = 4, Margin = new Padding(0, 14, 0, 8)
+            ColumnCount = 1, RowCount = 5, Margin = new Padding(0, 14, 0, 8)
         };
         help.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         help.Controls.Add(HelpCard("시간 적용을 끄면", "예약 시간과 관계없이 목록의 ‘차단 선택’ 상태를 따릅니다.",
@@ -67,6 +82,8 @@ internal sealed class DomainScheduleDialog : Form
         help.Controls.Add(_walltimeHelp, 0, 1);
         help.Controls.Add(_restartHelp, 0, 2);
         help.Controls.Add(_weeklyHelp, 0, 3);
+        help.Controls.Add(weekly, 0, 4);
+        _typeRows.Add((weekly, weekly, 2));
         layout.Controls.Add(help, 0, 8); layout.SetColumnSpan(help, 2);
         var buttons = new FlowLayoutPanel
         {
@@ -86,6 +103,7 @@ internal sealed class DomainScheduleDialog : Form
         _type.SelectedIndexChanged += (_, _) => UpdateInputs();
         _weekdayEnabled.CheckedChanged += (_, _) => UpdateInputs();
         _weekendEnabled.CheckedChanged += (_, _) => UpdateInputs();
+        _individual.CheckedChanged += (_, _) => UpdateInputs();
         UpdateInputs();
     }
 
@@ -96,9 +114,16 @@ internal sealed class DomainScheduleDialog : Form
         _minutes.Enabled = _restart.Enabled = _enabled.Checked && _type.SelectedIndex == 1;
         foreach (var row in _typeRows) row.Label.Visible = row.Input.Visible = row.Type == _type.SelectedIndex;
         var weekly = _enabled.Checked && _type.SelectedIndex == 2;
-        _weekdayEnabled.Enabled = _weekendEnabled.Enabled = weekly;
-        _weekdayStart.Enabled = _weekdayEnd.Enabled = weekly && _weekdayEnabled.Checked;
-        _weekendStart.Enabled = _weekendEnd.Enabled = weekly && _weekendEnabled.Checked;
+        _individual.Enabled = weekly;
+        _dailyPanel.Visible = _individual.Checked;
+        foreach (var day in _days)
+        {
+            day.Enabled.Enabled = weekly;
+            day.Start.Enabled = day.End.Enabled = weekly && day.Enabled.Checked;
+        }
+        _weekdayEnabled.Enabled = _weekendEnabled.Enabled = weekly && !_individual.Checked;
+        _weekdayStart.Enabled = _weekdayEnd.Enabled = weekly && !_individual.Checked && _weekdayEnabled.Checked;
+        _weekendStart.Enabled = _weekendEnd.Enabled = weekly && !_individual.Checked && _weekendEnabled.Checked;
         _walltimeHelp.Visible = _restartHelp.Visible = _type.SelectedIndex == 1;
         _weeklyHelp.Visible = _type.SelectedIndex == 2;
     }
@@ -119,6 +144,8 @@ internal sealed class DomainScheduleDialog : Form
             Enabled = _enabled.Checked, Type = type,
             Start = new DateTimeOffset(_start.Value), End = new DateTimeOffset(_end.Value),
             WalltimeMinutes = minutes,
+            Days = _individual.Checked ? _days.Select(d => new DailyBlockWindow
+                { Enabled = d.Enabled.Checked, Start = d.Start.Value.TimeOfDay, End = d.End.Value.TimeOfDay }).ToArray() : null,
             Weekdays = new DailyBlockWindow { Enabled = _weekdayEnabled.Checked, Start = _weekdayStart.Value.TimeOfDay, End = _weekdayEnd.Value.TimeOfDay },
             Weekends = new DailyBlockWindow { Enabled = _weekendEnabled.Checked, Start = _weekendStart.Value.TimeOfDay, End = _weekendEnd.Value.TimeOfDay },
             WalltimeStartedAt = restart ? DateTimeOffset.UtcNow : _original.WalltimeStartedAt,

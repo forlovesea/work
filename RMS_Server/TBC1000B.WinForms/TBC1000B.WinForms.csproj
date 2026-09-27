@@ -5,7 +5,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <VersionPrefix>3.2.4</VersionPrefix>
+    <VersionPrefix>3.2.6</VersionPrefix>
     <ApplicationIcon>..\battery#2.ico</ApplicationIcon>
     <RootNamespace>TBC1000B.WinForms</RootNamespace>
     <AssemblyName>TBC1000B_Monitor_v$(VersionPrefix)</AssemblyName>
@@ -15,5 +15,11 @@
     <Content Include="pantech.png" Link="Assets\pantech.png" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\install_battery.png" Link="Assets\install_battery.png" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\alarm.wav" Link="Assets\alarm.wav" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Update="skt_logo.png;pantech.png;..\install_battery.png;..\alarm.wav" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="false" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(ReleaseLicenseDirectory)' != ''">
+    <Content Include="$(ReleaseLicenseDirectory)\*.txt" Link="Licenses\%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

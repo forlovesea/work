@@ -1,0 +1,29 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build TBC1000B.WinForms",
+      "type": "process",
+      "command": "${workspaceFolder}\\.dotnet\\dotnet.exe",
+      "args": [
+        "build",
+        "${workspaceFolder}\\TBC1000B.WinForms\\TBC1000B.WinForms.csproj",
+        "--configuration",
+        "Debug"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "DOTNET_CLI_HOME": "${workspaceFolder}\\.dotnet",
+          "DOTNET_SKIP_FIRST_TIME_EXPERIENCE": "1",
+          "DOTNET_CLI_TELEMETRY_OPTOUT": "1"
+        }
+      },
+      "problemMatcher": "$msCompile",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    }
+  ]
+}

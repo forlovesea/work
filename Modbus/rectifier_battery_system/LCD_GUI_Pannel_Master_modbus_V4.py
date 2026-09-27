@@ -208,13 +208,41 @@ class PollWorker(QThread):
         text_batt_lines.append(f"Battery SOC : {soc} %")
 
         # 각 Cell 정보
-        for i in range(1, 16):
-            addr_t = 0xA739 + i + (n - 1) * 64
-            t = self.read_int16(addr_t)            
+        # 🔥 Temp 읽기
+        temp_base = 0xA73A + (n - 1) * 64
+        temp_count = 15
 
-            addr_v = 0xA74F + i + (n - 1) * 64
-            v = self.read_uint16(addr_v) / 10
-            text_cell_lines.append(f"Cell-{i:2d} Temp : {t:2d} degC / Volt : {v:.1f} V")            
+        frame = self.build_read_frame(temp_base, temp_count)
+        rx = self.send_and_recv(frame)
+
+        temps = [0]*15
+        if rx and len(rx) >= 3 + temp_count * 2 + 2:
+            data = rx[3:3 + temp_count * 2]
+            regs = struct.unpack(f">{temp_count}H", data)
+            for i in range(15):
+                temps[i] = struct.unpack(">h", struct.pack(">H", regs[i]))[0]
+
+
+        # 🔥 Volt 읽기
+        volt_base = 0xA750 + (n - 1) * 64
+        volt_count = 15
+
+        frame = self.build_read_frame(volt_base, volt_count)
+        rx = self.send_and_recv(frame)
+
+        volts = [0]*15
+        if rx and len(rx) >= 3 + volt_count * 2 + 2:
+            data = rx[3:3 + volt_count * 2]
+            regs = struct.unpack(f">{volt_count}H", data)
+            for i in range(15):
+                volts[i] = regs[i] / 10
+
+
+        # 🔥 출력
+        for i in range(15):
+            text_cell_lines.append(
+                f"Cell-{i+1:2d} Temp : {temps[i]:2d} degC / Volt : {volts[i]:.1f} V"
+            )    
 
         self.barcode_signal.emit(f"Barcode: {barcode}")
         self.battery_signal.emit("\n".join(text_batt_lines))
@@ -228,7 +256,8 @@ class PollWorker(QThread):
         
         # 헤더
         lines.append(fmt.format("ALARM ITEM", "ADDRESS", "STATUS", "VALUE"))
-        lines.append("-" * 72)
+        if alarm_count < 100:  # 제한
+            lines.append("-" * 72)
         
         # 1) Battery Missing (global)
         val = self.read_uint16(0x5022)
@@ -301,8 +330,8 @@ class PollWorker(QThread):
                 self.poll_time()
                 self.poll_battery(self.selected_n)
                 self.poll_alarm(self.selected_n) 
-                self.msleep(500)  # 500ms 간격
-                #self.msleep(1000)  # 1초 간격
+                #self.msleep(500)  # 500ms 간격
+                self.msleep(1000)  # 1초 간격
 
         except Exception as e:
             self.error_signal.emit(str(e))
@@ -526,6 +555,10 @@ class TimeBatteryGui(QWidget):
         
         self.text_frame = QTextEdit()
         self.text_frame.setReadOnly(True)
+        
+        # 🔥 추가 (핵심)
+        self.text_frame.document().setMaximumBlockCount(1000)  # 최대 1000줄 유지
+        
         # 버튼 두 개를 같은 줄에
         btn_bar = QHBoxLayout()
         self.btn_toggle_log = QPushButton("Stop Log")
@@ -752,12 +785,16 @@ class TimeBatteryGui(QWidget):
     def append_log(self, text: str):
         if not self.log_enabled:
             return
+         # 🔥 추가 (로그 너무 많을 때 샘플링)
+        if len(text) > 200:   # 너무 긴 프레임 컷
+            text = text[:200] + "..."
+            
         self.text_frame.append(text)
 
     def update_time(self, text: str):
         self.lbl_time.setText(text)
         self.latest_time_text = text
-        self.append_csv_log()
+        #self.append_csv_log()
 
     def update_battery(self, text: str):
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -767,7 +804,7 @@ class TimeBatteryGui(QWidget):
         
         self.text_battery.setPlainText(f"[{timestamp}]\n\n{text}")
         self.latest_battery_text = text
-        self.append_csv_log()
+        #self.append_csv_log()
 
 
     def update_cell(self, text: str):
@@ -783,7 +820,7 @@ class TimeBatteryGui(QWidget):
         
         self.text_cell.setPlainText(f"[{timestamp}]\n\n{text}")
         self.latest_cell_text = text
-        self.append_csv_log()
+        #self.append_csv_log()
 
 
 

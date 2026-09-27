@@ -10,6 +10,7 @@ public sealed class SnmpMonitorService : IMonitorService
         "1.3.6.1.4.1.2011.6.164.1.17.1", "1.3.6.1.4.1.2011.6.164.1.17.2",
         "1.3.6.1.4.1.2011.6.164.1.1.2.99" ];
     private const string SysUpTime = "1.3.6.1.2.1.1.3.0";
+    private const string SystemNameOid = "1.3.6.1.4.1.2011.6.164.1.1.1.19.0";
     private const string ChargeLimitOid = "1.3.6.1.4.1.2011.6.164.1.17.2.1.13.96";
     private const string SocEnableOid = "1.3.6.1.4.1.2011.6.164.1.17.2.1.29.96";
     private const string SocValueOid = "1.3.6.1.4.1.2011.6.164.1.17.2.1.30.96";
@@ -29,10 +30,15 @@ public sealed class SnmpMonitorService : IMonitorService
 
     public async Task ConnectAsync(ConnectionOptions options, CancellationToken cancellationToken)
     {
-        await DisconnectAsync(); _options = options; _snapshot.Connection = ConnectionState.Connecting; _snapshot.LastError = null; RaiseSnapshot();
+        await DisconnectAsync();
+        _snapshot.SystemName = ""; _snapshot.ModulesUpdatedAt = null; _snapshot.UpdatedAt = null;
+        _snapshot.RawValues.Clear(); SnmpDataMapper.Apply(_snapshot, _snapshot.RawValues);
+        _snapshot.ConsecutiveFailures = 0;
+        _options = options; _snapshot.Connection = ConnectionState.Connecting; _snapshot.LastError = null; RaiseSnapshot();
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken); linked.CancelAfter(TimeSpan.FromSeconds(6));
         try { await _client.GetAsync(options.Address, options.Port, options.GetCommunity, [SysUpTime], linked.Token); }
         catch (Exception ex) { _snapshot.Connection = ConnectionState.Disconnected; _snapshot.LastError = ex.Message; RaiseSnapshot(); throw; }
+        _snapshot.SystemName = await ReadSystemNameAsync(cancellationToken);
         _session = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken); _snapshot.Connection = ConnectionState.Connected; _snapshot.UpdatedAt = DateTime.Now; RaiseSnapshot();
         _pollTask = PollAsync(_session.Token); _trapTask = options.EnableTrapListener ? RunTrapAsync(_session.Token) : Task.CompletedTask;
     }
@@ -41,7 +47,23 @@ public sealed class SnmpMonitorService : IMonitorService
     {
         var session = _session; _session = null; if (session is null) return; session.Cancel();
         var tasks = new[] { _pollTask, _trapTask }.Where(t => t is not null).Cast<Task>().ToArray(); try { await Task.WhenAll(tasks); } catch (OperationCanceledException) { }
-        session.Dispose(); _pollTask = null; _trapTask = null; _snapshot.Connection = ConnectionState.Disconnected; RaiseSnapshot();
+        session.Dispose(); _pollTask = null; _trapTask = null; _snapshot.SystemName = ""; _snapshot.Connection = ConnectionState.Disconnected; RaiseSnapshot();
+    }
+
+    private async Task<string> ReadSystemNameAsync(CancellationToken token)
+    {
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+            timeout.CancelAfter(TimeSpan.FromSeconds(6));
+            var value = await GetSingleAsync(SystemNameOid, timeout.Token);
+            if (value.Oid != SystemNameOid || value.Type != SnmpDataType.OctetString) return "";
+            var text = value.Value is byte[] bytes ? System.Text.Encoding.UTF8.GetString(bytes) : value.DisplayValue;
+            var name = text.Trim('\0', ' ', '\t', '\r', '\n');
+            return name.Equals("null", StringComparison.OrdinalIgnoreCase) ? "" : name;
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+        catch (Exception) { return ""; } // Optional information must not fail the connection.
     }
 
     public async Task SetEpoAsync(int? moduleNumber, bool cutoff, CancellationToken cancellationToken)
@@ -97,10 +119,22 @@ public sealed class SnmpMonitorService : IMonitorService
                 foreach (var oid in BaseOids) { var values = await _client.WalkBulkAsync(options.Address, options.Port, options.GetCommunity, oid, 10, token); foreach (var value in values) cycle[value.Oid] = value.DisplayValue; await Task.Delay(10, token); }
                 lock (_snapshot) { _snapshot.RawValues.Clear(); foreach (var item in cycle) _snapshot.RawValues[item.Key] = item.Value; _snapshot.UpdatedAt = DateTime.Now; _snapshot.LastError = null; _snapshot.ConsecutiveFailures = 0; }
                 SnmpDataMapper.Apply(_snapshot, cycle);
+                if (_snapshot.Modules.Any(m => m.Connected)) _snapshot.ModulesUpdatedAt = DateTime.Now;
                 RaiseSnapshot();
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { break; }
-            catch (Exception ex) { _snapshot.LastError = ex.Message; _snapshot.ConsecutiveFailures++; _snapshot.TotalFailures++; if (_snapshot.ConsecutiveFailures >= 30) { _snapshot.Connection = ConnectionState.Disconnected; _session?.Cancel(); } RaiseSnapshot(); if (_snapshot.ConsecutiveFailures >= 30) break; }
+            catch (Exception ex)
+            {
+                _snapshot.LastError = ex.Message; _snapshot.ConsecutiveFailures++; _snapshot.TotalFailures++;
+                if (_snapshot.ConsecutiveFailures >= 30)
+                {
+                    _snapshot.Connection = ConnectionState.Disconnected;
+                    _snapshot.SystemName = "";
+                    _session?.Cancel();
+                }
+                RaiseSnapshot();
+                if (_snapshot.ConsecutiveFailures >= 30) break;
+            }
             await Task.Delay(TimeSpan.FromSeconds(2), token);
         }
     }

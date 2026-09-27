@@ -5,6 +5,11 @@ internal static class Program
     [STAThread]
     private static void Main(string[] args)
     {
+        // Resolve command-line paths before anchoring portable data to the executable.
+        if (args.Length >= 2 && args[0] == "--profile") args[1] = Path.GetFullPath(args[1]);
+        // With full bundle extraction, BaseDirectory points at the runtime cache.
+        // Keep customer settings and records next to the original executable.
+        Environment.CurrentDirectory = Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory;
         ApplicationConfiguration.Initialize();
 #if DEBUG
         Snmp.SnmpCodecSelfTest.Run();

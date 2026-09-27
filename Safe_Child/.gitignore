@@ -1,0 +1,9 @@
+bin/
+obj/
+*.user
+.vs/
+*.log
+Final/_Release/
+*.pfx
+*.p12
+.local_build_setup/

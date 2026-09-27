@@ -37,6 +37,8 @@ public sealed class MonitorSnapshot
     public List<ActiveAlarmEntry> ActiveAlarms { get; } = [];
     public ConnectionState Connection { get; set; }
     public DateTime? UpdatedAt { get; set; }
+    public DateTime? ModulesUpdatedAt { get; set; }
+    public string SystemName { get; set; } = "";
     public string? LastError { get; set; }
     public int ConsecutiveFailures { get; set; }
     public int TotalFailures { get; set; }

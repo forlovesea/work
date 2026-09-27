@@ -1,0 +1,25 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Python: TBC1000B 감시프로그램 V3.2.6",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}\\TBC1000B_감시프로그램_V3.2.6.py",
+      "python": "${config:python.defaultInterpreterPath}",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "TBC1000B WinForms",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build TBC1000B.WinForms",
+      "program": "${workspaceFolder}\\TBC1000B.WinForms\\bin\\Debug\\net8.0-windows\\TBC1000B_Monitor.dll",
+      "cwd": "${workspaceFolder}\\TBC1000B.WinForms\\bin\\Debug\\net8.0-windows",
+      "console": "internalConsole",
+      "stopAtEntry": false
+    }
+  ]
+}

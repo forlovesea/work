@@ -1,4 +1,4 @@
-param([string]$Version = '3.2.3-port-preview')
+param([string]$Version = '3.2.6')
 
 $ErrorActionPreference = 'Stop'
 $projectDirectory = $PSScriptRoot

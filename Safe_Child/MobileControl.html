@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Safe Child · 스마트폰 제어</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f1f5fb;color:#18243c;font:16px/1.6 system-ui,-apple-system,sans-serif}main{max-width:480px;margin:auto;padding:32px 20px}.brand{color:#2563eb;font-weight:800;letter-spacing:.03em}.intro{color:#65718a;margin:6px 0 24px}h1{font-size:27px;margin:12px 0 0}h2{font-size:20px;margin:0 0 14px}.card{background:white;border:1px solid #e2e8f0;border-radius:22px;padding:24px;margin:18px 0;box-shadow:0 8px 30px #1e3a8a08}label{display:block;font-weight:650;margin-bottom:8px}input{width:100%;padding:14px;border:1px solid #cbd5e1;border-radius:12px;font:inherit}input:focus{outline:3px solid #bfdbfe;border-color:#2563eb}button{border:0;border-radius:12px;padding:14px 18px;font:inherit;font-weight:650;cursor:pointer}.primary{background:#2563eb;color:white;width:100%;margin-top:16px}.secondary{background:#eaf1ff;color:#1d4ed8}.stop{width:100%;color:#b42318;background:#fff1f0;margin-top:12px}.quick{display:flex;gap:8px;margin:12px 0}.quick button{flex:1;padding:10px 4px}.note{font-size:13px;color:#64748b;margin:12px 0 0}#countdown{font-size:38px;line-height:1.2;font-weight:800;color:#2563eb;margin:12px 0;font-variant-numeric:tabular-nums}#message{white-space:pre-wrap;padding:14px;border-radius:12px;background:#fff7ed;color:#9a3412}#message:empty{display:none}[hidden]{display:none!important}button:disabled{opacity:.5;cursor:wait}.footer{display:flex;justify-content:space-between;align-items:center;font-size:13px;color:#64748b}.footer button{background:transparent;color:#475569;padding:8px}
+.password-field{position:relative}.password-field input{padding-right:60px}.password-eye{position:absolute;right:6px;top:50%;transform:translateY(-50%);width:44px;height:44px;padding:10px;background:transparent;color:#475569;display:grid;place-items:center}.password-eye{border-radius:50%;color:#7085a3;transition:background-color .18s ease,color .18s ease}.password-eye:hover{background:#eaf2ff;color:#3b6ebe}.password-eye:active{background:#dbeafe}.password-eye:focus-visible{outline:3px solid #bfdbfe}.password-eye svg{width:24px;height:24px}.password-eye .eye-closed{display:none}.password-eye[aria-pressed="true"] .eye-open{display:none}.password-eye[aria-pressed="true"] .eye-closed{display:block}
+main{max-width:640px}select{width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:12px;font:inherit;background:white}input[type=checkbox]{width:22px;height:22px;vertical-align:middle;margin-right:8px}.row{display:flex;align-items:center;justify-content:space-between;gap:8px}.rule{padding:16px 0;border-top:1px solid #e2e8f0}.rule strong{overflow-wrap:anywhere}.rule p{margin:4px 0;font-size:14px;color:#64748b}.day{display:grid;grid-template-columns:72px 1fr 1fr;gap:6px;align-items:center;margin:10px 0}.day input[type=time]{padding:8px;min-width:0}.day label{margin:0}.field{margin:16px 0}.badge{color:#1d4ed8;font-size:14px}fieldset{border:0;padding:0;margin:0;min-width:0}.toolbar{display:flex;gap:8px;flex-wrap:wrap}.toolbar button{flex:1}.empty{color:#64748b;text-align:center;padding:20px 0}#editor{scroll-margin-top:16px}#connection{font-size:13px;color:#64748b}button:focus-visible,select:focus-visible{outline:3px solid #93c5fd}h3{font-size:17px;margin:14px 0} @media(max-width:380px){main{padding:20px 12px}.card{padding:16px}.day{grid-template-columns:64px 1fr 1fr}}
+</style></head><body><main>
+<div class="brand">SAFE CHILD</div><h1>PC 보호 설정</h1><p class="intro">사이트별 차단과 요일별 시간을 관리하세요.</p><p id="connection" role="status">PC 연결 확인 중</p>
+<p id="message" role="status" aria-live="polite"></p>
+<form id="login" class="card"><h2>관리자 인증</h2><label for="password">__AUTH_LABEL__</label><div class="password-field"><input id="password" type="password" autocomplete="current-password" required maxlength="1024"><button type="button" id="password-eye" class="password-eye" aria-label="비밀번호 표시" aria-pressed="false" aria-controls="password"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><g class="eye-open"><path d="M3 12C7 5 17 5 21 12C17 19 7 19 3 12Z"/><circle cx="12" cy="12" r="2.7"/></g><path class="eye-closed" d="M3 10C7 18 17 18 21 10M6 14l-2 3M12 16v3M18 14l2 3"/></svg></button></div><button class="primary" type="submit">인증하고 계속</button><p class="note">인증은 15분 동안 유지됩니다.</p></form>
+<section id="controls" hidden>
+<section class="card" aria-labelledby="rules-title"><div class="row"><h2 id="rules-title">사이트별 보호</h2><button id="reload-rules" type="button" class="secondary">새로고침</button></div><p id="pc-clock" class="note"></p><p id="override-note" class="note" hidden>전체 일시 허용 중입니다. 저장한 차단 규칙은 일시 허용이 끝난 뒤 적용됩니다.</p><button id="add-rule" type="button" class="primary">사이트 추가</button><div id="rules"></div></section>
+<form id="editor" class="card" hidden><h2 id="editor-title">사이트 편집</h2><p id="editor-message" role="status" aria-live="polite"></p><fieldset id="editor-fields">
+<label for="domain">사이트 주소</label><input id="domain" placeholder="예: youtube.com" maxlength="2048" required autocomplete="off"><p class="note">주소를 붙여 넣어도 됩니다. 페이지 경로는 제외하고 도메인을 등록합니다.</p>
+<label class="field"><input id="rule-active" type="checkbox" checked>차단 선택</label><p class="note">끄면 이 사이트 규칙으로 차단하지 않습니다.</p>
+<label for="schedule-mode">차단 시간</label><select id="schedule-mode"><option value="manual">항상 (수동 차단)</option><option value="2">요일별 반복</option><option value="0">시작·종료 날짜 지정</option><option value="1">지금부터 일정 시간</option></select>
+<div id="weekly-fields" hidden><h3>요일별 차단 시간</h3><p class="note">PC 현지 시각 기준입니다. 종료가 시작보다 이르면 다음 날까지, 같으면 종일 차단합니다. 체크하지 않은 날에도 전날 시작한 차단이 이어질 수 있습니다.</p><div id="days"></div></div>
+<div id="absolute-fields" hidden><div class="field"><label for="rule-start">시작 (PC 현지 시각)</label><input id="rule-start" type="datetime-local" step="1"></div><div class="field"><label for="rule-end">종료 (PC 현지 시각)</label><input id="rule-end" type="datetime-local" step="1"></div></div>
+<div id="duration-fields" hidden><div class="field"><label for="rule-minutes">차단할 시간 (분)</label><input id="rule-minutes" type="number" min="1" max="525600" step="1" value="60"></div><label><input id="restart-timer" type="checkbox">저장할 때 시간을 다시 시작</label><p class="note">같은 설정은 남은 시간을 유지합니다. 시간 적용을 새로 켜거나 방식·분 값을 바꾸면 새로 시작합니다.</p></div>
+<button type="submit" class="primary">저장하고 적용</button><div class="toolbar field"><button id="cancel-edit" type="button" class="secondary">취소</button><button id="delete-rule" type="button" class="stop">사이트 삭제</button></div>
+</fieldset></form>
+<div class="card"><div id="state">보호 상태 확인 중</div><div id="countdown">--:--:--</div><div id="deadline" class="note"></div></div>
+<form id="allow" class="card"><h2>모든 사이트 일시 허용</h2><label for="minutes">허용 시간 (분)</label><input id="minutes" type="number" inputmode="numeric" min="1" max="1440" step="1" value="30" required><div class="quick"><button type="button" class="secondary" data-minutes="15">15분</button><button type="button" class="secondary" data-minutes="30">30분</button><button type="button" class="secondary" data-minutes="60">1시간</button><button type="button" class="secondary" data-minutes="120">2시간</button></div><button type="submit" class="primary">지금부터 허용</button><button type="button" id="stop" class="stop">허용 종료 · 보호 복원</button><p class="note">설정하면 지금부터 새로 계산합니다. 최대 24시간이며, 종료 시 Safe Child의 기존 도메인·포트 규칙을 다시 적용합니다. 다른 보안 프로그램의 차단은 변경하지 않습니다.</p></form>
+<div class="footer"><span>PC 앱이 켜져 있어야 제어할 수 있습니다.</span><button id="logout">로그아웃</button></div></section>
+</main><script nonce="__NONCE__">
+const base=location.pathname.replace(/\/$/,''),login=document.querySelector('#login'),controls=document.querySelector('#controls'),message=document.querySelector('#message');
+let remaining=0,received=Date.now(),authorized=false,polling=false;
+function notice(text){message.textContent=text;document.querySelector('#editor-message').textContent=text}
+function setPasswordVisible(visible){document.querySelector('#password').type=visible?'text':'password';const button=document.querySelector('#password-eye');button.setAttribute('aria-pressed',String(visible));button.setAttribute('aria-label',visible?'비밀번호 숨기기':'비밀번호 표시')}
+document.querySelector('#password-eye').addEventListener('click',()=>{setPasswordVisible(document.querySelector('#password').type==='password');document.querySelector('#password').focus()});
+function signedIn(value){const changed=authorized!==value;authorized=value;login.hidden=value;controls.hidden=!value;setPasswordVisible(false);if(!value){document.querySelector('#editor').hidden=true;document.querySelector('#rules').replaceChildren();editing=null;rulesLoaded=false}if(value&&changed)loadRules().catch(e=>notice(e.message))}
+async function api(path,data){
+ const response=await fetch(base+'/api/'+path,{method:data===undefined?'GET':'POST',credentials:'same-origin',cache:'no-store',headers:data===undefined?{}:{'Content-Type':'application/json','X-SafeChild':'1'},body:data===undefined?undefined:JSON.stringify(data)});
+ if(response.status===401){signedIn(false);throw Error('비밀번호를 확인하거나 다시 인증해 주세요.')}
+ if(response.status===429)throw Error('인증 요청이 많습니다. 1분 후 다시 시도하세요.');
+ if(!response.ok){let detail;try{detail=await response.json()}catch{}throw Error(detail?.error||'PC에 적용하지 못했습니다. 연결과 PC 상태를 확인하세요.')}
+ return response.status===204?null:response.json();
+}
+function render(status){
+ document.querySelector('#connection').textContent='PC 연결됨 · '+new Date().toLocaleTimeString('ko-KR');
+ document.querySelector('#override-note').hidden=!status.allowAll;
+ remaining=status.remainingSeconds;received=Date.now();
+ document.querySelector('#state').textContent=status.allowAll?'모든 사이트 허용 중':'기존 보호 규칙 적용 중';
+ document.querySelector('#deadline').textContent=status.allowAll&&status.until?'종료 예정 · '+new Date(status.until).toLocaleString('ko-KR'):'허용 시간을 설정하면 PC의 차단을 잠시 해제합니다.';
+ document.querySelector('#stop').disabled=!status.allowAll;
+ if(status.error)notice(status.error);tick();return !status.error;
+}
+function tick(){const seconds=Math.max(0,remaining-Math.floor((Date.now()-received)/1000));document.querySelector('#countdown').textContent=[Math.floor(seconds/3600),Math.floor(seconds/60)%60,seconds%60].map(v=>String(v).padStart(2,'0')).join(':')}
+async function action(form,run){const buttons=[...form.querySelectorAll('button')];buttons.forEach(b=>b.disabled=true);notice('');try{await run()}catch(e){notice(e.message||'PC와 연결할 수 없습니다. 연결 상태를 확인하세요.')}finally{buttons.forEach(b=>b.disabled=false);document.querySelector('#stop').disabled=remaining<=0}}
+login.addEventListener('submit',e=>{e.preventDefault();action(login,async()=>{const password=document.querySelector('#password');const status=await api('login',{password:password.value});password.value='';signedIn(true);render(status)})});
+document.querySelectorAll('[data-minutes]').forEach(b=>b.addEventListener('click',()=>document.querySelector('#minutes').value=b.dataset.minutes));
+document.querySelector('#allow').addEventListener('submit',e=>{e.preventDefault();action(e.currentTarget,async()=>{const minutes=Number(document.querySelector('#minutes').value);if(!Number.isInteger(minutes)||minutes<1||minutes>1440)throw Error('1~1440분 사이의 정수를 입력하세요.');if(render(await api('allow',{minutes})))notice('허용 시간을 적용했습니다.');await loadRules()})});
+document.querySelector('#stop').addEventListener('click',()=>action(document.querySelector('#allow'),async()=>{if(render(await api('allow',{minutes:0})))notice('허용을 종료하고 기존 보호 규칙을 적용했습니다.');await loadRules()}));
+document.querySelector('#logout').addEventListener('click',async()=>{try{await api('logout',{});signedIn(false);notice('로그아웃했습니다. 설정한 허용 시간은 유지됩니다.')}catch(e){notice(e.message)}});
+async function refresh(){if(polling)return;polling=true;try{const status=await api('status');signedIn(true);render(status);if(rulesLoaded&&!ruleBusy)await loadRules()}catch(e){document.querySelector('#connection').textContent=authorized?'PC 연결 확인 실패 · 마지막 확인 정보 표시 중':'인증이 필요합니다.';if(authorized)notice('PC 연결을 확인하세요. 표시된 상태는 마지막 확인 기준입니다.')}finally{polling=false}}
+const $=id=>document.getElementById(id);let editing=null,rulesLoaded=false,ruleBusy=false,ruleGeneration=0,pcNow='';
+const dayInputs=[];
+for(const index of [1,2,3,4,5,6,0]){const row=document.createElement('div');row.className='day';const label=document.createElement('label'),enabled=document.createElement('input');enabled.type='checkbox';label.append(enabled,document.createTextNode('일월화수목금토'[index]));const start=document.createElement('input'),end=document.createElement('input');start.type=end.type='time';start.setAttribute('aria-label','일월화수목금토'[index]+'요일 시작');end.setAttribute('aria-label','일월화수목금토'[index]+'요일 종료');enabled.onchange=()=>{start.disabled=end.disabled=!enabled.checked};row.append(label,start,end);$('days').append(row);dayInputs[index]={enabled,start,end}}
+function showRules(data){rulesLoaded=true;pcNow=data.pcTime;$('pc-clock').textContent='PC 시각 · '+data.pcTime+' ('+data.timeZone+')';$('override-note').hidden=!data.allowAll;$('rules').replaceChildren();if(data.error)notice(data.error);if(!data.rules.length){const p=document.createElement('p');p.className='empty';p.textContent='등록된 사이트가 없습니다.';$('rules').append(p)}for(const rule of data.rules){const card=document.createElement('article');card.className='rule';const head=document.createElement('div');head.className='row';const name=document.createElement('strong');name.textContent=rule.domain;const button=document.createElement('button');button.type='button';button.className='secondary';button.textContent='편집';button.onclick=()=>openEditor(rule);head.append(name,button);const state=document.createElement('p');state.className='badge';state.textContent=rule.state+' · '+rule.remaining;const description=document.createElement('p');description.textContent=rule.description;card.append(head,state,description);$('rules').append(card)}}
+async function loadRules(){const generation=++ruleGeneration;const data=await api('rules');if(authorized&&generation===ruleGeneration)showRules(data)}
+function modeChanged(){const mode=$('schedule-mode').value;$('weekly-fields').hidden=mode!=='2';$('absolute-fields').hidden=mode!=='0';$('duration-fields').hidden=mode!=='1';$('rule-start').required=$('rule-end').required=mode==='0';$('rule-minutes').required=mode==='1'}
+function openEditor(rule){
+ if(ruleBusy)return;
+ if(!rulesLoaded){notice('PC 설정을 먼저 불러와야 합니다. 새로고침을 눌러 주세요.');return}
+ if(!$('editor').hidden&&!confirm('작성 중인 내용을 버리고 다른 설정을 여시겠습니까?'))return;
+ editing=rule?structuredClone(rule):null;
+ const date=pcNow.replace(' ','T');
+ // Work on the PC's wall-clock string without converting it to the phone's time zone.
+ const end=new Date(Date.parse(date+'Z')+3600000).toISOString().slice(0,19);
+ const s=rule?.schedule||{enabled:false,type:2,start:date,end,minutes:60,
+  days:Array.from({length:7},()=>({enabled:true,start:'18:00',end:'22:00'}))};
+ $('editor-title').textContent=rule?'사이트 편집':'사이트 추가';
+ $('domain').value=rule?.domain||'';$('rule-active').checked=rule?.active??true;
+ $('schedule-mode').value=s.enabled?String(s.type):'manual';
+ $('rule-start').value=s.start;$('rule-end').value=s.end;
+ $('rule-minutes').value=s.minutes;$('restart-timer').checked=false;
+ s.days.forEach((w,i)=>{const d=dayInputs[i];d.enabled.checked=w.enabled;
+  d.start.value=w.start;d.end.value=w.end;d.start.disabled=d.end.disabled=!w.enabled});
+ $('delete-rule').hidden=!rule;modeChanged();notice('');
+ $('editor').hidden=false;$('editor').scrollIntoView({behavior:'smooth'});$('domain').focus();
+}
+$('schedule-mode').onchange=modeChanged;$('add-rule').onclick=()=>openEditor(null);$('cancel-edit').onclick=()=>{$('editor').hidden=true;editing=null};$('reload-rules').onclick=()=>action($('reload-rules').parentElement,loadRules);
+async function writeRule(operation){
+ if(ruleBusy)return;
+ const mode=$('schedule-mode').value;
+ const command={operation,originalDomain:editing?.domain??null,version:editing?.version??null,
+  domain:$('domain').value,active:$('rule-active').checked,
+  schedule:{enabled:mode!=='manual',type:mode==='manual'?(editing?.schedule.type??2):Number(mode),
+   start:$('rule-start').value,end:$('rule-end').value,minutes:Number($('rule-minutes').value),
+   restart:$('restart-timer').checked,
+   days:dayInputs.map(d=>({enabled:d.enabled.checked,start:d.start.value,end:d.end.value}))}};
+ ruleBusy=true;++ruleGeneration;$('editor-fields').disabled=true;notice('');
+ try{
+  const data=await api('rules',command);++ruleGeneration;
+  if(!authorized)return;
+  showRules(data);$('editor').hidden=true;editing=null;
+  notice(data.error?'설정은 저장했지만 PC 차단 적용에 실패했습니다. '+data.error:
+   operation==='delete'?'사이트를 삭제했습니다.':data.allowAll?
+   '저장했습니다. 전체 일시 허용이 끝나면 적용됩니다.':'설정을 저장하고 적용했습니다.');
+  message.scrollIntoView({behavior:'smooth',block:'center'});
+ }catch(e){notice(e.message||'저장 결과를 확인할 수 없습니다. 새로고침해 PC 상태를 확인하세요.')}
+ finally{ruleBusy=false;$('editor-fields').disabled=false}
+}
+$('editor').onsubmit=e=>{e.preventDefault();writeRule('save')};$('delete-rule').onclick=()=>{if(editing&&confirm(editing.domain+'을 삭제하시겠습니까?'))writeRule('delete')};
+setInterval(tick,1000);setInterval(()=>{if(authorized)refresh()},5000);refresh();
+</script></body></html>

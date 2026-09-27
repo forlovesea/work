@@ -1,0 +1,13 @@
+# Generated build output and local runtime files
+__pycache__/
+*.py[cod]
+*.log
+app.lock
+build/
+dist/
+bin/
+obj/
+.venv/
+.pytest_cache/
+RMS_Server/installers/
+RMS_Server/TBC1000B.WinForms/Final/*.exe

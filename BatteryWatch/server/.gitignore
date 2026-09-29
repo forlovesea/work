@@ -1,0 +1,7 @@
+*.local.json
+data/
+logs/
+certs/
+backups/
+*.sqlite3*
+__pycache__/

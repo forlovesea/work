@@ -1,0 +1,38 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'com.batterywatch.monitor'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'com.batterywatch.monitor'
+        minSdk 26
+        targetSdk 35
+        versionCode 1
+        versionName '0.1.0'
+        testInstrumentationRunner 'android.test.InstrumentationTestRunner'
+    }
+    flavorDimensions 'delivery'
+    productFlavors {
+        offline { dimension 'delivery'; applicationIdSuffix '.offline' }
+        push { dimension 'delivery' }
+    }
+    buildFeatures { buildConfig true }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    buildTypes {
+        debug { applicationIdSuffix '.debug' }
+        release { minifyEnabled false }
+    }
+}
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+    pushImplementation 'com.google.firebase:firebase-messaging:24.1.0'
+}
+def requested = gradle.startParameter.taskNames.collect { it.toLowerCase() }
+def pushRequested = requested.any { it.contains('push') || it in ['build', 'assemble', ':app:build', ':app:assemble'] }
+if (file('google-services.json').exists() && !requested.any { it.contains('offline') }) {
+    apply plugin: 'com.google.gms.google-services'
+} else if (pushRequested) {
+    throw new GradleException('Push builds require app/google-services.json from your Firebase project.')
+}

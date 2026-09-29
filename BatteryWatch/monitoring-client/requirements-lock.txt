@@ -1,0 +1,20 @@
+# Tested on Windows with Python 3.10. Full dependency versions.
+Jinja2==3.1.6
+MarkupSafe==3.0.3
+PySide6==6.9.2
+PySide6_Addons==6.9.2
+PySide6_Essentials==6.9.2
+certifi==2026.2.25
+charset-normalizer==3.4.6
+et_xmlfile==2.0.0
+idna==3.11
+openpyxl==3.1.5
+ply==3.11
+psutil==7.2.2
+pyasn1==0.4.8
+pycryptodomex==3.23.0
+pysmi==1.6.3
+pysnmp==4.4.12
+requests==2.32.5
+shiboken6==6.9.2
+urllib3==2.6.3

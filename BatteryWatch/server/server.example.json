@@ -1,0 +1,33 @@
+{
+  "host": "0.0.0.0",
+  "port": 9443,
+  "database": "data/batterywatch.sqlite3",
+  "tls": {
+    "certfile": "certs/fullchain.pem",
+    "keyfile": "certs/privkey.pem"
+  },
+  "max_connections": 32,
+  "idle_timeout": 3700,
+  "frame_timeout": 15,
+  "max_frame_bytes": 16777216,
+  "collectors": [
+    {
+      "id": "collector-01",
+      "token_sha256": "REPLACE_WITH_SHA256_FROM_GENERATED_LOCAL_CONFIG",
+      "devices": [
+        {
+          "site_id": "site-01",
+          "device_id": "battery-01"
+        }
+      ]
+    }
+  ],
+  "alarms": {
+    "scan_seconds": 5,
+    "stale_seconds": 60,
+    "rules": []
+  },
+  "push": {
+    "enabled": false
+  }
+}

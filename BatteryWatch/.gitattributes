@@ -1,0 +1,10 @@
+*.py text
+*.md text
+*.json text
+*.sh text eol=lf
+gradlew text eol=lf
+*.bat text eol=crlf
+*.jar binary
+*.png binary
+*.ico binary
+*.wav binary

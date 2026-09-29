@@ -1,0 +1,161 @@
+import os
+os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+import json
+import socket
+import sqlite3
+import sys
+import tempfile
+import threading
+import time
+import unittest
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from upload_transport import Outbox, UploadWorker, destination, envelope, encode_frame, receive_frame
+from test_receiver import Receiver
+
+
+class UploadTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.config = dict(enabled=True, host='127.0.0.1', port=9443, tls=False,
+                           token='local-test', ca_file='', site_id='s1', device_id='d1')
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_fragmented_frames_and_length_limit(self):
+        a,b = socket.socketpair()
+        self.addCleanup(a.close); self.addCleanup(b.close)
+        frame = encode_frame({'text':'축전지', 'number':42})
+        def send():
+            for byte in frame: a.sendall(bytes([byte]))
+        thread = threading.Thread(target=send); thread.start()
+        self.assertEqual(receive_frame(b)['number'],42)
+        thread.join()
+        a.sendall(b'\xff\xff\xff\xff')
+        with self.assertRaises(ValueError): receive_frame(b)
+
+    def test_persistence_route_isolation_and_capacity(self):
+        box = Outbox(self.root/'outbox.db', max_bytes=1000)
+        payload = envelope(self.config,'trap',{'alarm':'raised'})
+        route = destination(self.config)
+        box.put(route,payload)
+        box = Outbox(self.root/'outbox.db', max_bytes=1000)
+        self.assertEqual(box.peek(route)[0],payload['sample_id'])
+        self.assertIsNone(box.peek(destination(dict(self.config,host='other'))))
+        with self.assertRaises(RuntimeError):
+            box.put(route,envelope(self.config,'snapshot',{'large':'x'*2000}))
+        self.assertEqual(box.count(),1)
+
+    def test_ack_retry_and_deduplication(self):
+        server = Receiver(('127.0.0.1',0),self.root/'received.db','local-test')
+        self.addCleanup(server.server_close)
+        thread = threading.Thread(target=server.serve_forever,daemon=True); thread.start()
+        self.addCleanup(server.shutdown)
+        self.config['port'] = server.server_address[1]
+        payload = envelope(self.config,'snapshot',{'soc':80})
+        # Server commits, but client loses ACK; same ID must be accepted on retry.
+        with socket.create_connection(server.server_address) as sock:
+            sock.sendall(encode_frame(dict(type='upload', token='local-test',payload=payload)))
+            self.assertTrue(receive_frame(sock)['ok'])
+        box = Outbox(self.root/'queue.db'); box.put(destination(self.config),payload)
+        worker = UploadWorker(box,lambda text: None); worker.configure(self.config); worker.start()
+        try:
+            deadline = time.monotonic()+5
+            while box.count() and time.monotonic()<deadline: time.sleep(.02)
+            self.assertEqual(box.count(),0)
+            with sqlite3.connect(server.database) as db:
+                self.assertEqual(db.execute('SELECT count(*) FROM samples').fetchone()[0],1)
+        finally:
+            worker.stop(); worker.join(5)
+        self.assertFalse(worker.is_alive())
+
+    def test_bad_ack_preserves_queue(self):
+        listener=socket.socket(); listener.bind(('127.0.0.1',0)); listener.listen()
+        self.addCleanup(listener.close)
+        self.config['port']=listener.getsockname()[1]
+        def reject():
+            conn,_=listener.accept()
+            with conn:
+                receive_frame(conn)
+                conn.sendall(encode_frame({'type':'ack','sample_id':'wrong','ok':True}))
+        thread=threading.Thread(target=reject,daemon=True); thread.start()
+        box=Outbox(self.root/'queue.db'); box.put(destination(self.config),envelope(self.config,'trap',{}))
+        failed=threading.Event()
+        worker=UploadWorker(box,lambda text: failed.set()); worker.configure(self.config); worker.start()
+        try:
+            self.assertTrue(failed.wait(5)); self.assertEqual(box.count(),1)
+        finally:
+            worker.stop(); worker.join(5)
+        thread.join(2)
+
+    def test_gui_snapshot_and_fast_alarm_recovery(self):
+        from PySide6.QtWidgets import QApplication, QDialog, QSpinBox, QDialogButtonBox
+        from PySide6.QtCore import QSettings, QTimer
+        import monitor
+        app=QApplication.instance() or QApplication([])
+        profile=self.root/'test.ini'
+        settings=QSettings(str(profile),QSettings.IniFormat)
+        settings.setValue('site','test'); settings.sync()
+        ui=monitor.BatteryMonitorUI(str(profile),'Slave',forced_slave=True)
+        controller=ui.upload_controller
+        original_queue=Path(controller.outbox.path)
+        try:
+            self.assertEqual(controller.config['interval'],5)
+            def edit_settings():
+                dialog=ui.findChild(QDialog)
+                dialog.findChild(QSpinBox,'upload_interval').setValue(12)
+                dialog.findChild(QDialogButtonBox).button(QDialogButtonBox.Save).click()
+            QTimer.singleShot(0,edit_settings)
+            controller.open_settings()
+            self.assertEqual(controller.load_config()['interval'],12)
+            saved=QSettings(str(profile),QSettings.IniFormat)
+            self.assertEqual(saved.value('upload/interval',type=int),12)
+            controller.worker.stop(); controller.worker.join(5)
+            controller.outbox=Outbox(self.root/'ui.db')
+            controller.config=dict(self.config, interval=5)
+            ui.module_data={'1':{'soc':83,'cells':[3.2,3.3],'temps':[24,25]}}
+            controller.poll(True,{'1.2.3':'raw'})
+            controller.trap({'alarm':'raised','_source_ip':'10.0.0.1'})
+            controller.trap({'alarm':'recovered','_source_ip':'10.0.0.1'})
+            controller.capture()
+            with sqlite3.connect(controller.outbox.path) as db:
+                data=[json.loads(r[0]) for r in db.execute('SELECT payload FROM queue ORDER BY seq')]
+            self.assertEqual([p['kind'] for p in data],['trap','trap','snapshot'])
+            self.assertEqual(data[2]['data']['module_data']['1']['soc'],83)
+            self.assertEqual(data[2]['data']['raw_oids'],{'1.2.3':'raw'})
+            self.assertIsNotNone(data[2]['data']['last_poll_at'])
+            controller.config['interval']=12; controller.apply_timer()
+            self.assertEqual(controller.timer.interval(),12000)
+            self.assertFalse(data[2]['data']['connected'])
+        finally:
+            ui.close(); app.processEvents()
+            original_queue.unlink(missing_ok=True)
+
+
+    def test_reconnect_after_server_unavailable(self):
+        server=Receiver(('127.0.0.1',0),self.root/'received.db','local-test')
+        port=server.server_address[1]
+        server.server_close()
+        self.config['port']=port
+        box=Outbox(self.root/'queue.db')
+        box.put(destination(self.config),envelope(self.config,'snapshot',{'offline':True}))
+        failed=threading.Event()
+        worker=UploadWorker(box,lambda text: failed.set())
+        worker.configure(self.config); worker.start()
+        try:
+            self.assertTrue(failed.wait(5))
+            self.assertEqual(box.count(),1)
+            with Receiver(('127.0.0.1',port),self.root/'received.db','local-test') as server:
+                thread=threading.Thread(target=server.serve_forever,daemon=True); thread.start()
+                try:
+                    deadline=time.monotonic()+8
+                    while box.count() and time.monotonic()<deadline: time.sleep(.02)
+                    self.assertEqual(box.count(),0)
+                finally: server.shutdown()
+        finally:
+            worker.stop(); worker.join(5)
+
+
+if __name__=='__main__': unittest.main()

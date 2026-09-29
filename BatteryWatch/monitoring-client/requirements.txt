@@ -1,0 +1,2 @@
+# Python 3.10 required for the legacy SNMP asyncore stack.
+-r requirements-lock.txt

@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "sample_id": "5a622bd8-8dce-48f7-b495-a7be0bb6f0a2",
+  "site_id": "demo-site",
+  "device_id": "demo-battery-01",
+  "observed_at": "2026-09-28T00:00:00Z",
+  "quality": "good",
+  "modules": [
+    {
+      "module_id": "1",
+      "connected": true,
+      "soc_percent": 80.0,
+      "soh_percent": 95.0,
+      "voltage_v": 48.0,
+      "current_a": 0.0,
+      "cells": [
+        {
+          "cell_number": 1,
+          "voltage_v": 3.2,
+          "temperature_c": 25.0
+        }
+      ],
+      "device_alarms": []
+    }
+  ]
+}

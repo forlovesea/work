@@ -87,8 +87,9 @@ public final class BatteryDashboard {
         LinearLayout selection=new LinearLayout(context); selection.setOrientation(LinearLayout.VERTICAL);
         LinearLayout rackCard=card(parent); rackCard.addView(label("RACK OVERVIEW",12,GREEN));
         rackCard.addView(label("모듈을 선택해 상세값을 확인하세요",15,INK));
-        rackCard.addView(label("번호순 표시 · 실제 장착 위치와 다를 수 있음",11,MUTED));
+        rackCard.addView(label("번호 내림차순 표시 · 실제 장착 위치와 다를 수 있음",11,MUTED));
         List<ModuleSlots.Slot> installed=new ArrayList<>(); for(ModuleSlots.Slot s:slots) if(s.mapped&&installed.size()<10) installed.add(s);
+        Collections.reverse(installed);
         if(!installed.isEmpty()) {
             RackView rack=new RackView(context,installed,values,fresh);
             rack.choose=slot->{selectedId=slot.mapped+":"+slot.id;

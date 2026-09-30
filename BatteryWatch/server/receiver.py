@@ -109,6 +109,8 @@ def load_config(path):
     push=c.get('push',{})
     if not isinstance(push,dict) or type(push.get('enabled',False)) is not bool: raise ValueError('Invalid push configuration')
     if push.get('service_account'): push['service_account']=str((path.parent/push['service_account']).resolve())
+    from retention import configure as configure_retention
+    configure_retention(c)
     return c
 
 

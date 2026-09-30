@@ -47,7 +47,8 @@ async def serve(config, demo_data=False):
         raise
     if api.server: logging.info('Android API listening on %s',api.server.sockets[0].getsockname())
     stop=asyncio.Event()
-    jobs=[asyncio.create_task(monitor(engine,stop))]
+    from retention import monitor as retain
+    jobs=[asyncio.create_task(monitor(engine,stop)), asyncio.create_task(retain(storage,config,stop))]
     if demo_data:
         from smartphone_demo import feed
         logging.warning('SIMULATED DEMO: 10 modules, updates every 5 seconds; database=%s; real uploads rejected; push disabled',config['database'])

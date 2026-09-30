@@ -31,15 +31,18 @@ class Storage:
                     PRIMARY KEY(collector_id, sample_id));
                 CREATE INDEX IF NOT EXISTS samples_device_time
                     ON samples(site_id, device_id, captured_at DESC);
+                CREATE INDEX IF NOT EXISTS samples_received_time ON samples(received_at);
                 CREATE TABLE IF NOT EXISTS devices (
                     site_id TEXT NOT NULL, device_id TEXT NOT NULL,
                     collector_id TEXT NOT NULL, sample_id TEXT NOT NULL,
                     captured_at TEXT NOT NULL, last_received_at TEXT NOT NULL,
                     PRIMARY KEY(site_id, device_id));
+                CREATE INDEX IF NOT EXISTS devices_sample ON devices(collector_id,sample_id);
                 CREATE TABLE IF NOT EXISTS sessions (
                     session_id TEXT PRIMARY KEY, collector_id TEXT NOT NULL,
                     peer TEXT NOT NULL, connected_at TEXT NOT NULL,
                     last_seen_at TEXT NOT NULL, disconnected_at TEXT);
+                CREATE INDEX IF NOT EXISTS sessions_disconnected ON sessions(disconnected_at);
             ''')
 
     def connect(self):

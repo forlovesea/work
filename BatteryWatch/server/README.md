@@ -76,7 +76,7 @@ python -c "import secrets,hashlib; t=secrets.token_urlsafe(32); print('token:',t
 - 미래 5분 초과 시각, 시간대 없는 시각, 잘못된 스키마/JSON/비유한 숫자, 권한 밖 장비는 거부합니다.
 - DB 트랜잭션 커밋 후에만 ACK합니다. 디스크 오류·잠금 등 실패 시 ACK하지 않아 클라이언트가 재전송합니다.
 - 기본 동시 연결 32개, 최대 프레임 16 MiB, 미인증 헤더 대기 10초, 본문 대기 15초입니다. 인증된 연결의 유휴 제한 3700초는 클라이언트 최대 업로드 주기 3600초를 수용합니다.
-- 저장 데이터 자동 삭제는 하지 않습니다. 디스크 용량과 백업을 관리해야 합니다. 대규모 장비 수에 대한 성능 검증은 아직 하지 않았습니다.
+- Telemetry history defaults to 10 days; the latest snapshot per device is retained. See the retention policy below. Monitor disk usage and maintain backups; large deployments have not been performance-tested.
 - SQLite DB 하나당 서버 프로세스 하나만 실행합니다. DB는 서버 로컬 디스크에 둡니다.
 - 서버 자체 GUI/웹 화면과 운영체제 서비스 자동 등록은 없습니다. Android 화면, 서버 알람, FCM 연동은 구현되어 있습니다.
 

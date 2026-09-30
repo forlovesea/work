@@ -34,10 +34,10 @@ def sample(tick=0):
     modules = {}
     for n in range(1, 11):
         wave = math.sin(tick / 6 + n)
-        cells = [round(3.25 + n * .002 + j * .001 + wave * .005, 3) for j in range(16)]
+        cells = [round(3.25 + n * .002 + j * .001 + wave * .005, 3) for j in range(15)]
         modules[str(n)] = dict(soc=round(75 + n + wave, 1), soh=round(99 - n * .2, 1),
                                volt=round(sum(cells), 3), current=round(-2 - n * .1 + wave * .2, 2),
-                               cells=cells, temps=[round(24 + n * .3 + j * .05 + wave * .3, 1) for j in range(16)])
+                               cells=cells, temps=[round(24 + n * .3 + j * .05 + wave * .3, 1) for j in range(15)])
     return dict(schema_version=1, sample_id=str(uuid.uuid4()), **GRANT, kind='snapshot', captured_at=stamp,
                 data=dict(source_version='SIMULATED DEMO - NOT REAL MEASUREMENTS',
                           site_name='DEMO 테스트 현장', system_name='DEMO 배터리 모듈 10개 (가상 데이터)',

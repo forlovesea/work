@@ -37,8 +37,8 @@ class SmartphoneDemoTests(unittest.IsolatedAsyncioTestCase):
                     self.assertIn('DEMO',data['system_name'])
                     for n in range(1,11):
                         row=str(data['module_map'][str(n)]['row_index'])
-                        self.assertEqual(len(data['module_data'][row]['cells']),16)
-                        self.assertEqual(len(data['module_data'][row]['temps']),16)
+                        self.assertEqual(len(data['module_data'][row]['cells']),15)
+                        self.assertEqual(len(data['module_data'][row]['temps']),15)
                     _,history=await system.request('/api/v1/history'+route)
                     self.assertEqual(len(history['history']),1)
                     self.assertNotEqual(sample(0)['data']['module_data'],sample(5)['data']['module_data'])

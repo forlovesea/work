@@ -43,6 +43,11 @@ def sample(tick=0):
                           site_name='DEMO 테스트 현장', system_name='DEMO 배터리 모듈 10개 (가상 데이터)',
                           connected=True, last_poll_ok=True, last_poll_at=stamp, raw_oids={},
                           module_map={str(n): {'row_index': n, 'model': 'SIMULATED'} for n in range(1, 11)}, module_data=modules,
+                          group_soh=98.0,
+                          summary_table=[['Rack 전압[V]', 'Rack 전류[A]', 'SOC 충전율[%]'],
+                                         [round(sum(m['volt'] for m in modules.values()) / 10, 2),
+                                          round(sum(m['current'] for m in modules.values()), 2),
+                                          round(sum(m['soc'] for m in modules.values()) / 10, 1)]],
                           active_alarms=[]))
 
 

@@ -19,6 +19,9 @@ public class MainActivity extends Activity {
     private SettingsStore settings;
     private LinearLayout content;
     private TextView status;
+    private BatteryDashboard dashboard;
+    private ScrollView scroll;
+    private ConnectionSettingsDialog settingsDialog;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ExecutorService network = Executors.newSingleThreadExecutor();
     private boolean resumed, busy;
@@ -35,27 +38,28 @@ public class MainActivity extends Activity {
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         settings = new SettingsStore(this);
+        dashboard = new BatteryDashboard(this);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(20, 24, 20, 12);
+        root.setPadding(dashboard.dp(16), dashboard.dp(12), dashboard.dp(16), dashboard.dp(8));
         if (android.os.Build.VERSION.SDK_INT >= 30) {
             root.setOnApplyWindowInsetsListener((view, insets) -> {
                 android.graphics.Insets bars = insets.getInsets(android.view.WindowInsets.Type.systemBars());
-                view.setPadding(20 + bars.left, 24 + bars.top, 20 + bars.right, 12 + bars.bottom);
+                view.setPadding(dashboard.dp(16) + bars.left, dashboard.dp(12) + bars.top, dashboard.dp(16) + bars.right, dashboard.dp(8) + bars.bottom);
                 return insets;
             });
         }
-        root.setBackgroundColor(Color.rgb(245, 247, 250));
+        root.setBackgroundColor(BatteryDashboard.BG);
         TextView title = new TextView(this);
-        title.setText("BatteryWatch"); title.setTextSize(26); title.setTextColor(Color.rgb(20, 70, 65));
+        title.setText("BatteryWatch"); title.setTextSize(26); title.setTextColor(BatteryDashboard.INK);
         root.addView(title);
         LinearLayout actions = new LinearLayout(this);
         button(actions, "장비", () -> navigate("devices"));
         button(actions, "설정", this::showSettings);
         button(actions, "새로고침", this::refresh);
         root.addView(actions);
-        status = new TextView(this); status.setPadding(0, 12, 0, 12); root.addView(status);
-        ScrollView scroll = new ScrollView(this);
+        status = new TextView(this); status.setTextSize(12); status.setTextColor(BatteryDashboard.MUTED); status.setPadding(0, dashboard.dp(10), 0, dashboard.dp(10)); root.addView(status);
+        scroll = new ScrollView(this);
         content = new LinearLayout(this); content.setOrientation(LinearLayout.VERTICAL);
         scroll.addView(content); root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
         setContentView(root);
@@ -67,23 +71,25 @@ public class MainActivity extends Activity {
 
     @Override protected void onResume() { super.onResume(); resumed = true; handler.post(poll); }
     @Override protected void onPause() { resumed = false; handler.removeCallbacks(poll); super.onPause(); }
-    @Override protected void onDestroy() { generation++; handler.removeCallbacksAndMessages(null); network.shutdownNow(); super.onDestroy(); }
+    @Override protected void onDestroy() { resumed = false; generation++; if (settingsDialog != null) settingsDialog.dismiss(); handler.removeCallbacksAndMessages(null); network.shutdownNow(); super.onDestroy(); }
 
     private void button(LinearLayout parent, String label, Runnable action) {
-        Button b = new Button(this); b.setText(label); b.setOnClickListener(v -> action.run());
-        parent.addView(b);
+        Button b = new Button(this); b.setText(label); b.setAllCaps(false); b.setTextColor(BatteryDashboard.GREEN); b.setTextSize(13);
+        b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.rgb(30, 48, 62)));
+        b.setOnClickListener(v -> action.run());
+        parent.addView(b, new LinearLayout.LayoutParams(parent.getOrientation() == LinearLayout.HORIZONTAL ? 0 : -1, dashboard.dp(48), parent.getOrientation() == LinearLayout.HORIZONTAL ? 1 : 0));
     }
 
     private void text(String value, boolean heading) {
         TextView view = new TextView(this); view.setText(value); view.setTextSize(heading ? 20 : 16);
-        view.setTextColor(Color.rgb(35, 45, 55)); view.setPadding(6, 12, 6, 12); content.addView(view);
+        view.setTextColor(heading ? BatteryDashboard.INK : BatteryDashboard.MUTED); view.setPadding(6, 12, 6, 12); content.addView(view);
     }
 
-    private void navigate(String next) { page = next; generation++; content.removeAllViews(); refresh(); }
+    private void navigate(String next) { page = next; generation++; content.removeAllViews(); scroll.scrollTo(0, 0); refresh(); }
 
     private void refresh() {
-        if (busy || isFinishing()) return;
-        if (settings.url().isEmpty()) { status.setText("설정에서 서버 주소와 조회 토큰을 입력하세요."); return; }
+        if (busy || isFinishing() || (settingsDialog != null && settingsDialog.isShowing())) return;
+        if (settings.url().isEmpty()) { status.setText("서버 연결 대기"); status.setTextColor(BatteryDashboard.MUTED); content.setAlpha(1f); content.removeAllViews(); dashboard.empty(content, this::showSettings); return; }
         busy = true;
         final int requestGeneration = generation;
         final String requestedPage = page;
@@ -97,23 +103,25 @@ public class MainActivity extends Activity {
                 JSONObject response = api.get(path);
                 runOnUiThread(() -> {
                     busy = false;
-                    if (requestGeneration != generation || isFinishing()) return;
-                    try { render(requestedPage, response); }
+                    if (isFinishing()) return;
+                    if (requestGeneration != generation) { refresh(); return; }
+                    try { int y = scroll.getScrollY(); render(requestedPage, response); scroll.post(() -> scroll.scrollTo(0, y)); }
                     catch (Exception e) { status.setText("서버 데이터 형식을 확인하세요."); }
                 });
             } catch (Exception e) {
                 runOnUiThread(() -> {
                     busy = false;
-                    if (requestGeneration != generation || isFinishing()) return;
+                    if (isFinishing()) return;
+                    if (requestGeneration != generation) { refresh(); return; }
                     status.setText("조회 실패 — 표시된 값은 이전 데이터입니다.\n" + e.getMessage());
-                    status.setTextColor(Color.rgb(160, 45, 35));
+                    status.setTextColor(BatteryDashboard.AMBER); content.setAlpha(0.55f);
                 });
             }
         });
     }
 
     private void render(String requestedPage, JSONObject response) throws JSONException {
-        content.removeAllViews(); status.setTextColor(Color.rgb(65, 75, 85));
+        content.removeAllViews(); content.setAlpha(1f); status.setTextColor(BatteryDashboard.MUTED);
         status.setText("서버 응답: " + response.optString("server_time", ""));
         if (requestedPage.equals("devices")) {
             JSONArray devices = response.getJSONArray("devices");
@@ -121,12 +129,9 @@ public class MainActivity extends Activity {
             for (int i = 0; i < devices.length(); i++) {
                 JSONObject item = devices.getJSONObject(i);
                 String s = item.getString("site_id"), d = item.getString("device_id");
-                text(s + " / " + d, true);
-                text(!item.optBoolean("available") ? "수신 데이터 없음" :
-                    (item.optBoolean("fresh") ? "정상 수신" : "통신 실패 / 오래된 데이터") +
-                    " · 모듈 " + item.optInt("module_count") + " · 장비 알람 " + value(item, "alarm_count"), false);
-                button(content, "상세 보기", () -> { site = s; device = d; navigate("details"); });
-                button(content, "알람 보기", () -> { site = s; device = d; navigate("alarms"); });
+                dashboard.device(content, item,
+                    () -> { site = s; device = d; navigate("details"); },
+                    () -> { site = s; device = d; navigate("alarms"); });
             }
             return;
         }
@@ -136,20 +141,7 @@ public class MainActivity extends Activity {
         button(tabs, "이력", () -> navigate("history"));
         button(tabs, "알람", () -> navigate("alarms")); content.addView(tabs);
         if (requestedPage.equals("details")) {
-            JSONObject data = response.getJSONObject("payload").getJSONObject("data");
-            text(response.optBoolean("fresh") ? "정상 수신" : "통신 실패 / 오래된 데이터 — 현재 정상 값으로 사용하지 마세요.", true);
-            text("측정: " + data.optString("last_poll_at", "-") + "\n서버 수신: " + response.optString("received_at", "-"), false);
-            JSONObject modules = data.optJSONObject("module_data");
-            if (modules == null || modules.length() == 0) text("모듈 정보 없음", false);
-            else for (Iterator<String> it = modules.keys(); it.hasNext();) {
-                String key = it.next(); JSONObject m = modules.optJSONObject(key); if (m == null) continue;
-                text("모듈 " + key, true);
-                text("SOC " + value(m, "soc") + "% · SOH " + value(m, "soh") + "%\n전압 " + value(m, "volt") + " V · 전류 " + value(m, "current") + " A", false);
-                JSONArray volts = m.optJSONArray("cells"), temps = m.optJSONArray("temps");
-                int count = Math.max(volts == null ? 0 : volts.length(), temps == null ? 0 : temps.length());
-                for (int i = 0; i < count; i++) text("셀 " + (i + 1) + "   " + cell(volts, i) + " V   /   " + cell(temps, i) + " °C", false);
-            }
-            text("장비 알람", true); text(data.opt("active_alarms") == null ? "정보 없음" : data.opt("active_alarms").toString(), false);
+            dashboard.details(content, response);
         } else if (requestedPage.equals("history")) {
             JSONArray history = response.getJSONArray("history");
             if (history.length() == 0) text("저장된 이력이 없습니다.", false);
@@ -162,8 +154,8 @@ public class MainActivity extends Activity {
                     text("실제 측정: " + value(h, "last_poll_at") + (h.optBoolean("connected") && h.optBoolean("last_poll_ok") ? "" : " · 통신 불량 / 이전값"), false);
                     for (Iterator<String> it = modules.keys(); it.hasNext();) {
                         String key = it.next(); JSONObject m = modules.optJSONObject(key); if (m == null) continue;
-                        text("모듈 " + key + " · SOC " + value(m, "soc") + "% · " + value(m, "volt") + " V · " + value(m, "current") + " A", false);
-                        button(content, "모듈 " + key + " 셀 기록", () -> showCells(key, m));
+                        text("측정 행 " + key + " · SOC " + value(m, "soc") + "% · " + value(m, "volt") + " V · " + value(m, "current") + " A", false);
+                        button(content, "측정 행 " + key + " 셀 기록", () -> showCells(key, m));
                     }
                 }
                 if (!h.isNull("raw_trap")) text("Trap: " + h.opt("raw_trap"), false);
@@ -192,7 +184,7 @@ public class MainActivity extends Activity {
         int count = Math.max(volts == null ? 0 : volts.length(), temps == null ? 0 : temps.length());
         StringBuilder message = new StringBuilder();
         for (int i = 0; i < count; i++) message.append("셀 ").append(i + 1).append("   ").append(cell(volts, i)).append(" V / ").append(cell(temps, i)).append(" °C\n");
-        new AlertDialog.Builder(this).setTitle("모듈 " + module + " 셀 기록").setMessage(count == 0 ? "셀 정보 없음" : message.toString()).setPositiveButton("닫기", null).show();
+        new AlertDialog.Builder(this).setTitle("측정 행 " + module + " 셀 기록").setMessage(count == 0 ? "셀 정보 없음" : message.toString()).setPositiveButton("닫기", null).show();
     }
 
     private void acknowledge(String id) {
@@ -206,31 +198,18 @@ public class MainActivity extends Activity {
     }
 
     private void showSettings() {
-        LinearLayout form = new LinearLayout(this); form.setOrientation(LinearLayout.VERTICAL); form.setPadding(30, 10, 30, 10);
-        EditText url = new EditText(this); url.setHint("https://서버주소:8443"); url.setSingleLine(); url.setText(settings.url()); form.addView(url);
-        EditText token = new EditText(this); token.setHint("조회용 토큰"); token.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD); form.addView(token);
-        try { token.setText(settings.token()); } catch (Exception e) { status.setText("저장된 토큰을 다시 입력하세요."); }
-        EditText interval = new EditText(this); interval.setHint("조회 주기 (5~300초)"); interval.setInputType(InputType.TYPE_CLASS_NUMBER); interval.setText(String.valueOf(settings.interval())); form.addView(interval);
-        TextView push = new TextView(this); push.setText(PushBridge.description(this)); form.addView(push);
-        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("서버 연결 설정").setView(form)
-            .setPositiveButton("저장", null).setNegativeButton("취소", null).setNeutralButton("로그아웃", null).create();
-        dialog.setOnShowListener(v -> {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(b -> {
-                try {
-                    String endpoint = Endpoint.validate(url.getText().toString(), BuildConfig.DEBUG);
-                    String secret = token.getText().toString().trim(); int seconds = Integer.parseInt(interval.getText().toString());
-                    if (secret.isEmpty() || seconds < 5 || seconds > 300) throw new IllegalArgumentException("토큰과 조회 주기를 확인하세요.");
-                    changeSettings(endpoint, secret, seconds, false, dialog);
-                } catch (Exception e) { token.setError(e.getMessage()); }
-            });
-            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(b -> changeSettings("", "", 5, true, dialog));
+        if (settingsDialog != null && settingsDialog.isShowing()) return;
+        settingsDialog = new ConnectionSettingsDialog(this, settings, this::changeSettings);
+        settingsDialog.setOnDismissListener(d -> {
+            settingsDialog = null;
+            if (resumed && !busy) refresh();
         });
-        dialog.show();
+        settingsDialog.show();
     }
 
-    private void changeSettings(String url, String token, int interval, boolean logout, AlertDialog dialog) {
-        if (busy) { status.setText("현재 조회가 끝난 뒤 다시 저장하세요."); return; }
-        busy = true; generation++;
+    private void changeSettings(String url, String token, int interval, boolean logout, ConnectionSettingsDialog dialog) {
+        if (busy) { dialog.showError("현재 조회를 마무리하고 있습니다. 잠시 후 다시 저장하세요."); return; }
+        busy = true; generation++; dialog.saving(true);
         network.execute(() -> {
             try {
                 synchronized (PushBridge.LOCK) {
@@ -243,7 +222,7 @@ public class MainActivity extends Activity {
                     refresh();
                 });
             } catch (Exception e) {
-                runOnUiThread(() -> { busy = false; status.setText("설정 변경 실패 (이전 서버 알림 등록 해제 포함): " + e.getMessage()); });
+                runOnUiThread(() -> { busy = false; dialog.saving(false); dialog.showError("설정을 적용하지 못했습니다. 서버 연결과 이전 알림 등록 해제를 확인하세요.\n" + e.getMessage()); });
             }
         });
     }

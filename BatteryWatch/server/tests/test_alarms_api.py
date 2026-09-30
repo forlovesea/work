@@ -205,3 +205,14 @@ class ApiHttpTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.request('DELETE',route,{}))[0], 200)
         self.assertEqual((await self.request('PUT',route,[]))[0], 400)
         self.assertEqual((await self.request(extra='Transfer-Encoding: chunked\r\n'))[0], 400)
+
+    async def test_debug_metadata_redacts_credentials_and_query(self):
+        with self.assertLogs('batterywatch.api', level='DEBUG') as logs:
+            self.assertEqual((await self.request(route='/api/v1/devices?secret=PRIVATE_QUERY'))[0], 200)
+            self.assertEqual((await self.request(token='PRIVATE_BAD_TOKEN'))[0], 401)
+            self.assertEqual((await self.request(route='/PRIVATE_PATH'))[0], 404)
+        output='\n'.join(logs.output)
+        for expected in ('API connected', 'API response', 'status=200', 'status=401', 'status=404', 'elapsed_ms=', 'route=/api/v1/devices'):
+            self.assertIn(expected, output)
+        for secret in ('view-token', 'PRIVATE_BAD_TOKEN', 'PRIVATE_QUERY', 'PRIVATE_PATH', 'Authorization'):
+            self.assertNotIn(secret, output)

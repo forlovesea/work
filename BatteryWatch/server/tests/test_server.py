@@ -60,6 +60,18 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         finally:
             writer.close(); await writer.wait_closed()
 
+    async def test_upload_debug_ack_and_redaction(self):
+        sample=self.sample()
+        sample['data']['raw_oids']['secret']='PRIVATE_PAYLOAD'
+        with self.assertLogs('batterywatch', level='DEBUG') as logs:
+            self.assertTrue((await self.send(sample))['ok'])
+            self.assertTrue((await self.send(sample))['duplicate'])
+        output='\n'.join(logs.output)
+        for expected in ('UPLOAD frame', 'UPLOAD authenticated', 'UPLOAD ack', 'duplicate=True', "device='battery-01'"):
+            self.assertIn(expected, output)
+        self.assertNotIn(self.client['token'], output)
+        self.assertNotIn('PRIVATE_PAYLOAD', output)
+
     async def test_storage_duplicate_latest_and_traps(self):
         p=self.sample()
         self.assertTrue((await self.send(p,fragment=True))['ok'])

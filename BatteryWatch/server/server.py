@@ -33,7 +33,7 @@ def initialize(path, site, device):
     return credentials
 
 
-async def serve(config):
+async def serve(config, demo_data=False):
     storage=Storage(config['database'])
     engine=AlarmEngine(storage,config)
     push_config=config.get('push',{})
@@ -48,6 +48,10 @@ async def serve(config):
     if api.server: logging.info('Android API listening on %s',api.server.sockets[0].getsockname())
     stop=asyncio.Event()
     jobs=[asyncio.create_task(monitor(engine,stop))]
+    if demo_data:
+        from smartphone_demo import feed
+        logging.warning('SIMULATED DEMO: 10 modules, updates every 5 seconds; database=%s; real uploads rejected; push disabled',config['database'])
+        jobs.append(asyncio.create_task(feed(storage,stop)))
     if sender: jobs.append(asyncio.create_task(deliver(Dispatcher(storage,config,sender),stop)))
     loop=asyncio.get_running_loop()
     previous={}
@@ -74,7 +78,9 @@ def main():
     doctor=sub.add_parser('doctor',help='Read-only deployment checks; no credentials are printed')
     doctor.add_argument('--android-config',help='Optional Android google-services.json path')
     sub.add_parser('self-test',help='Isolated TCP/API/alarm integration checks; no configuration required')
-    sub.add_parser('run',help='Run TCP receiver until Ctrl+C')
+    run=sub.add_parser('run',help='Run TCP receiver until Ctrl+C')
+    run.add_argument('--demo-data',action='store_true',help='Serve 10 simulated modules using a separate demo database and existing API credentials')
+    run.add_argument('--debug',action='store_true',help='Log communication metadata without tokens or payloads')
     mobile=sub.add_parser('enable-api',help='Create a separate read-only Android credential')
     mobile.add_argument('--site',default='site-01'); mobile.add_argument('--device',default='battery-01')
     inspect=sub.add_parser('inspect',help='Print saved history, latest snapshots and sessions as JSON')
@@ -117,6 +123,9 @@ def main():
             temporary.replace(path)
             print('Android API enabled. Connection settings:',credentials)
             return
+        if args.command=='run' and args.demo_data:
+            from smartphone_demo import prepare
+            config=prepare(config)
         configure_api(config)
         configure_alarms(config)
         if args.command=='check':
@@ -126,7 +135,9 @@ def main():
             logs=Path(args.config).resolve().parent/'logs'; logs.mkdir(exist_ok=True)
             logging.basicConfig(level=logging.INFO,format='%(asctime)s %(levelname)s %(message)s',
                                 handlers=[logging.StreamHandler(),RotatingFileHandler(logs/'server.log',maxBytes=5*1024*1024,backupCount=5,encoding='utf-8')])
-            asyncio.run(serve(config))
+            logging.getLogger('batterywatch').setLevel(logging.DEBUG if args.debug else logging.INFO)
+            logging.info('Communication debug=%s; log=%s',args.debug,logs/'server.log')
+            asyncio.run(serve(config, demo_data=args.demo_data))
         else:
             if not Path(config['database']).is_file(): raise ValueError('Database not created yet; run the receiver first')
             storage=Storage(config['database'])

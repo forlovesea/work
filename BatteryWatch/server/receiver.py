@@ -1,4 +1,5 @@
 """BatteryWatch v1 TCP/TLS receiver, Python 3.10+ standard library only."""
+from communication_log import PeerLog
 import asyncio
 import hashlib
 import hmac
@@ -143,22 +144,22 @@ class Receiver:
         if self.tasks: await asyncio.gather(*list(self.tasks),return_exceptions=True)
 
     async def handle(self, reader, writer):
+        log=PeerLog(LOG,writer,'수집기')
         task=asyncio.current_task()
         if len(self.tasks)>=self.config['max_connections']:
-            LOG.debug('UPLOAD rejected peer=%s reason=connection_limit',writer.get_extra_info('peername'))
+            log.debug('UPLOAD rejected peer=%s reason=connection_limit',writer.get_extra_info('peername'))
             writer.close(); return
         self.tasks.add(task); self.writers.add(writer)
         session_id=str(uuid4())
         peer=str(writer.get_extra_info('peername'))
         collector_id=None
-        LOG.debug('UPLOAD connected session=%s peer=%s tls=%s',session_id,peer,bool(writer.get_extra_info('ssl_object')))
-        LOG.info('Connected session=%s peer=%s',session_id,peer)
+        log.debug('UPLOAD connected session=%s peer=%s tls=%s',session_id,peer,bool(writer.get_extra_info('ssl_object')))
         try:
             while True:
                 header=await asyncio.wait_for(reader.readexactly(4),self.config['idle_timeout'] if collector_id else 10)
                 size=struct.unpack('!I',header)[0]
                 if not 0<size<=self.config['max_frame_bytes']: raise Rejected('invalid_frame_size')
-                LOG.debug('UPLOAD frame session=%s bytes=%d',session_id,size)
+                log.debug('UPLOAD frame session=%s bytes=%d',session_id,size)
                 raw=await asyncio.wait_for(reader.readexactly(size),self.config['frame_timeout'])
                 def bad_constant(_): raise Rejected('non_finite_number')
                 try:
@@ -169,27 +170,26 @@ class Receiver:
                 identity,payload=validate(message,self.config['collectors'])
                 if collector_id is not None and identity!=collector_id: raise Rejected('identity_changed')
                 if collector_id is None:
-                    LOG.debug('UPLOAD authenticated session=%s collector=%r',session_id,identity)
+                    log.debug('UPLOAD authenticated session=%s collector=%r',session_id,identity)
                 collector_id=identity
                 duplicate=await asyncio.to_thread(self.storage.save,identity,payload,session_id,peer)
                 ack=json.dumps(dict(type='ack',sample_id=payload['sample_id'],ok=True,duplicate=duplicate)).encode()
                 writer.write(struct.pack('!I',len(ack))+ack)
                 await asyncio.wait_for(writer.drain(),4)
-                LOG.debug('UPLOAD ack session=%s collector=%r site=%r device=%r sample=%r kind=%s duplicate=%s',
+                log.debug('UPLOAD ack session=%s collector=%r site=%r device=%r sample=%r kind=%s duplicate=%s',
                           session_id,identity,payload['site_id'],payload['device_id'],payload['sample_id'],payload['kind'],duplicate)
-                LOG.info('Stored collector=%s kind=%s duplicate=%s',identity,payload['kind'],duplicate)
         except (Rejected,SampleConflict) as exc:
-            LOG.warning('Rejected session=%s reason=%s',session_id,str(exc))
+            log.warning('Rejected session=%s reason=%s',session_id,str(exc))
         except (asyncio.IncompleteReadError,ConnectionError,TimeoutError,asyncio.TimeoutError,OSError) as exc:
-            LOG.debug('UPLOAD transport_closed session=%s reason=%s',session_id,type(exc).__name__)
+            log.debug('UPLOAD transport_closed session=%s reason=%s',session_id,type(exc).__name__)
         except Exception:
             # Never log raw data, request tokens or exception values containing payloads.
-            LOG.error('Storage/processing failed session=%s; no success ACK sent',session_id)
+            log.error('Storage/processing failed session=%s; no success ACK sent',session_id)
         finally:
             writer.close()
             try: await asyncio.wait_for(writer.wait_closed(),2)
             except (OSError,asyncio.TimeoutError): pass
             try: await asyncio.to_thread(self.storage.disconnected,session_id)
-            except Exception: LOG.error('Unable to record disconnect session=%s',session_id)
+            except Exception: log.error('Unable to record disconnect session=%s',session_id)
             self.writers.discard(writer); self.tasks.discard(task)
-            LOG.info('Disconnected session=%s',session_id)
+            log.debug('Disconnected session=%s',session_id)

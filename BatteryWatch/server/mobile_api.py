@@ -1,4 +1,5 @@
 """Bounded HTTP/1.1 API: telemetry reads, acknowledgements and push registration."""
+from communication_log import PeerLog
 import asyncio
 from contextlib import closing
 from datetime import datetime,timezone
@@ -168,15 +169,16 @@ class MobileApi:
         if self.tasks: await asyncio.gather(*list(self.tasks),return_exceptions=True)
 
     async def handle(self,reader,writer):
+        log=PeerLog(LOG,writer,'앱')
         task=asyncio.current_task()
         if len(self.tasks)>=32:
-            LOG.debug('API rejected peer=%s reason=connection_limit',writer.get_extra_info('peername'))
+            log.debug('API rejected peer=%s reason=connection_limit',writer.get_extra_info('peername'))
             writer.close(); return
         self.tasks.add(task); self.writers.add(writer)
         connection=uuid.uuid4().hex
         started=time.monotonic()
         method_label,route,viewer_id='unknown','unknown',None
-        LOG.debug('API connected connection=%s peer=%s tls=%s',connection,writer.get_extra_info('peername'),bool(writer.get_extra_info('ssl_object')))
+        log.debug('API connected connection=%s peer=%s tls=%s',connection,writer.get_extra_info('peername'),bool(writer.get_extra_info('ssl_object')))
         code,body=400,dict(error='bad_request')
         try:
             request=await asyncio.wait_for(reader.readuntil(b'\r\n\r\n'),10)
@@ -185,8 +187,9 @@ class MobileApi:
             method,target,version=lines[0].split(' ')
             method_label=method if method in ('GET','POST','PUT','DELETE','HEAD','OPTIONS') else 'other'
             path=urlsplit(target).path
-            routes=('/api/v1/devices','/api/v1/alarms','/api/v1/snapshot','/api/v1/acknowledgements')
+            routes=('/api/v1/devices','/api/v1/alarms','/api/v1/snapshot','/api/v1/history','/api/v1/acknowledgements')
             route=path if path in routes else ('/api/v1/push-devices/:id' if path.startswith('/api/v1/push-devices/') else 'other')
+            log.debug('API request connection=%s method=%s route=%s',connection,method_label,route)
             headers={}
             for line in lines[1:]:
                 if not line: continue
@@ -213,9 +216,9 @@ class MobileApi:
                     data=json.loads(raw)
                     code,body=await asyncio.to_thread(mutate,self.storage,viewer,method,url.path,data)
         except (ValueError,UnicodeError,asyncio.IncompleteReadError,asyncio.LimitOverrunError,asyncio.TimeoutError) as exc:
-            LOG.debug('API request_failed connection=%s reason=%s',connection,type(exc).__name__)
+            log.debug('API request_failed connection=%s reason=%s',connection,type(exc).__name__)
         except Exception as exc:
-            LOG.debug('API processing_failed connection=%s reason=%s',connection,type(exc).__name__)
+            log.debug('API processing_failed connection=%s reason=%s',connection,type(exc).__name__)
             code,body=503,dict(error='temporarily_unavailable')
         try:
             body['server_time']=datetime.now(timezone.utc).isoformat()
@@ -224,13 +227,13 @@ class MobileApi:
             reason={200:'OK',400:'Bad Request',401:'Unauthorized',403:'Forbidden',404:'Not Found',405:'Method Not Allowed',409:'Conflict',413:'Content Too Large',503:'Service Unavailable'}[code]
             writer.write((f'HTTP/1.1 {code} {reason}\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {len(payload)}\r\nCache-Control: no-store\r\nConnection: close\r\nX-Content-Type-Options: nosniff\r\n\r\n').encode()+payload)
             await asyncio.wait_for(writer.drain(),5)
-            LOG.debug('API response connection=%s method=%s route=%s viewer=%r status=%d bytes=%d elapsed_ms=%.1f',
+            log.debug('API response connection=%s method=%s route=%s viewer=%r status=%d bytes=%d elapsed_ms=%.1f',
                       connection,method_label,route,viewer_id,code,len(payload),(time.monotonic()-started)*1000)
         except (ConnectionError,OSError,asyncio.TimeoutError) as exc:
-            LOG.debug('API response_failed connection=%s status=%d reason=%s',connection,code,type(exc).__name__)
+            log.debug('API response_failed connection=%s status=%d reason=%s',connection,code,type(exc).__name__)
         finally:
             writer.close()
             try: await asyncio.wait_for(writer.wait_closed(),2)
             except (OSError,asyncio.TimeoutError): pass
             self.writers.discard(writer); self.tasks.discard(task)
-            LOG.debug('API disconnected connection=%s',connection)
+            log.debug('API disconnected connection=%s',connection)

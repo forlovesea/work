@@ -33,7 +33,7 @@ def initialize(path, site, device):
     return credentials
 
 
-async def serve(config, demo_data=False):
+async def serve(config, demo_data=False, debug_control=None):
     storage=Storage(config['database'])
     engine=AlarmEngine(storage,config)
     push_config=config.get('push',{})
@@ -49,6 +49,9 @@ async def serve(config, demo_data=False):
     stop=asyncio.Event()
     from retention import monitor as retain
     jobs=[asyncio.create_task(monitor(engine,stop)), asyncio.create_task(retain(storage,config,stop))]
+    if debug_control is not None:
+        from communication_log import watch
+        jobs.append(asyncio.create_task(watch(debug_control,stop)))
     if demo_data:
         from smartphone_demo import feed
         logging.warning('SIMULATED DEMO: 10 modules, updates every 5 seconds; database=%s; real uploads rejected; push disabled',config['database'])
@@ -82,6 +85,8 @@ def main():
     run=sub.add_parser('run',help='Run TCP receiver until Ctrl+C')
     run.add_argument('--demo-data',action='store_true',help='Serve 10 simulated modules using a separate demo database and existing API credentials')
     run.add_argument('--debug',action='store_true',help='Log communication metadata without tokens or payloads')
+    debug=sub.add_parser('debug',help='Change communication logging in a running server')
+    debug.add_argument('state',choices=('on','off'))
     mobile=sub.add_parser('enable-api',help='Create a separate read-only Android credential')
     mobile.add_argument('--site',default='site-01'); mobile.add_argument('--device',default='battery-01')
     inspect=sub.add_parser('inspect',help='Print saved history, latest snapshots and sessions as JSON')
@@ -91,6 +96,12 @@ def main():
     backup.add_argument('output')
     args=parser.parse_args()
     try:
+        if args.command=='debug':
+            from communication_log import control_path, write_control
+            target=control_path(args.config)
+            write_control(target,args.state=='on')
+            print('Debug '+args.state+' requested. A running server using this config applies it within about 1 second: '+str(target))
+            return
         if args.command=='self-test':
             from local_demo import self_test
             print(json.dumps(asyncio.run(self_test()),indent=2))
@@ -138,7 +149,10 @@ def main():
                                 handlers=[logging.StreamHandler(),RotatingFileHandler(logs/'server.log',maxBytes=5*1024*1024,backupCount=5,encoding='utf-8')])
             logging.getLogger('batterywatch').setLevel(logging.DEBUG if args.debug else logging.INFO)
             logging.info('Communication debug=%s; log=%s',args.debug,logs/'server.log')
-            asyncio.run(serve(config, demo_data=args.demo_data))
+            from communication_log import control_path, write_control
+            control=control_path(args.config)
+            write_control(control,args.debug)
+            asyncio.run(serve(config, demo_data=args.demo_data, debug_control=control))
         else:
             if not Path(config['database']).is_file(): raise ValueError('Database not created yet; run the receiver first')
             storage=Storage(config['database'])

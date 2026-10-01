@@ -8392,6 +8392,9 @@ class BatteryMonitorUI(QMainWindow):
         left_layout.addSpacing(5)
         left_layout.addWidget(self.btn_slave_list)
 
+        self.btn_upload_settings = QPushButton("서버 TCP 업로드 설정")
+        left_layout.addWidget(self.btn_upload_settings)
+
         # ❌ 여기서 setVisible 하지 마라
         # self.btn_slave_list.setVisible(self.is_master)
 

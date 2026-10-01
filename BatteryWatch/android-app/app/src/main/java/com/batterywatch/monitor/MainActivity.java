@@ -24,7 +24,7 @@ public class MainActivity extends Activity {
     private ConnectionSettingsDialog settingsDialog;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ExecutorService network = Executors.newSingleThreadExecutor();
-    private boolean resumed, busy;
+    private boolean resumed, busy, closing;
     private int generation;
     private String site = "", device = "", page = "devices";
     private final Runnable poll = new Runnable() {
@@ -52,7 +52,16 @@ public class MainActivity extends Activity {
         root.setBackgroundColor(BatteryDashboard.BG);
         TextView title = new TextView(this);
         title.setText("BatteryWatch"); title.setTextSize(26); title.setTextColor(BatteryDashboard.INK);
-        root.addView(title);
+        LinearLayout header = new LinearLayout(this);
+        header.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        header.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+        Button exit = new Button(this);
+        exit.setText("종료"); exit.setAllCaps(false);
+        exit.setTextColor(BatteryDashboard.AMBER);
+        exit.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.rgb(30, 48, 62)));
+        exit.setOnClickListener(v -> exitApp());
+        header.addView(exit, new LinearLayout.LayoutParams(dashboard.dp(80), dashboard.dp(48)));
+        root.addView(header);
         LinearLayout actions = new LinearLayout(this);
         button(actions, "장비", () -> navigate("devices"));
         button(actions, "설정", this::showSettings);
@@ -73,6 +82,17 @@ public class MainActivity extends Activity {
     @Override protected void onPause() { resumed = false; handler.removeCallbacks(poll); super.onPause(); }
     @Override protected void onDestroy() { resumed = false; generation++; if (settingsDialog != null) settingsDialog.dismiss(); handler.removeCallbacksAndMessages(null); network.shutdownNow(); super.onDestroy(); }
 
+    private void exitApp() {
+        if (closing) return;
+        closing = true;
+        resumed = false;
+        generation++;
+        handler.removeCallbacksAndMessages(null);
+        if (settingsDialog != null) settingsDialog.dismiss();
+        network.shutdownNow();
+        finishAndRemoveTask();
+    }
+
     private void button(LinearLayout parent, String label, Runnable action) {
         Button b = new Button(this); b.setText(label); b.setAllCaps(false); b.setTextColor(BatteryDashboard.GREEN); b.setTextSize(13);
         b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.rgb(30, 48, 62)));
@@ -88,7 +108,7 @@ public class MainActivity extends Activity {
     private void navigate(String next) { page = next; generation++; content.removeAllViews(); scroll.scrollTo(0, 0); refresh(); }
 
     private void refresh() {
-        if (busy || isFinishing() || (settingsDialog != null && settingsDialog.isShowing())) return;
+        if (closing || network.isShutdown() || busy || isFinishing() || (settingsDialog != null && settingsDialog.isShowing())) return;
         if (settings.url().isEmpty()) { status.setText("서버 연결 대기"); status.setTextColor(BatteryDashboard.MUTED); content.setAlpha(1f); content.removeAllViews(); dashboard.empty(content, this::showSettings); return; }
         busy = true;
         final int requestGeneration = generation;
@@ -103,7 +123,7 @@ public class MainActivity extends Activity {
                 JSONObject response = api.get(path);
                 runOnUiThread(() -> {
                     busy = false;
-                    if (isFinishing()) return;
+                    if (closing || isFinishing() || isDestroyed()) return;
                     if (requestGeneration != generation) { refresh(); return; }
                     try { int y = scroll.getScrollY(); render(requestedPage, response); scroll.post(() -> scroll.scrollTo(0, y)); }
                     catch (Exception e) { status.setText("서버 데이터 형식을 확인하세요."); }
@@ -111,7 +131,7 @@ public class MainActivity extends Activity {
             } catch (Exception e) {
                 runOnUiThread(() -> {
                     busy = false;
-                    if (isFinishing()) return;
+                    if (closing || isFinishing() || isDestroyed()) return;
                     if (requestGeneration != generation) { refresh(); return; }
                     status.setText("조회 실패 — 표시된 값은 이전 데이터입니다.\n" + e.getMessage());
                     status.setTextColor(BatteryDashboard.AMBER); content.setAlpha(0.55f);

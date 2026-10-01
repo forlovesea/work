@@ -129,6 +129,30 @@ class UploadTests(unittest.TestCase):
             controller.config['interval']=12; controller.apply_timer()
             self.assertEqual(controller.timer.interval(),12000)
             self.assertFalse(data[2]['data']['connected'])
+            # ACK-driven state, stale configuration events, and live bounded history.
+            controller.update_status_button()
+            self.assertFalse(ui.btn_upload_status.isEnabled())
+            event = UploadWorker.result_event(controller.generation, data[2], False, 'ConnectionError')
+            controller.on_upload_result(event)
+            self.assertEqual(ui.btn_upload_status.property('uploadState'), 'failed')
+            controller.on_upload_result(dict(event, generation=controller.generation - 1, ok=True))
+            self.assertEqual(ui.btn_upload_status.property('uploadState'), 'failed')
+            controller.on_upload_result(dict(event, ok=True, error=''))
+            self.assertTrue(ui.btn_upload_status.isEnabled())
+            controller.open_history()
+            for i in range(35):
+                controller.on_upload_result(dict(event, ok=True, summary=f'기록 {i}'))
+            self.assertEqual(len(controller.history), 30)
+            lines = controller.history_view.toPlainText().splitlines()
+            self.assertEqual(len(lines), 30)
+            self.assertIn('기록 34', lines[0])
+            self.assertIn('기록 5', lines[-1])
+            controller.on_upload_result(event)
+            self.assertIn('실패 (ConnectionError)', controller.history_view.toPlainText().splitlines()[0])
+            controller.config['enabled'] = False
+            controller.update_status_button()
+            self.assertEqual(ui.btn_upload_status.property('uploadState'), 'disabled')
+            controller.history_dialog.close()
         finally:
             ui.close(); app.processEvents()
             original_queue.unlink(missing_ok=True)
@@ -142,7 +166,8 @@ class UploadTests(unittest.TestCase):
         box=Outbox(self.root/'queue.db')
         box.put(destination(self.config),envelope(self.config,'snapshot',{'offline':True}))
         failed=threading.Event()
-        worker=UploadWorker(box,lambda text: failed.set())
+        results=[]
+        worker=UploadWorker(box,lambda text: failed.set(), results.append)
         worker.configure(self.config); worker.start()
         try:
             self.assertTrue(failed.wait(5))
@@ -156,6 +181,10 @@ class UploadTests(unittest.TestCase):
                 finally: server.shutdown()
         finally:
             worker.stop(); worker.join(5)
+        self.assertFalse(results[0]['ok'])
+        self.assertTrue(results[-1]['ok'])
+        self.assertEqual(results[-1]['device_id'], 'd1')
+        self.assertNotIn('token', results[-1])
 
 
 if __name__=='__main__': unittest.main()

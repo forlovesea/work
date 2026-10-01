@@ -84,9 +84,11 @@ class Outbox:
 
 
 class UploadWorker(threading.Thread):
-    def __init__(self, outbox, report):
+    def __init__(self, outbox, report, result=None):
         super().__init__(daemon=True, name='BatteryWatchUpload')
         self.outbox, self.report = outbox, report
+        self.result = result or (lambda event: None)
+        self.generation = 0
         self.lock = threading.Lock()
         self.config = {}
         self.stopping = threading.Event()
@@ -96,8 +98,11 @@ class UploadWorker(threading.Thread):
     def configure(self, config):
         with self.lock:
             self.config = dict(config)
+            self.generation += 1
+            generation = self.generation
         self.disconnect()
         self.wake.set()
+        return generation
 
     def disconnect(self):
         sock, self.sock = self.sock, None
@@ -120,7 +125,9 @@ class UploadWorker(threading.Thread):
             self.wake.clear()
             with self.lock:
                 config = dict(self.config)
+                generation = self.generation
             delay = 0.5
+            pending = None
             try:
                 if not config.get('enabled'):
                     self.disconnect()
@@ -145,17 +152,36 @@ class UploadWorker(threading.Thread):
                     if not isinstance(ack, dict) or ack.get('type') != 'ack' or ack.get('sample_id') != sample_id or ack.get('ok') is not True:
                         raise ValueError('Invalid/rejected server ACK')
                     self.outbox.acknowledge(sample_id)
+                    self.result(self.result_event(generation, payload, True))
                     self.report('ACK ' + utc_now() + ' | pending ' + str(self.outbox.count()))
                     backoff, delay = 1, 0
             except Exception as exc:
                 self.disconnect()
                 # Do not expose server response contents or credentials.
                 if not self.stopping.is_set():
+                    self.result(self.result_event(generation, pending[1] if pending else None,
+                                                  False, type(exc).__name__))
                     self.report('Upload failed (' + type(exc).__name__ + '); retry in ' + str(backoff) + 's')
                 delay = backoff
                 backoff = min(backoff * 2, 60)
             self.wake.wait(delay)
         self.disconnect()
+
+    @staticmethod
+    def result_event(generation, payload, ok, error=''):
+        payload = payload or {}
+        data = payload.get('data', {})
+        if payload.get('kind') == 'snapshot':
+            summary = (f"상태 · 모듈 {len(data.get('module_data') or {})}개 · "
+                       f"알람 {len(data.get('active_alarms') or {})}건 · "
+                       f"장비 {'연결' if data.get('connected') else '미연결'}")
+        elif payload.get('kind') == 'trap':
+            summary = '알람 이벤트 (Trap)'
+        else:
+            summary = '전송 대기 데이터'
+        return dict(generation=generation, at=utc_now(), ok=ok, error=error,
+                    site_id=payload.get('site_id', ''), device_id=payload.get('device_id', ''),
+                    summary=summary)
 
 
 def envelope(config, kind, data):

@@ -1,12 +1,14 @@
 """Qt adapter: snapshots are copied on the UI thread; network runs separately."""
 import hashlib
 import math
+from collections import deque
+from datetime import datetime
 from pathlib import Path
 from PySide6.QtCore import QObject, QTimer, Signal, Qt, QSize
 from PySide6.QtGui import QColor, QIcon, QPixmap, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QFormLayout, QLineEdit,
                                QSpinBox, QCheckBox, QMessageBox, QLabel, QTextBrowser,
-                               QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog)
+                               QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog, QPlainTextEdit)
 from upload_transport import Outbox, UploadWorker, destination, envelope, utc_now
 
 
@@ -43,6 +45,7 @@ def plain(value):
 
 class UploadController(QObject):
     status = Signal(str)
+    upload_result = Signal(object)
 
     def __init__(self, ui):
         super().__init__(ui)
@@ -53,15 +56,21 @@ class UploadController(QObject):
         self.last_error = None
         self.last_trap_at = None
         self.storage_error = ''
+        self.history = deque(maxlen=30)
+        self.history_dialog = None
+        self.history_view = None
+        self.connection_state = 'waiting'
         key = hashlib.sha256(str(Path(ui.profile_path).resolve()).encode()).hexdigest()[:20]
         self.outbox = Outbox(Path(__file__).parent / 'data' / (key + '.sqlite3'))
         self.label = QLabel()
         self.status.connect(self.show_status)
         ui.btn_upload_settings.clicked.connect(self.open_settings)
+        ui.btn_upload_status.clicked.connect(self.open_history)
+        self.upload_result.connect(self.on_upload_result)
         ui.statusBar().addWidget(self.label, 1)
         self.config = self.load_config()
-        self.worker = UploadWorker(self.outbox, self.status.emit)
-        self.worker.configure(self.config)
+        self.worker = UploadWorker(self.outbox, self.status.emit, self.upload_result.emit)
+        self.generation = self.worker.configure(self.config)
         self.worker.start()
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.capture)
@@ -70,6 +79,89 @@ class UploadController(QObject):
     def show_status(self, text):
         self.label.setText(self.storage_error or text)
         self.label.setToolTip(self.label.text())
+        self.update_status_button()
+
+    def update_status_button(self):
+        configured = self.config.get('enabled') and all(
+            self.config.get(k) for k in ('host', 'token', 'site_id', 'device_id'))
+        state = self.connection_state if configured else 'disabled'
+        if configured and self.storage_error:
+            state = 'failed'
+        colors = {
+            'disabled': ('#E8ECF1', '#CDD5DF', '#8793A3', '업로드 설정이 없거나 사용하지 않습니다.'),
+            'waiting': ('#E8ECF1', '#CDD5DF', '#68788C', '첫 업로드 결과를 기다리는 중입니다.'),
+            'failed': ('#F9DEDF', '#E9B8BD', '#A45460', '접속 또는 업로드 실패 · 자동 재시도 중'),
+            'success': ('#DDF2E7', '#ACD7C0', '#397A5C', '업로드 정상 · 클릭하면 최근 30건을 확인합니다.'),
+        }
+        bg, border, fg, tooltip = colors[state]
+        button = self.ui.btn_upload_status
+        button.setProperty('uploadState', state)
+        button.setEnabled(state == 'success')
+        button.setCursor(Qt.PointingHandCursor if state == 'success' else Qt.ArrowCursor)
+        button.setToolTip(tooltip)
+        button.setAccessibleName('업로드 상태: ' + tooltip)
+        button.setStyleSheet(f'''
+            QPushButton#upload_status {{ background: {bg}; color: {fg};
+                border: 1px solid {border}; border-radius: 10px;
+                padding: 0px 14px; font-weight: 600; }}
+            QPushButton#upload_status:disabled {{ background: {bg}; color: {fg}; }}
+            QPushButton#upload_status:hover {{ border: 1px solid {fg}; }}
+        ''')
+        self.ui.btn_upload_settings.ensurePolished()
+        button.setFixedHeight(self.ui.btn_upload_settings.sizeHint().height())
+
+    def on_upload_result(self, event):
+        if event['generation'] != self.generation or not self.config.get('enabled'):
+            return
+        self.connection_state = 'success' if event['ok'] else 'failed'
+        self.history.appendleft(event)
+        self.update_status_button()
+        self.refresh_history()
+
+    def refresh_history(self):
+        if self.history_view is None:
+            return
+        lines = []
+        for event in self.history:
+            timestamp = datetime.fromisoformat(event['at']).astimezone().strftime('%Y-%m-%d %H:%M:%S')
+            result = '성공 (서버 저장 확인)' if event['ok'] else '실패 (' + event['error'] + ')'
+            line = f"{timestamp} | {result} | {event['site_id']}/{event['device_id']} | {event['summary']}"
+            lines.append(' '.join(line.splitlines()))
+        self.history_view.setPlainText('\n'.join(lines))
+        self.history_view.verticalScrollBar().setValue(0)
+
+    def open_history(self):
+        if not self.ui.btn_upload_status.isEnabled():
+            return
+        if self.history_dialog is None:
+            dialog = QDialog(self.ui)
+            dialog.setWindowTitle('업로드 상태 · 최근 전송 기록')
+            dialog.resize(940, 520)
+            dialog.setStyleSheet('''
+                QDialog { background: #F2F7F5; }
+                QLabel { color: #4B6B5C; background: transparent; }
+                QPlainTextEdit { background: #FFFFFF; color: #385647;
+                    border: 1px solid #CFE1D7; border-radius: 10px; padding: 10px; }
+                QPushButton { background: #DDF2E7; color: #397A5C;
+                    border: 1px solid #ACD7C0; border-radius: 8px; padding: 8px 20px; }
+            ''')
+            layout = QVBoxLayout(dialog)
+            layout.addWidget(QLabel('최근 전송 결과 30건 · 최신 기록이 맨 위에 실시간 표시됩니다.\n'
+                                   '시간은 이 PC의 현지 시각이며, 기록은 프로그램 실행 중에 유지됩니다.'))
+            self.history_view = QPlainTextEdit(dialog)
+            self.history_view.setReadOnly(True)
+            self.history_view.setLineWrapMode(QPlainTextEdit.NoWrap)
+            self.history_view.document().setMaximumBlockCount(30)
+            layout.addWidget(self.history_view)
+            buttons = QDialogButtonBox(QDialogButtonBox.Close)
+            buttons.button(QDialogButtonBox.Close).setText('닫기')
+            buttons.rejected.connect(dialog.reject)
+            layout.addWidget(buttons)
+            self.history_dialog = dialog
+        self.refresh_history()
+        self.history_dialog.show()
+        self.history_dialog.raise_()
+        self.history_dialog.activateWindow()
 
     def load_config(self):
         s = self.ui.settings
@@ -180,7 +272,8 @@ class UploadController(QObject):
             for k,v in config.items(): self.ui.settings.setValue('upload/' + k, v)
             self.ui.settings.sync()
             self.config = config
-            self.worker.configure(config)
+            self.generation = self.worker.configure(config)
+            self.connection_state = 'waiting'
             self.apply_timer()
             dialog.accept()
         buttons.accepted.connect(save); buttons.rejected.connect(dialog.reject)

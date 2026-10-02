@@ -174,13 +174,15 @@ class UploadWorker(threading.Thread):
         if payload.get('kind') == 'snapshot':
             summary = (f"상태 · 모듈 {len(data.get('module_data') or {})}개 · "
                        f"알람 {len(data.get('active_alarms') or {})}건 · "
-                       f"장비 {'연결' if data.get('connected') else '미연결'}")
+                       f"장비 {'연결' if data.get('connected') else '미연결'} · "
+                       f"측정 {'성공' if data.get('last_poll_ok') else '실패/대기'}")
         elif payload.get('kind') == 'trap':
             summary = '알람 이벤트 (Trap)'
         else:
             summary = '전송 대기 데이터'
         return dict(generation=generation, at=utc_now(), ok=ok, error=error,
                     site_id=payload.get('site_id', ''), device_id=payload.get('device_id', ''),
+                    captured_at=payload.get('captured_at'), last_poll_at=data.get('last_poll_at'),
                     summary=summary)
 
 

@@ -122,10 +122,18 @@ class UploadController(QObject):
         if self.history_view is None:
             return
         lines = []
+        def local_time(value):
+            if not value:
+                return '없음'
+            try:
+                return datetime.fromisoformat(value.replace('Z', '+00:00')).astimezone().strftime('%Y-%m-%d %H:%M:%S')
+            except (ValueError, TypeError, AttributeError):
+                return '시각 형식 오류'
         for event in self.history:
-            timestamp = datetime.fromisoformat(event['at']).astimezone().strftime('%Y-%m-%d %H:%M:%S')
+            timestamp = local_time(event['at'])
             result = '성공 (서버 저장 확인)' if event['ok'] else '실패 (' + event['error'] + ')'
-            line = f"{timestamp} | {result} | {event['site_id']}/{event['device_id']} | {event['summary']}"
+            line = (f"전송 {timestamp} | {result} | {event['site_id']}/{event['device_id']} | {event['summary']}"
+                    f" | 수집 {local_time(event.get('captured_at'))} | 실제 측정 {local_time(event.get('last_poll_at'))}")
             lines.append(' '.join(line.splitlines()))
         self.history_view.setPlainText('\n'.join(lines))
         self.history_view.verticalScrollBar().setValue(0)
@@ -147,7 +155,8 @@ class UploadController(QObject):
             ''')
             layout = QVBoxLayout(dialog)
             layout.addWidget(QLabel('최근 전송 결과 30건 · 최신 기록이 맨 위에 실시간 표시됩니다.\n'
-                                   '시간은 이 PC의 현지 시각이며, 기록은 프로그램 실행 중에 유지됩니다.'))
+                                   '시간은 이 PC의 현지 시각이며, 기록은 프로그램 실행 중에 유지됩니다.\n'
+                                   '전송 성공은 서버 저장 확인입니다. 최신 측정 여부는 실제 측정 시각과 측정 성공 상태를 확인하세요.'))
             self.history_view = QPlainTextEdit(dialog)
             self.history_view.setReadOnly(True)
             self.history_view.setLineWrapMode(QPlainTextEdit.NoWrap)

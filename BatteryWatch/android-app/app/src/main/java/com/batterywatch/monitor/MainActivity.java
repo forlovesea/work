@@ -142,7 +142,7 @@ public class MainActivity extends Activity {
 
     private void render(String requestedPage, JSONObject response) throws JSONException {
         content.removeAllViews(); content.setAlpha(1f); status.setTextColor(BatteryDashboard.MUTED);
-        status.setText("서버 응답: " + response.optString("server_time", ""));
+        status.setText("서버 응답: " + DisplayTime.format(response.optString("server_time", "")));
         if (requestedPage.equals("devices")) {
             JSONArray devices = response.getJSONArray("devices");
             if (devices.length() == 0) text("조회 가능한 장비가 없습니다.", false);
@@ -167,11 +167,11 @@ public class MainActivity extends Activity {
             if (history.length() == 0) text("저장된 이력이 없습니다.", false);
             for (int i = 0; i < history.length(); i++) {
                 JSONObject h = history.getJSONObject(i);
-                text(h.optString("captured_at") + " · " + h.optString("kind"), true);
+                text(DisplayTime.format(h.optString("captured_at")) + " · " + h.optString("kind"), true);
                 text("알람: " + h.optString("alarms", "[]") + "\n고장: " + h.optString("faults", "[]"), false);
                 JSONObject modules = h.optJSONObject("module_data");
                 if (modules != null) {
-                    text("실제 측정: " + value(h, "last_poll_at") + (h.optBoolean("connected") && h.optBoolean("last_poll_ok") ? "" : " · 통신 불량 / 이전값"), false);
+                    text("실제 측정: " + DisplayTime.format(h.optString("last_poll_at")) + (h.optBoolean("connected") && h.optBoolean("last_poll_ok") ? "" : " · 통신 불량 / 이전값"), false);
                     for (Iterator<String> it = modules.keys(); it.hasNext();) {
                         String key = it.next(); JSONObject m = modules.optJSONObject(key); if (m == null) continue;
                         text("측정 행 " + key + " · SOC " + value(m, "soc") + "% · " + value(m, "volt") + " V · " + value(m, "current") + " A", false);
@@ -188,7 +188,7 @@ public class MainActivity extends Activity {
             for (int i = 0; i < events.length(); i++) {
                 JSONObject e = events.getJSONObject(i);
                 text((e.optString("transition").equals("raised") ? "발생" : "복구") + " · " +
-                    new java.util.Date((long)(e.optDouble("created_at") * 1000)) + "\n" + e.optString("message"), false);
+                    DisplayTime.epoch(e.optDouble("created_at")) + "\n" + e.optString("message"), false);
                 if (e.isNull("acknowledged_at")) {
                     String id = e.getString("event_id"); button(content, "확인 기록", () -> acknowledge(id));
                 } else text("사용자 확인 완료", false);

@@ -6569,8 +6569,11 @@ class BatteryMonitorUI(QMainWindow):
         # 3️⃣ Fault 테이블 초기화
         self.fault_table.setRowCount(0)
 
-        # 4️⃣ 상태 초기화
-        self.is_connected = False
+        # 화면 초기화는 실행 중인 SNMP 연결을 끊지 않는다.
+        # 재접속 준비에서만 연결 상태를 초기화한다. 일반 초기화에서 False로
+        # 바꾸면 계속 수신되는 측정값도 앱에 미연결 상태로 업로드된다.
+        if for_reconnect:
+            self.is_connected = False
         self.update_full_cutoff_button_state()
         if for_reconnect:
             self.update_time_label.setText("최종업데이트시간 : 대기중")

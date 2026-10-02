@@ -36,6 +36,19 @@ class UploadTests(unittest.TestCase):
         a.sendall(b'\xff\xff\xff\xff')
         with self.assertRaises(ValueError): receive_frame(b)
 
+    def test_successful_upload_keeps_old_measurement_time_visible(self):
+        payload = envelope(self.config, 'snapshot', {
+            'connected': True, 'last_poll_ok': False,
+            'last_poll_at': '2026-10-01T07:00:00+00:00',
+        })
+        payload['captured_at'] = '2026-10-01T07:00:05+00:00'
+        event = UploadWorker.result_event(1, payload, True)
+        self.assertTrue(event['ok'])
+        self.assertEqual(event['last_poll_at'], payload['data']['last_poll_at'])
+        self.assertEqual(event['captured_at'], payload['captured_at'])
+        self.assertIn('측정 실패/대기', event['summary'])
+        self.assertNotIn('token', event)
+
     def test_persistence_route_isolation_and_capacity(self):
         box = Outbox(self.root/'outbox.db', max_bytes=1000)
         payload = envelope(self.config,'trap',{'alarm':'raised'})
@@ -147,12 +160,30 @@ class UploadTests(unittest.TestCase):
             self.assertEqual(len(lines), 30)
             self.assertIn('기록 34', lines[0])
             self.assertIn('기록 5', lines[-1])
+            self.assertIn('실제 측정 ', lines[0])
+            self.assertIn('수집 ', lines[0])
             controller.on_upload_result(event)
             self.assertIn('실패 (ConnectionError)', controller.history_view.toPlainText().splitlines()[0])
             controller.config['enabled'] = False
             controller.update_status_button()
             self.assertEqual(ui.btn_upload_status.property('uploadState'), 'disabled')
             controller.history_dialog.close()
+            # Clearing the screen must not advertise a live SNMP session as
+            # disconnected. Verify the flag in the actual uploaded snapshot.
+            controller.config['enabled'] = True
+            ui.is_connected = True
+            ui.btn_reset.click()
+            self.assertTrue(ui.is_connected)
+            controller.poll(True, {'1.2.3': 'new reading'})
+            controller.capture()
+            with sqlite3.connect(controller.outbox.path) as db:
+                latest = json.loads(db.execute('SELECT payload FROM queue ORDER BY seq DESC LIMIT 1').fetchone()[0])
+            self.assertTrue(latest['data']['connected'])
+            self.assertTrue(latest['data']['last_poll_ok'])
+            ui.reset_module_state(for_reconnect=True)
+            self.assertFalse(ui.is_connected)
+            ui.btn_reset.click()
+            self.assertFalse(ui.is_connected)
         finally:
             ui.close(); app.processEvents()
             original_queue.unlink(missing_ok=True)

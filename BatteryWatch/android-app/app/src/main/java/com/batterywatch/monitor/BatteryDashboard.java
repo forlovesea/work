@@ -51,6 +51,9 @@ public final class BatteryDashboard {
         box.addView(label(data.optString("device_id"),22,INK));
         boolean available=data.optBoolean("available"),fresh=data.optBoolean("fresh");
         box.addView(label(!available?"● 수신 데이터 없음":fresh?"● 정상 수신":"● 통신 실패 / 오래된 데이터",14,fresh&&available?GREEN:AMBER));
+        if(available) box.addView(label("측정  "+DisplayTime.format(data.optString("last_poll_at"))
+            +"\n수신  "+DisplayTime.format(data.optString("received_at"))
+            +"\n"+DisplayTime.age(data.optDouble("measurement_age_seconds",Double.NaN)),12,MUTED));
         LinearLayout hero=new LinearLayout(context); hero.setGravity(Gravity.CENTER_VERTICAL);
         ImageView photo=new ImageView(context); photo.setImageResource(R.drawable.battery_rack);
         photo.setContentDescription("배터리 랙 참고 사진, 실제 구성은 상세 화면에서 확인");
@@ -80,7 +83,16 @@ public final class BatteryDashboard {
         long count=slots.stream().filter(s->s.mapped).count();
         summary.addView(label("배터리 모듈  "+count+" / 10",24,INK));
         rackSummary(summary,data,slots,fresh);
-        summary.addView(label("측정  "+data.optString("last_poll_at","—")+"\n수신  "+response.optString("received_at","—"),12,MUTED));
+        summary.addView(label("측정  "+DisplayTime.format(data.optString("last_poll_at"))+"\n수신  "+DisplayTime.format(response.optString("received_at")),12,MUTED));
+        summary.addView(label(DisplayTime.age(response.optDouble("measurement_age_seconds",Double.NaN)),12,fresh?MUTED:AMBER));
+        if(!fresh) {
+            String reason=!data.optBoolean("connected")?"모니터링 클라이언트와 배터리 장비의 연결을 확인하세요.":
+                !data.optBoolean("last_poll_ok")?"최근 장비 측정 실패 · 이전 측정값입니다.":
+                "PC/서버 시계와 모니터링 클라이언트의 측정·전송 대기를 확인하세요.";
+            summary.addView(label(reason,13,AMBER));
+            if(!data.isNull("last_poll_error") && !data.optString("last_poll_error").isEmpty())
+                summary.addView(label("측정 오류: "+data.optString("last_poll_error"),12,AMBER));
+        }
         if(slots.isEmpty()) { summary.addView(label("등록된 모듈 정보가 없습니다.",16,AMBER)); return; }
         if(count>10) summary.addView(label("지원 수량(10개)을 초과한 데이터입니다. 서버 구성을 확인하세요.",14,AMBER));
         if(slots.stream().anyMatch(s->!s.mapped)) summary.addView(label("모듈 번호를 확인할 수 없는 측정 행이 있습니다. 미매핑 행으로 별도 표시합니다.",13,AMBER));

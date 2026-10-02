@@ -44,14 +44,14 @@ final class ConnectionSettingsDialog extends Dialog {
         LinearLayout server=ui.card(form);
         server.addView(ui.label("01  서버 주소",18,BatteryDashboard.INK));
         server.addView(ui.label("HTTPS 주소와 앱 조회 포트를 입력하세요.",13,BatteryDashboard.MUTED));
-        url=input(server,"https://battery.example.com:8443",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_URI);
+        url=clearableInput(server,"서버 주소 초기화","https://battery.example.com:8443",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_URI);
         url.setText(settings.url());urlError=error(server);
         server.addView(ui.label("앱 조회 기본 포트는 8443입니다.\n수집기 업로드 포트 9443과 구분하세요.",13,BatteryDashboard.MUTED));
 
         LinearLayout credentials=ui.card(form);
         credentials.addView(ui.label("02  조회용 토큰",18,BatteryDashboard.INK));
         credentials.addView(ui.label("서버에서 발급받은 앱 조회용 토큰을 붙여넣으세요. 수집기 업로드 토큰과는 다릅니다.",13,BatteryDashboard.MUTED));
-        token=input(credentials,"조회용 토큰 입력",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        token=clearableInput(credentials,"토큰 초기화","조회용 토큰 입력",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD);
         token.setTypeface(Typeface.MONOSPACE); token.setTransformationMethod(PasswordTransformationMethod.getInstance());
         token.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
         tokenError=error(credentials);
@@ -101,6 +101,22 @@ final class ConnectionSettingsDialog extends Dialog {
         field.setImeOptions(EditorInfo.IME_ACTION_NEXT);
         LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,ui.dp(54));lp.setMargins(0,ui.dp(10),0,ui.dp(4));
         parent.addView(field,lp);controls.add(field);return field;
+    }
+    private EditText clearableInput(LinearLayout parent,String clearDescription,String hint,int type){
+        LinearLayout row=new LinearLayout(getContext());row.setGravity(Gravity.CENTER_VERTICAL);
+        EditText field=input(row,hint,type);
+        LinearLayout.LayoutParams fieldParams=new LinearLayout.LayoutParams(0,ui.dp(54),1);
+        fieldParams.setMargins(0,ui.dp(10),ui.dp(8),ui.dp(4));field.setLayoutParams(fieldParams);
+        Button clear=button("초기화",false,()->{
+            field.setText("");field.requestFocus();
+            if(field==url && urlError!=null)urlError.setVisibility(View.GONE);
+            if(field==token && tokenError!=null)tokenError.setVisibility(View.GONE);
+            if(feedback!=null)feedback.setVisibility(View.GONE);
+        });
+        clear.setContentDescription(clearDescription);
+        LinearLayout.LayoutParams clearParams=new LinearLayout.LayoutParams(ui.dp(64),ui.dp(54));
+        clearParams.setMargins(0,ui.dp(10),0,ui.dp(4));row.addView(clear,clearParams);
+        parent.addView(row,new LinearLayout.LayoutParams(-1,-2));return field;
     }
     private TextView error(LinearLayout parent){TextView t=ui.label("",13,BatteryDashboard.AMBER);t.setVisibility(View.GONE);
         t.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);parent.addView(t);return t;}

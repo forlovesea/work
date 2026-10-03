@@ -6,6 +6,8 @@
 
 원본 SNMP 스택 호환을 위해 **Python 3.10**을 사용합니다.
 
+서버·Android 앱과의 데이터 흐름, 인증서/토큰 발급과 세 프로그램 설정 절차는 [통합 개발·운영 상세서](../docs/developer-guide.md)를 참고하세요.
+
 ```powershell
 cd C:\Users\Administrator\Downloads\proj\GITHUB\work\BatteryWatch\monitoring-client
 python -m venv .venv

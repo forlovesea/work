@@ -4,16 +4,50 @@
 
 클라이언트의 [TCP 프로토콜](../docs/tcp-upload-protocol.md)에 맞춘 TCP/TLS 수신·저장 서버입니다. **Python 3.10 이상**에서 실행합니다. 조회/등록 API, 알람 판정·복구·확인 기록, FCM 발송 큐도 구현했습니다. FCM 사용 시에만 `requirements-push.txt`의 추가 패키지가 필요합니다.
 
+세 프로그램의 통신 구조, 권한 토큰, 인증서 생성·배포, 서버·클라이언트·앱 설정을 순서대로 보려면 [통합 개발·운영 상세서](../docs/developer-guide.md)를 참고하세요.
+
+서버 전경/백그라운드 실행과 별도 터미널에서 종료·재시작하는 방법은 [서버 실행 및 프로세스 관리 Word 사용설명서](서버_실행_및_프로세스_관리_사용설명서.docx)를 참고하세요.
+
 ## 바로 실행 (같은 PC에서 연결 시험)
 
 ```powershell
 cd C:\Users\Administrator\Downloads\proj\GITHUB\work\BatteryWatch\server
 python server.py init --site site-01 --device battery-01
 python server.py check
-python server.py run
+python server.py run --foreground
 ```
 
-`init`은 최초 한 번 실행합니다. 이미 있는 설정이나 토큰은 덮어쓰지 않습니다. 실행 중지는 Ctrl+C입니다. 초기화 후에는 `run.bat`으로 실행해도 됩니다.
+`init`은 최초 한 번 실행합니다. 이미 있는 설정이나 토큰은 덮어쓰지 않습니다. `--foreground`는 현재 터미널에서 실행하며 Ctrl+C로 종료합니다. 실행 모드를 지정하지 않은 `run`도 기존처럼 전경 실행입니다. Windows에서는 `run.bat` 또는 `python server.py run --foreground`를 사용하세요.
+
+## Ubuntu/Linux 백그라운드 실행과 프로세스 관리
+
+운영 서버에서 다른 터미널을 닫아도 계속 실행하려면 백그라운드 옵션을 사용합니다. 별도 터미널에서 같은 서버 설정과 실행 계정을 사용해 정상 종료·재시작할 수 있습니다.
+
+```bash
+cd /home/<계정>/work/BatteryWatch/server
+.venv/bin/python server.py --config server.local.json run --background
+
+# 다른 터미널에서 정상 종료
+.venv/bin/python server.py --config server.local.json stop
+
+# 설정을 다시 읽어 백그라운드 재시작
+.venv/bin/python server.py --config server.local.json restart
+```
+
+- `run --background`는 서버 포트가 열리고 준비된 뒤 PID와 로그 위치를 표시합니다. 같은 설정으로 이미 실행 중이면 두 번째 서버를 시작하지 않습니다.
+- `stop`은 해당 설정으로 실행한 백그라운드 서버에 SIGTERM을 보내 정리 후 종료하며, 최대 15초 기다립니다. 대기시간은 `stop --timeout 30`으로 지정할 수 있습니다.
+- `restart`는 기존 실행의 디버그/데모 모드를 유지하고 설정을 다시 읽어 실행합니다. 디버그 로그는 `restart --debug`로 켜고 `restart --no-debug`로 끕니다.
+- 설정별 PID 파일은 `server.local.pid`, 서비스 로그는 `logs/server.log`, 시작 실패 등 표준 출력/오류는 `logs/server-daemon.log`에 기록합니다. 로그 확인은 `tail -f logs/server.log`로 합니다.
+- PID 파일이 없는 전경 실행 서버는 이 `stop`/`restart` 명령의 관리 대상이 아닙니다. 그 터미널에서 Ctrl+C로 종료하세요. systemd 등 서비스 관리자로 실행 중이라면 해당 서비스 관리자를 사용합니다.
+- `--background`, `stop`, `restart`는 Ubuntu/Linux에서 지원합니다. Windows 개발 PC에서는 전경 실행을 사용하세요.
+
+예를 들어 다른 터미널에서 실제 실행 상태와 포트를 확인할 수 있습니다.
+
+```bash
+ps -ef | grep '[s]erver.py.*--daemon-child'
+sudo ss -ltnp 'sport = :9443'
+tail -f /home/<계정>/work/BatteryWatch/server/logs/server.log
+```
 
 - `server.local.json`: 서버 설정, 클라이언트별 토큰 SHA256와 허용 현장/장비
 - `client-connection.local.json`: **클라이언트에 입력할 실제 토큰**과 접속 설정

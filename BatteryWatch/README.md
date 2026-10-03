@@ -2,6 +2,8 @@
 
 **새 PC/Ubuntu에 checkout한 뒤에는 [환경 재현 안내](docs/reproduce.md)를 먼저 따르세요.** `bootstrap.py`와 잠금 파일로 서버·수집기의 독립 환경을 만들고, Android는 포함된 Gradle Wrapper로 빌드합니다. 토큰·인증서·현장 데이터는 별도 복원합니다.
 
+세 프로그램의 설계·데이터 흐름·인증서/토큰 생성·운영 설정은 [통합 개발·운영 상세서](docs/developer-guide.md)에서 확인하세요. 고객사 전달용 [Word 문서](docs/BatteryWatch_통합_개발운영_상세서.docx)도 함께 제공합니다.
+
 축전지 데이터를 공인 IP 서버에 축적하고 Android 앱에서 상태 및 안전 알람을 확인하는 신규 프로젝트입니다. 기존 RMS_Server와 독립적으로 개발합니다.
 
 ## 현재 상태

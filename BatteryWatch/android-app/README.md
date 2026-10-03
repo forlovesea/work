@@ -28,7 +28,7 @@ JDK 17, Gradle 8.11.1, Android SDK `platforms;android-35` 및 `build-tools;35.0.
 
 출력: `app/build/outputs/apk/offline/debug/app-offline-debug.apk`
 `offline`은 Firebase 없는 **조회 전용 빌드** 이름이며 서버 네트워크 연결은 필요합니다. 백그라운드 푸시를 제공하지 않습니다.
-시험용 APK: [BatteryWatch 0.2.7 오프라인 디버그 APK 다운로드](https://github.com/forlovesea/work/raw/refs/heads/main/BatteryWatch/android-app/releases/BatteryWatch-0.2.7-offline-debug.apk). 기존 디버그 APK와 서명이 다르면 업데이트 설치 대신 기존 앱을 제거한 뒤 설치하세요.
+시험용 APK: [BatteryWatch 0.2.8 오프라인 디버그 APK 다운로드](https://github.com/forlovesea/work/raw/refs/heads/main/BatteryWatch/android-app/releases/BatteryWatch-0.2.8-offline-debug.apk). 기존 디버그 APK와 서명이 다르면 업데이트 설치 대신 기존 앱을 제거한 뒤 설치하세요.
 
 서버에서 `python server.py enable-api`로 조회 토큰을 생성한 뒤 `android-connection.local.json`의 서버 주소와 토큰을 앱에 입력합니다. 수집기 업로드 토큰과 다릅니다.
 기본 API 포트는 8443입니다. 에뮬레이터 로컬 시험 주소는 `http://10.0.2.2:8443`이며 HTTP는 debug 빌드의 루프백/에뮬레이터 주소만 허용합니다. 실제 휴대폰은 유효한 인증서의 HTTPS 주소를 사용하세요.

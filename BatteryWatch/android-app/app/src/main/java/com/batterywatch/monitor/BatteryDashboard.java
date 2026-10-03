@@ -206,7 +206,18 @@ public final class BatteryDashboard {
     private void addProtection(LinearLayout parent,String title,Object value) {
         String state=RackSummary.protection(value);
         int color="발생".equals(state)?AMBER:"정상".equals(state)?GREEN:MUTED;
-        parent.addView(label(title+": "+state,14,color));
+        LinearLayout row=new LinearLayout(context);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(0,dp(2),0,dp(2));
+        TextView name=label(title,14,INK);
+        row.addView(name,new LinearLayout.LayoutParams(0,-2,1));
+        TextView badge=label(state,13,color);
+        badge.setGravity(Gravity.CENTER);
+        badge.setMinWidth(dp(68));
+        badge.setPadding(dp(10),dp(3),dp(10),dp(3));
+        badge.setBackground(background(Color.rgb(34,54,66),12));
+        row.addView(badge,new LinearLayout.LayoutParams(-2,-2));
+        parent.addView(row,new LinearLayout.LayoutParams(-1,-2));
     }
     private void showModule(LinearLayout parent,ModuleSlots.Slot slot,JSONObject m,boolean fresh) {
         parent.removeAllViews(); LinearLayout box=card(parent);

@@ -57,6 +57,15 @@ class UploadTests(unittest.TestCase):
         event=UploadWorker.result_event(1,payload,True,control_command=command)
         self.assertEqual(event['control_command'],command)
 
+    def test_module_communication_status_labels(self):
+        from upload_ui import module_communication_status
+        self.assertEqual(module_communication_status(0),'Online')
+        self.assertEqual(module_communication_status(3),'Disconnect')
+        self.assertEqual(module_communication_status(4),'충전중')
+        self.assertEqual(module_communication_status(255),'Unknown')
+        self.assertIsNone(module_communication_status(None))
+        self.assertEqual(module_communication_status('invalid'),'Unknown')
+
     def test_remote_charge_limit_rejects_unapproved_command_values(self):
         from remote_control import apply_charge_limit
         result=apply_charge_limit({},{
@@ -145,7 +154,7 @@ class UploadTests(unittest.TestCase):
             controller.worker.stop(); controller.worker.join(5)
             controller.outbox=Outbox(self.root/'ui.db')
             controller.config=dict(self.config, interval=5)
-            ui.module_data={'1':{'soc':83,'cells':[3.2,3.3],'temps':[24,25]}}
+            ui.module_data={'1':{'soc':83,'status':0,'cells':[3.2,3.3],'temps':[24,25]}}
             controller.poll(True,{'1.2.3':'raw'})
             controller.trap({'alarm':'raised','_source_ip':'10.0.0.1'})
             controller.trap({'alarm':'recovered','_source_ip':'10.0.0.1'})
@@ -163,6 +172,8 @@ class UploadTests(unittest.TestCase):
                 data=[json.loads(r[0]) for r in db.execute('SELECT payload FROM queue ORDER BY seq')]
             self.assertEqual([p['kind'] for p in data],['trap','trap','snapshot'])
             self.assertEqual(data[2]['data']['module_data']['1']['soc'],83)
+            self.assertEqual(data[2]['data']['module_data']['1']['status'],0)
+            self.assertEqual(data[2]['data']['module_data']['1']['communication_status'],'Online')
             self.assertEqual(data[2]['data']['raw_oids'],{'1.2.3':'raw'})
             self.assertIsNotNone(data[2]['data']['last_poll_at'])
             self.assertEqual(data[2]['data']['operating_status'],{

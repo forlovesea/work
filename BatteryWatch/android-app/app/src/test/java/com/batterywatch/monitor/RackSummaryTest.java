@@ -27,4 +27,13 @@ public class RackSummaryTest {
         assertEquals("—",RackSummary.protection(null));
         assertEquals("—",RackSummary.protection("-"));
     }
+    @Test public void moduleCommunicationStatusSupportsCodesAndLabels() {
+        assertEquals("Online",RackSummary.communicationStatus(0));
+        assertEquals("Offline",RackSummary.communicationStatus("1"));
+        assertEquals("Disconnect",RackSummary.communicationStatus("Disconnect"));
+        assertEquals("충전중",RackSummary.communicationStatus(4));
+        assertEquals("Unknown",RackSummary.communicationStatus(255));
+        assertEquals("—",RackSummary.communicationStatus(null));
+        assertEquals("—",RackSummary.communicationStatus("unexpected"));
+    }
 }

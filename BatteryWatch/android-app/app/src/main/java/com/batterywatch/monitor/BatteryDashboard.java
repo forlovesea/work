@@ -213,6 +213,12 @@ public final class BatteryDashboard {
         box.addView(label(slot.label(),23,INK));
         if(!fresh) box.addView(label("이전 수신값 · 현재 정상 값으로 사용하지 마세요",13,AMBER));
         if(m==null) { box.addView(label("이 모듈의 측정 데이터가 없습니다.",15,AMBER)); return; }
+        Object communication=m.isNull("communication_status")?m.opt("status"):m.opt("communication_status");
+        String communicationStatus=RackSummary.communicationStatus(communication);
+        int communicationColor="Online".equals(communicationStatus)||"충전중".equals(communicationStatus)
+            ||"방전중".equals(communicationStatus)||"Standby".equals(communicationStatus)?GREEN:
+            "Offline".equals(communicationStatus)||"Disconnect".equals(communicationStatus)?AMBER:MUTED;
+        box.addView(label("통신 상태: "+communicationStatus,14,communicationColor));
         LinearLayout metrics=new LinearLayout(context);
         metric(metrics,"SOC",value(m,"soc"),"%",fresh?GREEN:MUTED); metric(metrics,"SOH",value(m,"soh"),"%",INK);box.addView(metrics);
         double soc=m.optDouble("soc",Double.NaN);

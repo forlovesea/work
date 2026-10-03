@@ -33,7 +33,7 @@ kind는 snapshot 또는 trap입니다. captured_at은 큐 저장용 데이터를
 
 snapshot data 필드: source_version, mode, site_name, system_name, equipment_ip, connected, last_poll_ok, last_poll_at, last_poll_error, last_trap_at, snmp_fail_count, snmp_total_fail_count, raw_oids, module_map, module_data, row_to_module, equip_to_module, module_order, module_barcodes, active_alarms, faults, active_fault_keys, total_capacity, group_soh, summary_table, operating_status, module_tables, fault_table, epo_status. `operating_status`에는 방전 횟수, 과전압/고온/과전류 충전차단 및 차단기 OFF 상태, 충전전류제한[C], SOC 충전제한 지원/활성/설정값이 구조화되어 포함됩니다. 상태를 아직 확인할 수 없는 값은 null이며, SOC 충전제한은 장비 응답을 확인한 경우에만 지원 여부를 true로 보냅니다.
 
-원본 데이터 키와 배열을 보존하며 딕셔너리 키는 JSON 문자열로 변환합니다. module_data의 cells는 V, temps는 ℃, volt는 V, current는 A, soc/soh는 %입니다. 수집 불가 값은 null입니다. 원본이 표현한 상태/센티널 값은 raw_oids에 그대로 유지됩니다.
+원본 데이터 키와 배열을 보존하며 딕셔너리 키는 JSON 문자열로 변환합니다. module_data의 cells는 V, temps는 ℃, volt는 V, current는 A, soc/soh는 %입니다. `status`는 모듈 통신 상태 코드이며 `communication_status`는 앱 표시용 상태명(Online, Offline, Sleep, Disconnect, 충전중, 방전중, Standby, Unknown)입니다. 상태 코드를 아직 확인할 수 없으면 상태명은 null입니다. 수집 불가 값은 null입니다. 원본이 표현한 상태/센티널 값은 raw_oids에 그대로 유지됩니다.
 
 trap data 필드: received_at, raw_trap, monitored_ip. raw_trap의 `_source_ip`가 실제 발신 장비이며 현재 프로필과 다를 수 있습니다. 발생/복구 Trap OID를 그대로 보존합니다.
 

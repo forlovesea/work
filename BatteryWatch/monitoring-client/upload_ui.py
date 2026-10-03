@@ -45,6 +45,28 @@ def plain(value):
     return str(value)
 
 
+MODULE_COMMUNICATION_STATUSES = {
+    0: 'Online',
+    1: 'Offline',
+    2: 'Sleep',
+    3: 'Disconnect',
+    4: '충전중',
+    5: '방전중',
+    6: 'Standby',
+    255: 'Unknown',
+}
+
+
+def module_communication_status(status):
+    if status is None:
+        return None
+    try:
+        code = int(status)
+    except (TypeError, ValueError, OverflowError):
+        return 'Unknown'
+    return MODULE_COMMUNICATION_STATUSES.get(code, 'Unknown')
+
+
 class UploadController(QObject):
     status = Signal(str)
     upload_result = Signal(object)
@@ -568,6 +590,10 @@ class UploadController(QObject):
         }
         with self.control_result_lock:
             control_results = list(self.pending_control_results)
+        module_data = {
+            str(row): dict(values, communication_status=module_communication_status(values.get('status')))
+            for row, values in u.module_data.items()
+        }
         data = {
             'source_version': 'TBC1000B V3.2.6', 'mode': u.mode,
             'site_name': u.site_edit.text(), 'system_name': u.system_edit.text(),
@@ -577,7 +603,7 @@ class UploadController(QObject):
             'last_poll_at': self.last_poll_at, 'last_poll_error': self.last_error,
             'last_trap_at': self.last_trap_at,
             'snmp_fail_count': u.snmp_fail_count, 'snmp_total_fail_count': u.snmp_total_fail_count,
-            'raw_oids': self.raw_oids, 'module_map': u.module_map, 'module_data': u.module_data,
+            'raw_oids': self.raw_oids, 'module_map': u.module_map, 'module_data': module_data,
             'row_to_module': u.row_to_module, 'equip_to_module': u.equip_to_module,
             'module_order': u.module_order, 'module_barcodes': u.module_barcodes,
             'active_alarms': u.current_alarm_table, 'faults': u.fault_list,

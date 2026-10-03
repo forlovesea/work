@@ -23,6 +23,21 @@ public final class RackSummary {
         if(Boolean.FALSE.equals(value)||"정상".equals(value)) return "정상";
         return "—";
     }
+    public static String communicationStatus(Object value) {
+        if(value==null) return "—";
+        String status=value.toString().trim();
+        switch(status) {
+            case "0": case "Online": return "Online";
+            case "1": case "Offline": return "Offline";
+            case "2": case "Sleep": return "Sleep";
+            case "3": case "Disconnect": return "Disconnect";
+            case "4": case "충전중": return "충전중";
+            case "5": case "방전중": return "방전중";
+            case "6": case "Standby": return "Standby";
+            case "255": case "Unknown": return "Unknown";
+            default: return "—";
+        }
+    }
     public static final class Temperatures {
         private double min=Double.POSITIVE_INFINITY,max=Double.NEGATIVE_INFINITY;
         private final Set<String> lows=new LinkedHashSet<>(),highs=new LinkedHashSet<>();

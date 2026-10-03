@@ -15,21 +15,39 @@ from alarms import AlarmEngine, configure as configure_alarms, monitor
 from push import FirebaseSender, Dispatcher, deliver
 
 
-def initialize(path, site, device):
+def parse_grant(value):
+    site, separator, device = value.partition('/')
+    if not separator or not identifier(site) or not identifier(device):
+        raise ValueError('Device grant must be SITE_ID/DEVICE_ID')
+    return dict(site_id=site, device_id=device)
+
+
+def unique_grants(grants):
+    result=[]
+    for grant in grants:
+        if grant not in result:
+            result.append(grant)
+    return result
+
+
+def initialize(path, site, device, grants=None):
     path=Path(path).resolve()
     credentials=path.parent/'client-connection.local.json'
     if path.exists() or credentials.exists():
         raise ValueError('Existing configuration/credentials will not be overwritten')
-    if not identifier(site) or not identifier(device): raise ValueError('Invalid site/device ID')
+    configured_grants=unique_grants(grants or [dict(site_id=site,device_id=device)])
+    if not configured_grants or any(not all(identifier(g.get(k)) for k in ('site_id','device_id')) for g in configured_grants):
+        raise ValueError('Invalid site/device grant')
     token=secrets.token_urlsafe(32)
     config=dict(host='127.0.0.1',port=9443,database='data/batterywatch.sqlite3',tls={},
                 max_connections=32,idle_timeout=3700,frame_timeout=15,max_frame_bytes=16*1024*1024,
                 collectors=[dict(id='collector-01',token_sha256=hashlib.sha256(token.encode()).hexdigest(),
-                                 devices=[dict(site_id=site,device_id=device)])])
+                                 devices=configured_grants)])
     path.parent.mkdir(parents=True,exist_ok=True)
     with path.open('x',encoding='utf-8') as f: json.dump(config,f,ensure_ascii=False,indent=2)
     with credentials.open('x',encoding='utf-8') as f:
-        json.dump(dict(host='127.0.0.1',port=9443,tls=False,token=token,site_id=site,device_id=device,interval=5),f,ensure_ascii=False,indent=2)
+        grant=configured_grants[0]
+        json.dump(dict(host='127.0.0.1',port=9443,tls=False,token=token,site_id=grant['site_id'],device_id=grant['device_id'],interval=5),f,ensure_ascii=False,indent=2)
     return credentials
 
 
@@ -77,7 +95,9 @@ def main():
     parser.add_argument('--config',default=str(Path(__file__).with_name('server.local.json')))
     sub=parser.add_subparsers(dest='command',required=True)
     init=sub.add_parser('init',help='Create local configuration and client credentials')
-    init.add_argument('--site',default='site-01'); init.add_argument('--device',default='battery-01')
+    init.add_argument('--site'); init.add_argument('--device')
+    init.add_argument('--grant',action='append',default=[],metavar='SITE_ID/DEVICE_ID',
+                      help='Additional authorized site/device pair; repeat for multiple pairs')
     sub.add_parser('check',help='Validate configuration')
     doctor=sub.add_parser('doctor',help='Read-only deployment checks; no credentials are printed')
     doctor.add_argument('--android-config',help='Optional Android google-services.json path')
@@ -88,7 +108,9 @@ def main():
     debug=sub.add_parser('debug',help='Change communication logging in a running server')
     debug.add_argument('state',choices=('on','off'))
     mobile=sub.add_parser('enable-api',help='Create a separate read-only Android credential')
-    mobile.add_argument('--site',default='site-01'); mobile.add_argument('--device',default='battery-01')
+    mobile.add_argument('--site'); mobile.add_argument('--device')
+    mobile.add_argument('--grant',action='append',default=[],metavar='SITE_ID/DEVICE_ID',
+                        help='Limit the viewer to this authorized pair; repeat for multiple pairs (default: all collector grants)')
     inspect=sub.add_parser('inspect',help='Print saved history, latest snapshots and sessions as JSON')
     inspect.add_argument('--site'); inspect.add_argument('--device')
     inspect.add_argument('--limit',type=int,default=20)
@@ -113,7 +135,14 @@ def main():
             if not report['ok']: parser.exit(1)
             return
         if args.command=='init':
-            credentials=initialize(args.config,args.site,args.device)
+            grants=[parse_grant(value) for value in args.grant]
+            if args.site is not None or args.device is not None:
+                if args.site is None or args.device is None:
+                    raise ValueError('--site and --device must be provided together')
+                grants.append(dict(site_id=args.site,device_id=args.device))
+            if not grants:
+                grants=[dict(site_id=args.site or 'site-01',device_id=args.device or 'battery-01')]
+            credentials=initialize(args.config,args.site,args.device,grants)
             print('Configuration created:',Path(args.config).resolve())
             print('Client connection values (contains secret token):',credentials)
             return
@@ -123,10 +152,17 @@ def main():
             credentials=path.parent/'android-connection.local.json'
             raw=json.loads(path.read_text(encoding='utf-8-sig'))
             if credentials.exists() or raw.get('api'): raise ValueError('Existing Android API settings will not be overwritten')
-            grant=dict(site_id=args.site,device_id=args.device)
-            if not any(grant in c['devices'] for c in config['collectors']): raise ValueError('Register the collector site/device first')
+            registered=unique_grants(g for c in config['collectors'] for g in c['devices'])
+            requested=[parse_grant(value) for value in args.grant]
+            if args.site is not None or args.device is not None:
+                if args.site is None or args.device is None:
+                    raise ValueError('--site and --device must be provided together')
+                requested.append(dict(site_id=args.site,device_id=args.device))
+            grants=unique_grants(requested or registered)
+            if any(grant not in registered for grant in grants):
+                raise ValueError('Every viewer grant must be registered for a collector')
             token=secrets.token_urlsafe(32)
-            raw['api']=dict(enabled=True,host='127.0.0.1',port=8443,viewers=[dict(id='android-01',token_sha256=hashlib.sha256(token.encode()).hexdigest(),devices=[grant])])
+            raw['api']=dict(enabled=True,host='127.0.0.1',port=8443,viewers=[dict(id='android-01',token_sha256=hashlib.sha256(token.encode()).hexdigest(),devices=grants)])
             scheme='https' if config['tls'].get('certfile') else 'http'
             with credentials.open('x',encoding='utf-8') as f:
                 json.dump(dict(server_url=scheme+'://127.0.0.1:8443',token=token),f,indent=2)

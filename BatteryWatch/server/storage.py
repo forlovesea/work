@@ -2,6 +2,7 @@
 import json
 import sqlite3
 import threading
+import time
 from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
@@ -43,6 +44,14 @@ class Storage:
                     peer TEXT NOT NULL, connected_at TEXT NOT NULL,
                     last_seen_at TEXT NOT NULL, disconnected_at TEXT);
                 CREATE INDEX IF NOT EXISTS sessions_disconnected ON sessions(disconnected_at);
+                CREATE TABLE IF NOT EXISTS control_commands (
+                    command_id TEXT PRIMARY KEY, viewer_id TEXT NOT NULL,
+                    collector_id TEXT NOT NULL, site_id TEXT NOT NULL, device_id TEXT NOT NULL,
+                    action TEXT NOT NULL, value_centi INTEGER NOT NULL,
+                    status TEXT NOT NULL, created_at REAL NOT NULL, expires_at REAL NOT NULL,
+                    claim_until REAL, applied_value_centi INTEGER, result_message TEXT);
+                CREATE INDEX IF NOT EXISTS control_commands_pending
+                    ON control_commands(collector_id,site_id,device_id,status,created_at);
             ''')
 
     def connect(self):
@@ -76,6 +85,28 @@ class Storage:
                     captured_at=MAX(devices.captured_at,excluded.captured_at),
                     last_received_at=excluded.last_received_at''',
                     (payload['site_id'], payload['device_id'], collector_id, payload['sample_id'], payload['captured_at'], received))
+                for result in payload['data'].get('control_results', []):
+                    command = db.execute('''SELECT value_centi FROM control_commands
+                        WHERE command_id=? AND collector_id=? AND site_id=? AND device_id=?
+                        AND status='dispatched' ''',
+                        (result['command_id'],collector_id,payload['site_id'],payload['device_id'])).fetchone()
+                    if command is None:
+                        continue
+                    applied = result.get('applied_value_centi')
+                    status = 'succeeded' if (
+                        result['status'] == 'succeeded'
+                        and result.get('applied_value_centi') == command['value_centi']
+                    ) else 'failed'
+                    result_message = (
+                        result.get('message','') if status == 'succeeded'
+                        else result.get('message','') or '장비 적용값 검증 실패'
+                    )
+                    db.execute('''UPDATE control_commands SET status=?,claim_until=NULL,
+                        applied_value_centi=?,result_message=?
+                        WHERE command_id=? AND collector_id=? AND site_id=? AND device_id=?
+                        AND status='dispatched' ''',
+                        (status,applied,result_message,result['command_id'],collector_id,
+                         payload['site_id'],payload['device_id']))
             db.execute('''INSERT INTO sessions VALUES(?,?,?,?,?,NULL)
                 ON CONFLICT(session_id) DO UPDATE SET last_seen_at=excluded.last_seen_at''',
                 (session_id, collector_id, peer, received, received))
@@ -85,6 +116,37 @@ class Storage:
     def disconnected(self, session_id):
         with self.lock, closing(self.connect()) as db, db:
             db.execute('UPDATE sessions SET disconnected_at=? WHERE session_id=?', (now(), session_id))
+
+    def claim_control_command(self, collector_id, site_id, device_id, instant=None):
+        instant = time.time() if instant is None else instant
+        with self.lock, closing(self.connect()) as db, db:
+            db.execute('''UPDATE control_commands SET status='timed_out',claim_until=NULL,
+                result_message='명령 시간 초과' WHERE status IN ('queued','dispatched') AND expires_at<=?''',
+                (instant,))
+            row = db.execute('''SELECT command_id,action,value_centi FROM control_commands
+                WHERE collector_id=? AND site_id=? AND device_id=? AND expires_at>?
+                AND (status='queued' OR (status='dispatched' AND claim_until<=?))
+                ORDER BY created_at LIMIT 1''',
+                (collector_id,site_id,device_id,instant,instant)).fetchone()
+            if row is None:
+                return None
+            db.execute('''UPDATE control_commands SET status='dispatched',claim_until=?
+                WHERE command_id=?''', (instant + 20,row['command_id']))
+            return dict(command_id=row['command_id'],action=row['action'],
+                        value_centi=row['value_centi'])
+
+    def control_command_status(self, command_id, viewer_id, instant=None):
+        instant = time.time() if instant is None else instant
+        with self.lock, closing(self.connect()) as db, db:
+            db.execute('''UPDATE control_commands SET status='timed_out',claim_until=NULL,
+                result_message='명령 시간 초과' WHERE command_id=? AND viewer_id=?
+                AND status IN ('queued','dispatched') AND expires_at<=?''',
+                (command_id,viewer_id,instant))
+            row = db.execute('''SELECT command_id,site_id,device_id,action,value_centi,status,
+                applied_value_centi,result_message,created_at,expires_at
+                FROM control_commands WHERE command_id=? AND viewer_id=?''',
+                (command_id,viewer_id)).fetchone()
+            return dict(row) if row else None
 
     def inspect(self, site=None, device=None, limit=20):
         with closing(self.connect()) as db:

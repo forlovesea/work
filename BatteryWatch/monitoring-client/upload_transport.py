@@ -152,7 +152,8 @@ class UploadWorker(threading.Thread):
                     if not isinstance(ack, dict) or ack.get('type') != 'ack' or ack.get('sample_id') != sample_id or ack.get('ok') is not True:
                         raise ValueError('Invalid/rejected server ACK')
                     self.outbox.acknowledge(sample_id)
-                    self.result(self.result_event(generation, payload, True))
+                    self.result(self.result_event(generation, payload, True,
+                                                  control_command=ack.get('control_command')))
                     self.report('ACK ' + utc_now() + ' | pending ' + str(self.outbox.count()))
                     backoff, delay = 1, 0
             except Exception as exc:
@@ -168,7 +169,7 @@ class UploadWorker(threading.Thread):
         self.disconnect()
 
     @staticmethod
-    def result_event(generation, payload, ok, error=''):
+    def result_event(generation, payload, ok, error='', control_command=None):
         payload = payload or {}
         data = payload.get('data', {})
         if payload.get('kind') == 'snapshot':
@@ -183,7 +184,7 @@ class UploadWorker(threading.Thread):
         return dict(generation=generation, at=utc_now(), ok=ok, error=error,
                     site_id=payload.get('site_id', ''), device_id=payload.get('device_id', ''),
                     captured_at=payload.get('captured_at'), last_poll_at=data.get('last_poll_at'),
-                    summary=summary)
+                    summary=summary, control_command=control_command)
 
 
 def envelope(config, kind, data):

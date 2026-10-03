@@ -1,6 +1,7 @@
 """Qt adapter: snapshots are copied on the UI thread; network runs separately."""
 import hashlib
 import math
+import threading
 from collections import deque
 from datetime import datetime
 from pathlib import Path
@@ -10,6 +11,7 @@ from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QFormLayout, QLineEdit
                                QSpinBox, QCheckBox, QMessageBox, QLabel, QTextBrowser,
                                QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog, QPlainTextEdit)
 from upload_transport import Outbox, UploadWorker, destination, envelope, utc_now
+from remote_control import apply_charge_limit
 
 
 def token_visibility_icon(color, visible):
@@ -56,6 +58,9 @@ class UploadController(QObject):
         self.last_error = None
         self.last_trap_at = None
         self.storage_error = ''
+        self.control_result_lock = threading.Lock()
+        self.pending_control_results = []
+        self.active_control_commands = set()
         self.history = deque(maxlen=30)
         self.history_dialog = None
         self.history_view = None
@@ -113,10 +118,48 @@ class UploadController(QObject):
     def on_upload_result(self, event):
         if event['generation'] != self.generation or not self.config.get('enabled'):
             return
+        command = event.get('control_command')
+        if command:
+            self.start_remote_control(command, event)
         self.connection_state = 'success' if event['ok'] else 'failed'
         self.history.appendleft(event)
         self.update_status_button()
         self.refresh_history()
+
+    def start_remote_control(self, command, event):
+        command_id = command.get('command_id') if isinstance(command, dict) else None
+        if not isinstance(command_id, str) or command_id in self.active_control_commands:
+            return
+        if (event.get('site_id') != self.config.get('site_id')
+                or event.get('device_id') != self.config.get('device_id')):
+            return
+        ui = self.ui
+        try:
+            port = int(ui.port_edit.text().strip() or 161)
+        except ValueError:
+            port = 161
+        snmp_config = dict(
+            ip=ui.ip_edit.text().strip(),
+            port=port,
+            get_community=ui.get_comm_edit.text().strip(),
+            set_community=ui.set_comm_edit.text().strip(),
+        )
+        self.active_control_commands.add(command_id)
+
+        def execute():
+            try:
+                result = apply_charge_limit(snmp_config, command)
+            except Exception:
+                result = dict(command_id=command_id, status='failed',
+                              applied_value_centi=None,
+                              message='SNMP 설정 처리 중 예상하지 못한 오류가 발생했습니다.')
+            with self.control_result_lock:
+                self.pending_control_results.append(result)
+            self.active_control_commands.discard(command_id)
+            state = '적용 및 확인 완료' if result['status'] == 'succeeded' else '적용 실패'
+            self.status.emit('원격 충전전류제한 ' + state + ' · ' + result['message'])
+
+        threading.Thread(target=execute, name='BatteryWatchRemoteControl', daemon=True).start()
 
     def refresh_history(self):
         if self.history_view is None:
@@ -472,17 +515,59 @@ class UploadController(QObject):
                               'monitored_ip': self.ui.ip_edit.text().strip()})
 
     def enqueue(self, kind, data):
-        if not self.config['enabled']: return
+        if not self.config['enabled']: return False
         try:
             self.outbox.put(destination(self.config), envelope(self.config, kind, plain(data)))
+            return True
         except Exception as exc:
             self.storage_error = '데이터 저장 실패 (일부 유실 가능): ' + str(exc)
             self.show_status(self.storage_error)
+            return False
 
     def capture(self):
         u = self.ui
         def table_values(table):
             return [[table.item(r,c).text() if table.item(r,c) else None for c in range(table.columnCount())] for r in range(table.rowCount())]
+        def summary_value(label):
+            position = getattr(u, 'summary_position_map', {}).get(label)
+            if position is None:
+                return None
+            item = u.summary_table.item(*position)
+            return item.text().strip() if item else None
+        def alarm_state(label):
+            value = summary_value(label)
+            if value == '발생':
+                return True
+            if value == '정상':
+                return False
+            return None
+        def button_number(button, decimals=2):
+            try:
+                value = float(button.text().strip())
+            except (AttributeError, TypeError, ValueError):
+                return None
+            return round(value, decimals) if math.isfinite(value) else None
+
+        soc_enabled = getattr(u, 'soc_charge_limit_enabled', None)
+        soc_value = getattr(u, 'soc_charge_limit_value', None)
+        try:
+            soc_enabled = int(soc_enabled)
+            soc_value = int(soc_value)
+        except (TypeError, ValueError):
+            soc_enabled = soc_value = None
+        soc_supported = (
+            True if soc_enabled in (1, 2)
+            else False if getattr(u, 'soc_charge_limit_fail_count', 0) >= 2
+            else None
+        )
+        soc_read_ok = soc_enabled in (1, 2) and getattr(u, 'soc_charge_limit_fail_count', 0) == 0
+        soc_limit = {
+            'supported': soc_supported,
+            'enabled': soc_enabled == 2 if soc_read_ok else None,
+            'value_percent': soc_value if soc_read_ok and soc_value is not None and 1 <= soc_value <= 100 else None,
+        }
+        with self.control_result_lock:
+            control_results = list(self.pending_control_results)
         data = {
             'source_version': 'TBC1000B V3.2.6', 'mode': u.mode,
             'site_name': u.site_edit.text(), 'system_name': u.system_edit.text(),
@@ -498,11 +583,35 @@ class UploadController(QObject):
             'active_alarms': u.current_alarm_table, 'faults': u.fault_list,
             'active_fault_keys': u.active_fault_keys, 'total_capacity': u.total_capacity,
             'group_soh': u.group_soh, 'summary_table': table_values(u.summary_table),
+            'control_results': control_results,
+            'operating_status': {
+                'discharge_count': (
+                    int(summary_value('방전 횟수'))
+                    if summary_value('방전 횟수') and summary_value('방전 횟수').isdigit()
+                    else None
+                ),
+                'charge_cutoff': {
+                    'overvoltage': alarm_state('과전압 충전차단'),
+                    'high_temperature': alarm_state('고온 충전차단'),
+                    'overcurrent': alarm_state('과전류 충전차단'),
+                    'breaker_off': alarm_state('차단기 OFF'),
+                },
+                'charge_current_limit_c': button_number(getattr(u, 'charge_limit_button', None)),
+                'soc_charge_limit': soc_limit,
+            },
             'module_tables': [table_values(u.module_table_left), table_values(u.module_table_right)],
             'fault_table': table_values(u.fault_table),
             'epo_status': {str(k): v.text() for k,v in u.cutoff_buttons.items()},
         }
-        self.enqueue('snapshot', data)
+        if control_results and self.enqueue('snapshot', data):
+            completed = {result['command_id'] for result in control_results}
+            with self.control_result_lock:
+                self.pending_control_results = [
+                    result for result in self.pending_control_results
+                    if result['command_id'] not in completed
+                ]
+        elif not control_results:
+            self.enqueue('snapshot', data)
 
     def close(self):
         self.timer.stop()

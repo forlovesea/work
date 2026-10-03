@@ -24,6 +24,7 @@ RMS_Server\TBC1000B.WinForms> ..\.dotnet\dotnet.exe publish .\TBC1000B.WinForms.
 
 
 
+
 *Windows PowerShell 실행 후, 
 - 윈도우 TRAP 중지.
 Set-Service SNMPTRAP -StartupType Disabled

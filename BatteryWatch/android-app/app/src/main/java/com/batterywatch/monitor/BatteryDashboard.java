@@ -74,7 +74,7 @@ public final class BatteryDashboard {
         if(values!=null) for(Iterator<String> i=values.keys();i.hasNext();) rows.add(i.next());
         return ModuleSlots.resolve(mapping,rows);
     }
-    public void details(LinearLayout parent,JSONObject response) throws JSONException {
+    public void details(LinearLayout parent,JSONObject response,Runnable changeChargeLimit) throws JSONException {
         JSONObject data=response.getJSONObject("payload").getJSONObject("data");
         JSONObject values=data.optJSONObject("module_data"); List<ModuleSlots.Slot> slots=slots(data);
         boolean fresh=response.optBoolean("fresh");
@@ -82,7 +82,7 @@ public final class BatteryDashboard {
         summary.addView(label(fresh?"● 정상 수신":"● 오래된 데이터 · 현재 상태 확인 필요",14,fresh?GREEN:AMBER));
         long count=slots.stream().filter(s->s.mapped).count();
         summary.addView(label("배터리 모듈  "+count+" / 10",24,INK));
-        rackSummary(summary,data,slots,fresh);
+        rackSummary(summary,data,slots,fresh,changeChargeLimit);
         summary.addView(label("측정  "+DisplayTime.format(data.optString("last_poll_at"))+"\n수신  "+DisplayTime.format(response.optString("received_at")),12,MUTED));
         summary.addView(label(DisplayTime.age(response.optDouble("measurement_age_seconds",Double.NaN)),12,fresh?MUTED:AMBER));
         if(!fresh) {
@@ -141,7 +141,8 @@ public final class BatteryDashboard {
         }
         return null;
     }
-    private void rackSummary(LinearLayout parent,JSONObject data,List<ModuleSlots.Slot> slots,boolean fresh) {
+    private void rackSummary(LinearLayout parent,JSONObject data,List<ModuleSlots.Slot> slots,boolean fresh,
+                             Runnable changeChargeLimit) {
         int color=fresh?INK:MUTED;
         LinearLayout electric=new LinearLayout(context);
         metric(electric,"전체 전압",RackSummary.number(summaryValue(data,"Rack 전압[V]"),false),"V",color);
@@ -168,6 +169,44 @@ public final class BatteryDashboard {
         column(origins,temperatures.maxModules(),MUTED); column(origins,temperatures.minModules(),MUTED);
         parent.addView(origins);
         parent.addView(label("온도: 수신된 셀 기준 · 미수신 값은 — 표시",11,MUTED));
+        operatingStatus(parent,data,fresh,changeChargeLimit);
+    }
+    private void operatingStatus(LinearLayout parent,JSONObject data,boolean fresh,Runnable changeChargeLimit) {
+        JSONObject status=data.optJSONObject("operating_status");
+        LinearLayout section=card(parent);
+        section.addView(label("방전 · 충전 보호 및 제한",16,INK));
+        LinearLayout metrics=new LinearLayout(context);
+        Object discharge=status==null?summaryValue(data,"방전 횟수"):status.opt("discharge_count");
+        Object chargeLimit=status==null?null:status.opt("charge_current_limit_c");
+        metric(metrics,"방전 횟수",RackSummary.number(discharge,false),"회",fresh?INK:MUTED);
+        metric(metrics,"충전전류제한",RackSummary.number(chargeLimit,false,2),"C",fresh?INK:MUTED);
+        section.addView(metrics);
+        if(fresh) action(section,"충전전류제한 변경",changeChargeLimit);
+        else section.addView(label("새 측정값을 수신한 뒤 충전전류제한을 변경할 수 있습니다.",12,AMBER));
+
+        JSONObject cutoffs=status==null?null:status.optJSONObject("charge_cutoff");
+        addProtection(section,"과전압 충전차단",cutoffs==null?summaryValue(data,"과전압 충전차단"):cutoffs.opt("overvoltage"));
+        addProtection(section,"고온 충전차단",cutoffs==null?summaryValue(data,"고온 충전차단"):cutoffs.opt("high_temperature"));
+        addProtection(section,"과전류 충전차단",cutoffs==null?summaryValue(data,"과전류 충전차단"):cutoffs.opt("overcurrent"));
+        addProtection(section,"차단기 OFF",cutoffs==null?summaryValue(data,"차단기 OFF"):cutoffs.opt("breaker_off"));
+
+        JSONObject socLimit=status==null?null:status.optJSONObject("soc_charge_limit");
+        if(socLimit!=null&&!socLimit.isNull("supported")) {
+            if(socLimit.optBoolean("supported")) {
+                boolean enabled=socLimit.optBoolean("enabled");
+                String value=RackSummary.number(socLimit.opt("value_percent"),true);
+                String text=socLimit.isNull("enabled")?"응답 없음":
+                    enabled?"사용 · "+("—".equals(value)?"값 미수신":value+"%"):"미사용";
+                section.addView(label("SOC 충전제한: "+text,14,enabled?GREEN:MUTED));
+            }
+        } else if(socLimit!=null) {
+            section.addView(label("SOC 충전제한: 확인 중",14,MUTED));
+        }
+    }
+    private void addProtection(LinearLayout parent,String title,Object value) {
+        String state=RackSummary.protection(value);
+        int color="발생".equals(state)?AMBER:"정상".equals(state)?GREEN:MUTED;
+        parent.addView(label(title+": "+state,14,color));
     }
     private void showModule(LinearLayout parent,ModuleSlots.Slot slot,JSONObject m,boolean fresh) {
         parent.removeAllViews(); LinearLayout box=card(parent);

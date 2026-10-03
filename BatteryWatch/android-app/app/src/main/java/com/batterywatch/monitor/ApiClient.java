@@ -37,6 +37,7 @@ final class ApiClient {
                     case 401 -> "인증 토큰이 올바르지 않습니다.";
                     case 403 -> "이 장비의 조회 권한이 없습니다.";
                     case 404 -> "저장된 데이터가 아직 없거나 API 주소가 다릅니다.";
+                    case 409 -> "모니터링 클라이언트가 오프라인이거나 장비의 최신 측정값이 준비되지 않았습니다.";
                     default -> "서버 응답 오류 (" + code + ")";
                 };
                 throw new IOException(message);

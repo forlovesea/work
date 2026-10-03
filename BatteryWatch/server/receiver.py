@@ -10,7 +10,7 @@ import ssl
 import struct
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 from storage import SampleConflict
 
 LOG = logging.getLogger('batterywatch')
@@ -67,6 +67,24 @@ def validate(message, collectors):
             if not isinstance(p['data'].get(field),dict): raise Rejected('invalid_snapshot')
         if not isinstance(p['data'].get('active_alarms'),list): raise Rejected('invalid_snapshot')
         if p['data'].get('last_poll_at') is not None: timestamp(p['data']['last_poll_at'])
+        results=p['data'].get('control_results',[])
+        if not isinstance(results,list) or len(results)>20:
+            raise Rejected('invalid_control_result')
+        for result in results:
+            if not isinstance(result,dict):
+                raise Rejected('invalid_control_result')
+            try:
+                if str(UUID(result.get('command_id',''))) != result['command_id']:
+                    raise ValueError()
+            except (ValueError,TypeError,KeyError):
+                raise Rejected('invalid_control_result') from None
+            if result.get('status') not in ('succeeded','failed'):
+                raise Rejected('invalid_control_result')
+            applied=result.get('applied_value_centi')
+            if applied is not None and (type(applied) is not int or not 5<=applied<=100):
+                raise Rejected('invalid_control_result')
+            if not isinstance(result.get('message',''),str) or len(result.get('message',''))>200:
+                raise Rejected('invalid_control_result')
     else:
         if not isinstance(p['data'].get('raw_trap'),dict): raise Rejected('invalid_trap')
         timestamp(p['data'].get('received_at'))
@@ -173,7 +191,13 @@ class Receiver:
                     log.debug('UPLOAD authenticated session=%s collector=%r',session_id,identity)
                 collector_id=identity
                 duplicate=await asyncio.to_thread(self.storage.save,identity,payload,session_id,peer)
-                ack=json.dumps(dict(type='ack',sample_id=payload['sample_id'],ok=True,duplicate=duplicate)).encode()
+                ack_message=dict(type='ack',sample_id=payload['sample_id'],ok=True,duplicate=duplicate)
+                if payload['kind']=='snapshot':
+                    command=await asyncio.to_thread(
+                        self.storage.claim_control_command,identity,payload['site_id'],payload['device_id'])
+                    if command is not None:
+                        ack_message['control_command']=command
+                ack=json.dumps(ack_message).encode()
                 writer.write(struct.pack('!I',len(ack))+ack)
                 await asyncio.wait_for(writer.drain(),4)
                 log.debug('UPLOAD ack session=%s collector=%r site=%r device=%r sample=%r kind=%s duplicate=%s',

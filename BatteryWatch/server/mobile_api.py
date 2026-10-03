@@ -58,6 +58,18 @@ def freshness(payload,received_at):
 
 def query(storage,viewer,path,params):
     grants=viewer['devices']
+    command_prefix='/api/v1/commands/'
+    if path.startswith(command_prefix):
+        command_id=path[len(command_prefix):]
+        try:
+            if str(uuid.UUID(command_id)) != command_id: raise ValueError()
+        except ValueError:
+            return 400,dict(error='invalid_command_id')
+        command=storage.control_command_status(command_id,viewer['id'])
+        if command is None: return 404,dict(error='not_found')
+        if dict(site_id=command['site_id'],device_id=command['device_id']) not in grants:
+            return 403,dict(error='forbidden')
+        return 200,dict(command=command)
     with closing(storage.connect()) as db:
         if path=='/api/v1/devices':
             items=[]
@@ -110,6 +122,40 @@ def mutate(storage, viewer, method, path, body):
     if not isinstance(body, dict):
         return 400, dict(error='invalid_body')
     with storage.lock, closing(storage.connect()) as db, db:
+        if method == 'POST' and path == '/api/v1/commands':
+            site_id,device_id=body.get('site_id'),body.get('device_id')
+            if not identifier(site_id) or not identifier(device_id):
+                return 400,dict(error='invalid_device')
+            grant=dict(site_id=site_id,device_id=device_id)
+            if grant not in viewer['devices']:
+                return 403,dict(error='forbidden')
+            if body.get('action') != 'charge_current_limit':
+                return 400,dict(error='invalid_command')
+            value=body.get('value_centi')
+            if type(value) is not int or not 5<=value<=100:
+                return 400,dict(error='invalid_value')
+            instant=time.time()
+            fresh_after=datetime.fromtimestamp(instant-20,timezone.utc).isoformat(timespec='microseconds')
+            device=db.execute('''SELECT d.collector_id,s.payload,s.received_at FROM devices d
+                JOIN samples s ON s.collector_id=d.collector_id AND s.sample_id=d.sample_id
+                JOIN sessions x ON x.collector_id=d.collector_id
+                WHERE d.site_id=? AND d.device_id=?
+                AND x.disconnected_at IS NULL AND x.last_seen_at>=?
+                ORDER BY d.last_received_at DESC LIMIT 1''',
+                (site_id,device_id,fresh_after)).fetchone()
+            if device is None:
+                return 409,dict(error='device_offline')
+            snapshot=json.loads(device['payload'])
+            if not freshness(snapshot,device['received_at'])['fresh']:
+                return 409,dict(error='device_not_ready')
+            command_id=str(uuid.uuid4())
+            db.execute('''INSERT INTO control_commands
+                (command_id,viewer_id,collector_id,site_id,device_id,action,value_centi,
+                 status,created_at,expires_at)
+                VALUES(?,?,?,?,?,'charge_current_limit',?,'queued',?,?)''',
+                (command_id,viewer['id'],device['collector_id'],site_id,device_id,
+                 value,instant,instant+60))
+            return 200,dict(command_id=command_id,status='queued')
         if method == 'POST' and path == '/api/v1/acknowledgements':
             event = db.execute('SELECT site_id,device_id FROM alarm_events WHERE event_id=?', (str(body.get('event_id', '')),)).fetchone()
             if event is None:
@@ -187,8 +233,10 @@ class MobileApi:
             method,target,version=lines[0].split(' ')
             method_label=method if method in ('GET','POST','PUT','DELETE','HEAD','OPTIONS') else 'other'
             path=urlsplit(target).path
-            routes=('/api/v1/devices','/api/v1/alarms','/api/v1/snapshot','/api/v1/history','/api/v1/acknowledgements')
-            route=path if path in routes else ('/api/v1/push-devices/:id' if path.startswith('/api/v1/push-devices/') else 'other')
+            routes=('/api/v1/devices','/api/v1/alarms','/api/v1/snapshot','/api/v1/history','/api/v1/acknowledgements','/api/v1/commands')
+            route=path if path in routes else (
+                '/api/v1/commands/:id' if path.startswith('/api/v1/commands/') else
+                '/api/v1/push-devices/:id' if path.startswith('/api/v1/push-devices/') else 'other')
             log.debug('API request connection=%s method=%s route=%s',connection,method_label,route)
             headers={}
             for line in lines[1:]:

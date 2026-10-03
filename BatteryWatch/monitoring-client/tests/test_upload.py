@@ -49,6 +49,23 @@ class UploadTests(unittest.TestCase):
         self.assertIn('측정 실패/대기', event['summary'])
         self.assertNotIn('token', event)
 
+    def test_upload_ack_passes_remote_command_to_client_handler(self):
+        from upload_transport import UploadWorker
+        command={'command_id':'12345678-1234-4234-8234-123456789abc',
+                 'action':'charge_current_limit','value_centi':75}
+        payload=envelope(self.config,'snapshot',{'connected':True})
+        event=UploadWorker.result_event(1,payload,True,control_command=command)
+        self.assertEqual(event['control_command'],command)
+
+    def test_remote_charge_limit_rejects_unapproved_command_values(self):
+        from remote_control import apply_charge_limit
+        result=apply_charge_limit({},{
+            'command_id':'12345678-1234-4234-8234-123456789abc',
+            'action':'charge_current_limit','value_centi':101,
+        })
+        self.assertEqual(result['status'],'failed')
+        self.assertIsNone(result['applied_value_centi'])
+
     def test_persistence_route_isolation_and_capacity(self):
         box = Outbox(self.root/'outbox.db', max_bytes=1000)
         payload = envelope(self.config,'trap',{'alarm':'raised'})
@@ -132,6 +149,15 @@ class UploadTests(unittest.TestCase):
             controller.poll(True,{'1.2.3':'raw'})
             controller.trap({'alarm':'raised','_source_ip':'10.0.0.1'})
             controller.trap({'alarm':'recovered','_source_ip':'10.0.0.1'})
+            ui.update_summary_value('방전 횟수','17')
+            ui.set_summary_alarm('과전압 충전차단',True)
+            ui.set_summary_alarm('고온 충전차단',False)
+            ui.set_summary_alarm('과전류 충전차단',False)
+            ui.set_summary_alarm('차단기 OFF',True)
+            ui.charge_limit_button.setText('0.45')
+            ui.soc_charge_limit_enabled=2
+            ui.soc_charge_limit_value=90
+            ui.soc_charge_limit_fail_count=0
             controller.capture()
             with sqlite3.connect(controller.outbox.path) as db:
                 data=[json.loads(r[0]) for r in db.execute('SELECT payload FROM queue ORDER BY seq')]
@@ -139,6 +165,29 @@ class UploadTests(unittest.TestCase):
             self.assertEqual(data[2]['data']['module_data']['1']['soc'],83)
             self.assertEqual(data[2]['data']['raw_oids'],{'1.2.3':'raw'})
             self.assertIsNotNone(data[2]['data']['last_poll_at'])
+            self.assertEqual(data[2]['data']['operating_status'],{
+                'discharge_count':17,
+                'charge_cutoff':{
+                    'overvoltage':True,'high_temperature':False,
+                    'overcurrent':False,'breaker_off':True,
+                },
+                'charge_current_limit_c':0.45,
+                'soc_charge_limit':{'supported':True,'enabled':True,'value_percent':90},
+            })
+            ui.soc_charge_limit_fail_count=1
+            controller.capture()
+            with sqlite3.connect(controller.outbox.path) as db:
+                latest=json.loads(db.execute('SELECT payload FROM queue ORDER BY seq DESC LIMIT 1').fetchone()[0])
+            self.assertEqual(latest['data']['operating_status']['soc_charge_limit'],
+                             {'supported':True,'enabled':None,'value_percent':None})
+            ui.soc_charge_limit_enabled=None
+            ui.soc_charge_limit_value=None
+            ui.soc_charge_limit_fail_count=2
+            controller.capture()
+            with sqlite3.connect(controller.outbox.path) as db:
+                latest=json.loads(db.execute('SELECT payload FROM queue ORDER BY seq DESC LIMIT 1').fetchone()[0])
+            self.assertEqual(latest['data']['operating_status']['soc_charge_limit'],
+                             {'supported':False,'enabled':None,'value_percent':None})
             controller.config['interval']=12; controller.apply_timer()
             self.assertEqual(controller.timer.interval(),12000)
             self.assertFalse(data[2]['data']['connected'])

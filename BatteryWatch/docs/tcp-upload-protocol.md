@@ -31,7 +31,7 @@ monitoring-client → 서버 수집 연결은 TCP/TLS입니다. Android 조회 A
 
 kind는 snapshot 또는 trap입니다. captured_at은 큐 저장용 데이터를 만든 시각입니다. SNMP 마지막 성공 수신 시각은 data.last_poll_at이며 재전송 시 sample_id와 시각을 바꾸지 않습니다. 서버는 received_at을 별도로 기록합니다.
 
-snapshot data 필드: source_version, mode, site_name, system_name, equipment_ip, connected, last_poll_ok, last_poll_at, last_poll_error, last_trap_at, snmp_fail_count, snmp_total_fail_count, raw_oids, module_map, module_data, row_to_module, equip_to_module, module_order, module_barcodes, active_alarms, faults, active_fault_keys, total_capacity, group_soh, summary_table, module_tables, fault_table, epo_status.
+snapshot data 필드: source_version, mode, site_name, system_name, equipment_ip, connected, last_poll_ok, last_poll_at, last_poll_error, last_trap_at, snmp_fail_count, snmp_total_fail_count, raw_oids, module_map, module_data, row_to_module, equip_to_module, module_order, module_barcodes, active_alarms, faults, active_fault_keys, total_capacity, group_soh, summary_table, operating_status, module_tables, fault_table, epo_status. `operating_status`에는 방전 횟수, 과전압/고온/과전류 충전차단 및 차단기 OFF 상태, 충전전류제한[C], SOC 충전제한 지원/활성/설정값이 구조화되어 포함됩니다. 상태를 아직 확인할 수 없는 값은 null이며, SOC 충전제한은 장비 응답을 확인한 경우에만 지원 여부를 true로 보냅니다.
 
 원본 데이터 키와 배열을 보존하며 딕셔너리 키는 JSON 문자열로 변환합니다. module_data의 cells는 V, temps는 ℃, volt는 V, current는 A, soc/soh는 %입니다. 수집 불가 값은 null입니다. 원본이 표현한 상태/센티널 값은 raw_oids에 그대로 유지됩니다.
 
@@ -44,6 +44,8 @@ trap data 필드: received_at, raw_trap, monitored_ip. raw_trap의 `_source_ip`�
 ```
 
 ACK도 같은 길이 헤더를 사용합니다. **DB 트랜잭션 커밋 후** 반환해야 합니다. 운영 서버는 인증된 수집기 ID + sample_id로 중복 제거하고 이미 저장된 메시지에도 성공 ACK를 반환해야 합니다.
+
+현장/장비가 온라인이고 앱 조회 토큰에 해당 장비 권한이 있으면 앱은 충전전류제한 변경 명령을 서버에 요청할 수 있습니다. 서버는 해당 장비를 마지막으로 수집한 연결된 collector에 최대 60초간 명령을 대기시키며, 다음 snapshot ACK에 `control_command`를 선택적으로 포함합니다. 클라이언트는 지정된 `charge_current_limit` 동작(0.05~1.00 C)만 SNMP SET하고 GET으로 검증합니다. 다음 snapshot의 `data.control_results`로 결과를 회신하며 앱은 명령 상태 API를 통해 성공/실패/시간초과를 확인합니다. 업로드 토큰과 조회 토큰 권한은 분리되고, 서버는 조회 권한과 연결된 collector/device를 함께 확인합니다. 응답 유실 시 같은 설정값 명령이 재전달될 수 있으므로 설정 동작은 멱등하게 처리합니다.
 
 ok:false, 잘못된 ID 또는 연결 종료 시 클라이언트는 큐를 삭제하지 않습니다. 영구적인 인증/스키마 오류가 계속되면 후속 전송도 대기하므로 운영자가 원인을 수정해야 합니다.
 

@@ -7,9 +7,12 @@ import android.os.Handler;
 import android.os.Looper;
 import android.graphics.Color;
 import android.text.InputType;
+import android.text.InputFilter;
 import android.view.View;
 import android.widget.*;
 import org.json.*;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.Iterator;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -26,6 +29,8 @@ public class MainActivity extends Activity {
     private final ExecutorService network = Executors.newSingleThreadExecutor();
     private boolean resumed, busy, closing;
     private int generation;
+    private String pendingControlCommand;
+    private long controlCommandDeadline;
     private String site = "", device = "", page = "devices";
     private final Runnable poll = new Runnable() {
         @Override public void run() {
@@ -161,7 +166,7 @@ public class MainActivity extends Activity {
         button(tabs, "이력", () -> navigate("history"));
         button(tabs, "알람", () -> navigate("alarms")); content.addView(tabs);
         if (requestedPage.equals("details")) {
-            dashboard.details(content, response);
+            dashboard.details(content, response, () -> showChargeLimitDialog(response));
         } else if (requestedPage.equals("history")) {
             JSONArray history = response.getJSONArray("history");
             if (history.length() == 0) text("저장된 이력이 없습니다.", false);
@@ -194,6 +199,121 @@ public class MainActivity extends Activity {
                 } else text("사용자 확인 완료", false);
             }
         }
+    }
+
+    private void showChargeLimitDialog(JSONObject snapshot) {
+        if (busy || pendingControlCommand != null) {
+            Toast.makeText(this,"이전 설정 요청이 처리 중입니다.",Toast.LENGTH_SHORT).show();
+            return;
+        }
+        EditText input=new EditText(this);
+        input.setSingleLine(true);
+        input.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        input.setFilters(new InputFilter[]{new InputFilter.LengthFilter(5)});
+        JSONObject data=snapshot.optJSONObject("payload");
+        JSONObject telemetry=data==null?null:data.optJSONObject("data");
+        JSONObject status=telemetry==null?null:telemetry.optJSONObject("operating_status");
+        Object current=status==null?null:status.opt("charge_current_limit_c");
+        if(current!=null&&current!=JSONObject.NULL) input.setText(String.format(java.util.Locale.ROOT,"%.2f",
+            current instanceof Number?((Number)current).doubleValue():Double.parseDouble(current.toString())));
+        input.setSelection(input.length());
+        new AlertDialog.Builder(this)
+            .setTitle("충전전류제한 변경")
+            .setMessage(site+" / "+device+" 장비에 원격 설정을 요청합니다.\n범위: 0.05~1.00 C\n온라인 모니터링 클라이언트가 장비에 적용하고 GET으로 확인합니다.")
+            .setView(input)
+            .setNegativeButton("취소",null)
+            .setPositiveButton("장비에 설정 요청",(dialog,which)->{
+                try {
+                    BigDecimal value=new BigDecimal(input.getText().toString().trim())
+                        .setScale(2,RoundingMode.UNNECESSARY);
+                    int centi=value.movePointRight(2).intValueExact();
+                    if(centi<5||centi>100) throw new NumberFormatException();
+                    requestChargeLimit(centi);
+                } catch (ArithmeticException|NumberFormatException e) {
+                    new AlertDialog.Builder(this).setTitle("입력 오류")
+                        .setMessage("0.05~1.00 사이 값을 소수점 둘째 자리까지 입력하세요.")
+                        .setPositiveButton("확인",null).show();
+                }
+            }).show();
+    }
+
+    private void requestChargeLimit(int valueCenti) {
+        if (busy || pendingControlCommand != null) return;
+        busy=true;
+        controlCommandDeadline=android.os.SystemClock.elapsedRealtime()+75000;
+        status.setText("원격 설정 요청을 서버에 전송 중…");
+        final String targetSite=site,targetDevice=device;
+        network.execute(()->{
+            try {
+                JSONObject body=new JSONObject().put("site_id",targetSite).put("device_id",targetDevice)
+                    .put("action","charge_current_limit").put("value_centi",valueCenti);
+                JSONObject response=new ApiClient(settings.url(),settings.token())
+                    .request("POST","/api/v1/commands",body);
+                String commandId=response.getString("command_id");
+                runOnUiThread(()->{
+                    busy=false; pendingControlCommand=commandId;
+                    status.setText("요청 전송됨 · 모니터링 클라이언트의 장비 적용 및 확인 대기 중…");
+                    pollControlCommand(commandId);
+                });
+            } catch(Exception e) {
+                runOnUiThread(()->{
+                    busy=false;
+                    status.setText("원격 설정 요청 실패: "+e.getMessage());
+                    status.setTextColor(BatteryDashboard.AMBER);
+                });
+            }
+        });
+    }
+
+    private void pollControlCommand(String commandId) {
+        handler.postDelayed(()->{
+            if(closing||!commandId.equals(pendingControlCommand)) return;
+            if(android.os.SystemClock.elapsedRealtime()>=controlCommandDeadline) {
+                pendingControlCommand=null;
+                status.setText("원격 설정 결과 시간 초과 · 장비 상태를 새로 확인하세요.");
+                status.setTextColor(BatteryDashboard.AMBER);
+                return;
+            }
+            if(busy) { pollControlCommand(commandId); return; }
+            busy=true;
+            network.execute(()->{
+                try {
+                    JSONObject response=new ApiClient(settings.url(),settings.token())
+                        .get("/api/v1/commands/"+commandId);
+                    JSONObject command=response.getJSONObject("command");
+                    String state=command.getString("status");
+                    runOnUiThread(()->{
+                        busy=false;
+                        if(!commandId.equals(pendingControlCommand)) return;
+                        if(state.equals("succeeded")) {
+                            pendingControlCommand=null;
+                            String applied=String.format(java.util.Locale.ROOT,"%.2f",
+                                command.optInt("applied_value_centi")/100.0);
+                            status.setText("충전전류제한 적용 및 장비 확인 완료: "+applied+" C");
+                            status.setTextColor(BatteryDashboard.GREEN);
+                            refresh();
+                        } else if(state.equals("failed")||state.equals("timed_out")) {
+                            pendingControlCommand=null;
+                            status.setText("충전전류제한 설정 "+(state.equals("failed")?"실패: ":"시간 초과: ")
+                                +command.optString("result_message","확인 필요"));
+                            status.setTextColor(BatteryDashboard.AMBER);
+                        } else {
+                            status.setText("원격 설정 처리 중…");
+                            pollControlCommand(commandId);
+                        }
+                    });
+                } catch(Exception e) {
+                    runOnUiThread(()->{
+                        busy=false;
+                        if(commandId.equals(pendingControlCommand)) {
+                            pendingControlCommand=null;
+                            status.setText("원격 설정 결과 확인 실패: "+e.getMessage());
+                            status.setTextColor(BatteryDashboard.AMBER);
+                        }
+                    });
+                }
+            });
+        },1500);
     }
 
     private String value(JSONObject object, String key) { return object.isNull(key) ? "-" : object.optString(key, "-"); }

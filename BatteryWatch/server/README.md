@@ -54,9 +54,38 @@ backup은 실행 중인 DB에서도 SQLite 백업 API로 일관된 사본을 만
 
 공인/내부망 인터페이스 바인딩은 TLS가 필수입니다. 비암호화 수신은 루프백 시험만 허용합니다. 설정 예시는 `server.example.json`이며 토큰 자리표시자를 실제 값으로 교체해야 합니다. 인증서 경로와 DB 경로는 설정 파일 디렉터리 기준입니다. `--config`는 하위 명령 **앞**에 지정합니다: `python server.py --config /opt/batterywatch/server.local.json run`.
 
-## 여러 클라이언트
+## 여러 클라이언트와 공통 토큰
 
-server.local.json의 collectors에 수집기별 고유 id, token_sha256, devices를 추가합니다. 각 수집기는 별도 무작위 토큰을 사용합니다. 토큰은 SHA256 해시로만 서버 설정에 보관하고 원문은 클라이언트 설정에 입력합니다. devices는 허용된 site_id/device_id 쌍 목록입니다. 설정 변경은 서버 재시작 후 적용됩니다. 다른 수집기가 같은 현장/장비로 전송하도록 허용하면 최신 snapshot은 두 수집기 중 captured_at이 최신인 메시지가 됩니다.
+여러 모니터링 클라이언트가 같은 업로드 토큰을 사용하려면 서버에 collector 하나를 등록하고, 그 `devices` 배열에 허용할 모든 `site_id`/`device_id` 쌍을 둡니다. 초기화할 때 여러 쌍을 함께 등록할 수 있습니다:
+
+```powershell
+python server.py init --grant 현장A/랙1 --grant 현장B/랙2
+```
+
+생성된 `client-connection.local.json`에는 첫 장비의 ID와 공통 업로드 토큰이 들어갑니다. 각 클라이언트 프로필에 같은 토큰을 입력하고 해당 클라이언트의 실제 `site_id`/`device_id`를 설정하세요. 허용 목록에 없는 ID는 서버가 거부합니다.
+
+기존 서버에서 업로드 토큰을 하나로 합칠 때는 먼저 모니터링 클라이언트의 업로드 대기열을 비우고 전송을 중지하세요. `collectors`에 유지할 한 collector의 `devices`에 모든 현장/장비 쌍을 추가하고, 나머지 collector 설정을 제거한 다음 그 공통 토큰을 각 클라이언트에 입력하고 서버를 재시작합니다. collector ID는 재전송 중복 제거에 쓰입니다. ID를 합치면 예전 collector ID로 이미 저장된 샘플과 미확인 대기 샘플의 중복 제거가 이어지지 않을 수 있으므로 대기열을 먼저 비우는 것이 중요합니다.
+
+앱은 하나의 조회 토큰으로 여러 현장·장비를 볼 수 있습니다. API를 처음 활성화할 때 `enable-api`는 등록된 모든 collector의 장비 쌍을 하나의 Android 조회 토큰에 허용합니다:
+
+```powershell
+python server.py enable-api
+```
+
+특정 장비들만 앱에 허용하려면 `--grant SITE_ID/DEVICE_ID`를 필요한 횟수만큼 지정하세요. 기존 `--site SITE_ID --device DEVICE_ID` 방식도 한 쌍을 제한 허용하는 용도로 유지됩니다. API가 이미 설정된 서버에서는 `api.viewers[].devices`에 장비 쌍을 추가/삭제하면 기존 앱 조회 토큰을 유지한 채 권한을 바꿀 수 있습니다. 업로드와 조회 토큰은 계속 서로 다른 권한의 토큰으로 분리됩니다. 조회 토큰은 읽기 API 권한이며 업로드할 수 없고, 업로드 토큰은 등록된 장비에만 데이터를 보낼 수 있으며 Android 조회에 사용할 수 없습니다. 설정 변경은 서버 재시작 후 적용됩니다.
+
+구성 예시:
+
+```json
+"collectors": [{
+  "id": "collector-01",
+  "token_sha256": "공통 업로드 토큰의 SHA256",
+  "devices": [
+    {"site_id": "현장A", "device_id": "랙1"},
+    {"site_id": "현장B", "device_id": "랙2"}
+  ]
+}]
+```
 
 토큰 생성 예시 (출력 원문은 안전하게 전달):
 
@@ -91,12 +120,12 @@ python -m unittest discover -s tests -v
 ## Android API와 알람 활성화
 
 ```powershell
-python server.py enable-api --site site-01 --device battery-01
+python server.py enable-api
 python server.py check
 python server.py run
 ```
 
-`android-connection.local.json`에 조회용 토큰이 생성됩니다. 수집기 토큰과 별개이며 기본 API 주소는 `127.0.0.1:8443`입니다. 외부 바인딩 시 TLS 인증서가 필요합니다. 계정별 장비 권한은 `api.viewers[].devices`에서 설정합니다.
+`android-connection.local.json`에 등록된 모든 장비를 조회할 수 있는 조회용 토큰 하나가 생성됩니다. 필요한 경우 `--grant SITE_ID/DEVICE_ID`를 반복해 범위를 줄이세요. 업로드 토큰과 조회 토큰은 별개이며 기본 API 주소는 `127.0.0.1:8443`입니다. 외부 바인딩 시 TLS 인증서가 필요합니다. 기존 설정에서 권한을 바꿀 때는 `api.viewers[].devices`를 편집합니다.
 운영 수치 임계값은 기본 비활성이며 통신 중단과 장비 자체 알람은 기본 감시합니다. 실제 구현된 경로, 임계값, FCM 설정은 [알람·푸시 안내](../docs/alarms-and-push.md)를 따릅니다.
 
 ## 이번에 구현한 항목

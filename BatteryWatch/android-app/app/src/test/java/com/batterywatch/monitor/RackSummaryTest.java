@@ -14,9 +14,17 @@ public class RackSummaryTest {
     @Test public void numbersPreserveZeroAndRejectInvalidPercentages() {
         assertEquals("0.0",RackSummary.number(0,true));
         assertEquals("82.0",RackSummary.number("82 %",true));
+        assertEquals("0.45",RackSummary.number(0.45,false,2));
         assertEquals("—",RackSummary.number(101,true));
         assertEquals("—",RackSummary.number("-",false));
         assertEquals("—",RackSummary.number(null,false));
         assertEquals("-4.2",RackSummary.number(-4.2,false));
+    }
+    @Test public void protectionStatusKeepsUnknownDistinctFromNormal() {
+        assertEquals("발생",RackSummary.protection(true));
+        assertEquals("정상",RackSummary.protection(false));
+        assertEquals("발생",RackSummary.protection("발생"));
+        assertEquals("—",RackSummary.protection(null));
+        assertEquals("—",RackSummary.protection("-"));
     }
 }

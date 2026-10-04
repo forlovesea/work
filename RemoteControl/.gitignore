@@ -1,0 +1,10 @@
+.gradle/
+.gradle-home/
+.toolchain/
+local.properties
+**/build/
+*.jks
+*.keystore
+__pycache__/
+dist/*.apk
+*.pem

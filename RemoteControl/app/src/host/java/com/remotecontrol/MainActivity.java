@@ -12,7 +12,18 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import javax.net.ssl.SSLSocket;
 
 public final class MainActivity extends Activity {
-    private EditText invitation;
+    private EditText serverAddress, accessKey;
+    private LinearLayout settingsPanel, deviceRows, page;
+    private ScrollView deviceList;
+    private android.view.View title;
+    private boolean browsing, loading, fullScreen, smallView;
+    private volatile int browseGeneration;
+    private String listHost, listKey;
+    private int listPort;
+    private volatile SSLSocket listing;
+    private final Runnable listTick = new Runnable() {
+        public void run() { if (browsing) refreshDevices(); main.postDelayed(this, 5000); }
+    };
     private TextView status;
     private TextView healthBar;
     private final ConnectionHealth health = new ConnectionHealth();
@@ -43,20 +54,26 @@ public final class MainActivity extends Activity {
     private boolean touching;
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        LinearLayout page = Ui.page(this, "Host · 접속하는 기기");
-        Ui.text(this, page, "Target의 접속 정보를 붙여 넣으세요. LTE / Wi-Fi에서 중계서버를 통해 연결합니다.");
-        invitation = new EditText(this); invitation.setHint("Target에서 복사한 최신 접속 정보");
-        invitation.setSingleLine(true); invitation.setTextSize(12);
-        invitation.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
-        page.addView(invitation);
-        connect = Ui.button(this, page, "Target 연결", v -> connect());
-        Ui.button(this, page, "연결 종료", v -> disconnect("연결을 종료했습니다.", false));
-        status = Ui.text(this, page, "대기 중");
+        page = Ui.page(this, "Host · 원격 스마트폰");
+        title = page.getChildAt(0);
+        settingsPanel = new LinearLayout(this); settingsPanel.setOrientation(LinearLayout.VERTICAL); page.addView(settingsPanel);
+        serverAddress = new EditText(this); serverAddress.setSingleLine(true); serverAddress.setHint("중계서버 주소:포트");
+        serverAddress.setText(ServerSettings.preferences(this).getString("address", "61.105.141.21:55000")); settingsPanel.addView(serverAddress);
+        accessKey = new EditText(this); accessKey.setSingleLine(true); accessKey.setHint("서버 접속 키 (최초 설정)");
+        accessKey.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        accessKey.setText(ServerSettings.secret(this)); settingsPanel.addView(accessKey);
+        connect = Ui.button(this, settingsPanel, "서버 연결 / 목록 새로고침", v -> browse());
+        status = Ui.text(this, page, "서버에 연결하면 Target 목록이 표시됩니다.");
+        deviceList = new ScrollView(this); deviceRows = new LinearLayout(this); deviceRows.setOrientation(LinearLayout.VERTICAL);
+        deviceList.addView(deviceRows); page.addView(deviceList, new LinearLayout.LayoutParams(-1, dp(140)));
         LinearLayout navigation = new LinearLayout(this); page.addView(navigation);
-        Ui.button(this, navigation, "뒤로", v -> command(Protocol.BACK, 0, 0, 0, 0, 1));
-        Ui.button(this, navigation, "홈", v -> command(Protocol.HOME, 0, 0, 0, 0, 1));
+        toolbarButton(navigation, "뒤로", () -> command(Protocol.BACK, 0, 0, 0, 0, 1));
+        toolbarButton(navigation, "홈", () -> command(Protocol.HOME, 0, 0, 0, 0, 1));
+        toolbarButton(navigation, "화면 보기", this::viewOptions);
+        toolbarButton(navigation, "연결 종료", () -> disconnect("연결을 종료했습니다.", false));
         screen = new ImageView(this); screen.setBackgroundColor(Color.rgb(15, 23, 42));
-        screen.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        screen.setScaleType(ImageView.ScaleType.MATRIX);
+        screen.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> fitImage());
         page.addView(screen, new LinearLayout.LayoutParams(-1, 0, 1));
         healthBar = new TextView(this);
         healthBar.setTextSize(13); healthBar.setTypeface(null, Typeface.BOLD);
@@ -87,10 +104,95 @@ public final class MainActivity extends Activity {
             return true;
         });
     }
-    private void connect() {
-        final String[] info;
-        try { info = Protocol.invitation(invitation.getText().toString()); }
-        catch (IllegalArgumentException e) { status.setText(e.getMessage()); return; }
+    private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
+    private void toolbarButton(LinearLayout row, String label, Runnable action) {
+        Button button = new Button(this); button.setText(label); button.setTextSize(12); button.setMinWidth(0);
+        row.addView(button, new LinearLayout.LayoutParams(0, -2, 1)); button.setOnClickListener(v -> action.run());
+    }
+    private void viewOptions() {
+        new android.app.AlertDialog.Builder(this).setTitle("원격 화면 보기")
+                .setSingleChoiceItems(new String[]{"화면에 맞춤", "전체화면 보기", "작게 보기"}, fullScreen ? 1 : smallView ? 2 : 0,
+                        (d, which) -> { setViewMode(which); d.dismiss(); }).setNegativeButton("닫기", null).show();
+    }
+    private void setViewMode(int mode) {
+        fullScreen = mode == 1; smallView = mode == 2; touching = false;
+        int visibility = fullScreen ? android.view.View.GONE : android.view.View.VISIBLE;
+        title.setVisibility(visibility);
+        int setupVisibility = fullScreen || socket != null ? android.view.View.GONE : android.view.View.VISIBLE;
+        settingsPanel.setVisibility(setupVisibility); deviceList.setVisibility(setupVisibility);
+        status.setVisibility(visibility); healthBar.setVisibility(visibility);
+        if (Build.VERSION.SDK_INT >= 30) {
+            android.view.WindowInsetsController controller = getWindow().getInsetsController();
+            if (controller != null) {
+                controller.setSystemBarsBehavior(android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                if (fullScreen) controller.hide(android.view.WindowInsets.Type.systemBars());
+                else controller.show(android.view.WindowInsets.Type.systemBars());
+            }
+        } else getWindow().getDecorView().setSystemUiVisibility(fullScreen
+                ? android.view.View.SYSTEM_UI_FLAG_FULLSCREEN | android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    | android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY : android.view.View.SYSTEM_UI_FLAG_VISIBLE);
+        screen.post(this::fitImage);
+    }
+    private void fitImage() {
+        if (current == null || screen.getWidth() == 0 || screen.getHeight() == 0) return;
+        float scale = Math.min((float) screen.getWidth() / current.getWidth(), (float) screen.getHeight() / current.getHeight());
+        if (smallView) scale *= 0.55f;
+        Matrix matrix = new Matrix(); matrix.setScale(scale, scale);
+        matrix.postTranslate((screen.getWidth() - current.getWidth() * scale) / 2f,
+                (screen.getHeight() - current.getHeight() * scale) / 2f);
+        screen.setImageMatrix(matrix);
+    }
+    private void browse() {
+        try {
+            String[] endpoint = ServerSettings.endpoint(serverAddress.getText().toString());
+            String key = accessKey.getText().toString().trim();
+            ServerSettings.save(this, serverAddress.getText().toString().trim(), key, "Host");
+            disconnect("중계서버 연결 중…", false);
+            browseGeneration++; loading = false;
+            if (listing != null) try { listing.close(); } catch (IOException ignored) {}
+            deviceRows.removeAllViews();
+            listHost = endpoint[0]; listPort = Integer.parseInt(endpoint[1]); listKey = key; browsing = true;
+            ((android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(accessKey.getWindowToken(), 0);
+            refreshDevices();
+        } catch (Exception error) { status.setText(error instanceof IllegalArgumentException ? error.getMessage() : "서버 설정을 저장할 수 없습니다."); }
+    }
+    private void refreshDevices() {
+        if (loading || !browsing) return;
+        loading = true;
+        final int request = browseGeneration;
+        final String host = listHost, key = listKey; final int port = listPort;
+        new Thread(() -> {
+            try (SSLSocket connection = Relay.socket()) {
+                listing = connection;
+                if (request != browseGeneration) return;
+                org.json.JSONArray rows = Directory.open(connection, host, port, Directory.request("LIST", key, null)).getJSONArray("devices");
+                main.post(() -> {
+                    if (request != browseGeneration || !browsing) return;
+                    loading = false; deviceRows.removeAllViews();
+                    if (rows.length() == 0) Ui.text(this, deviceRows, "접속 중인 Target이 없습니다. Target에서 서버 연결을 시작하세요.");
+                    for (int i = 0; i < rows.length(); i++) {
+                        org.json.JSONObject item = rows.optJSONObject(i); if (item == null) continue;
+                        String id = item.optString("id"), state = item.optString("state");
+                        String name = item.optString("name", "Target");
+                        String label = state.equals("ready") ? "연결 가능" : state.equals("busy") ? "사용 중" : "화면 공유 승인 필요";
+                        Button device = Ui.button(this, deviceRows, name + " · " + label + " · " + id.substring(0, Math.min(6, id.length())),
+                                v -> connect(id, name, host, port, key));
+                        device.setEnabled(state.equals("ready") && socket == null && relay == null);
+                    }
+                    if (socket == null && relay == null) status.setText("서버 연결됨 · Target " + rows.length() + "대 · 5초마다 갱신");
+                });
+            } catch (Exception error) {
+                main.post(() -> {
+                    if (request != browseGeneration) return;
+                    loading = false; deviceRows.removeAllViews();
+                    Ui.text(this, deviceRows, "목록을 불러오지 못했습니다. 자동으로 다시 시도합니다.");
+                    if (socket == null && relay == null) status.setText("서버 연결 실패: " + (error instanceof IOException ? error.getMessage() : error.getClass().getSimpleName()));
+                });
+            }
+        }, "host-directory").start();
+    }
+    private void connect(String deviceId, String deviceName, String host, int port, String key) {
+        if (socket != null || relay != null || !connect.isEnabled()) return;
         disconnect("연결 중…", false); connect.setEnabled(false);
         health.connecting(); renderHealth();
         final int session = generation;
@@ -103,10 +205,13 @@ public final class MainActivity extends Activity {
                     if (session != generation) { upstream.close(); return; }
                     relay = upstream;
                 }
-                Relay.register(upstream, info[1], Integer.parseInt(info[2]), "HOST", info[3]);
+                org.json.JSONObject selected = Directory.open(upstream, host, port, Directory.request("CONNECT", key, deviceId));
+                String fingerprint = selected.getString("fingerprint"), token = selected.getString("token");
+                if (!fingerprint.matches("[0-9a-fA-F]{64}") || !token.matches("[0-9a-f]{32}")) throw new IOException("잘못된 서버 응답");
+                if (!Relay.line(upstream).equals("PAIRED")) throw new IOException("Target 연결 실패");
                 upstream.setSoTimeout(0);
                 Socket tunnel = Relay.localTunnel(upstream);
-                try { link = (SSLSocket) Tls.client(info[4]).getSocketFactory().createSocket(tunnel, "target", 0, true); }
+                try { link = (SSLSocket) Tls.client(fingerprint).getSocketFactory().createSocket(tunnel, "target", 0, true); }
                 catch (Exception e) { tunnel.close(); throw e; }
                 synchronized (this) {
                     if (session != generation) return;
@@ -115,7 +220,7 @@ public final class MainActivity extends Activity {
                 link.setEnabledProtocols(new String[]{"TLSv1.2"}); link.setSoTimeout(10000); link.startHandshake();
                 DataOutputStream out = new DataOutputStream(link.getOutputStream());
                 DataInputStream input = new DataInputStream(link.getInputStream());
-                out.writeUTF(info[5]); out.flush();
+                out.writeUTF(token); out.flush();
                 if (!input.readBoolean()) throw new IOException("접속 키가 올바르지 않습니다.");
                 boolean allowed = input.readBoolean();
                 synchronized (this) {
@@ -126,7 +231,8 @@ public final class MainActivity extends Activity {
                 main.post(() -> { if (session == generation) {
                     health.connected(SystemClock.elapsedRealtime()); renderHealth();
                     status.setText(allowed ? "연결됨 · 화면 터치로 제어" : "연결됨 · 화면 보기 전용");
-                    invitation.setText("");
+                    status.setText(deviceName + " · " + (allowed ? "화면 터치로 제어" : "화면 보기 전용"));
+                    setViewMode(1);
                 }});
                 while (session == generation) {
                     int length = input.readInt();
@@ -157,14 +263,14 @@ public final class MainActivity extends Activity {
                         main.post(() -> {
                             pendingFrame.set(false);
                             if (session != generation || bitmap == null) { if (bitmap != null) bitmap.recycle(); return; }
-                            current = bitmap; screen.setImageBitmap(bitmap);
+                            current = bitmap; screen.setImageBitmap(bitmap); fitImage();
                             health.frame(); renderHealth();
                         });
                     }
                 }
             } catch (Exception e) {
                 String reason = e instanceof java.security.GeneralSecurityException || e instanceof javax.net.ssl.SSLException
-                        ? "Target 인증 실패. 접속 정보를 다시 확인하세요." : "연결 종료: " + e.getClass().getSimpleName();
+                        ? "Target 인증 실패. 서버와 앱 설정을 확인하세요." : "연결 종료: " + (e instanceof IOException ? e.getMessage() : e.getClass().getSimpleName());
                 main.post(() -> { if (session == generation) disconnect(reason); });
             } finally {
                 if (link != null) try { link.close(); } catch (IOException ignored) {}
@@ -242,9 +348,13 @@ public final class MainActivity extends Activity {
         current = null;
         if (status != null) status.setText(message);
         if (connect != null) connect.setEnabled(true);
+        if (screen != null && healthBar != null) setViewMode(smallView ? 2 : 0);
     }
-    @Override protected void onResume() { super.onResume(); main.removeCallbacks(healthTick); main.post(healthTick); }
-    @Override protected void onPause() { main.removeCallbacks(healthTick); super.onPause(); }
+    @Override protected void onResume() { super.onResume(); main.removeCallbacks(healthTick); main.post(healthTick); main.removeCallbacks(listTick); main.post(listTick); }
+    @Override protected void onPause() { main.removeCallbacks(healthTick); main.removeCallbacks(listTick); super.onPause(); }
     @Override protected void onStop() { disconnect("앱이 화면에서 벗어나 연결을 종료했습니다.", false); super.onStop(); }
-    @Override protected void onDestroy() { main.removeCallbacks(healthTick); disconnect("연결 종료", false); commands.shutdownNow(); super.onDestroy(); }
+    @Override public void onBackPressed() { if (fullScreen) setViewMode(0); else super.onBackPressed(); }
+    @Override protected void onDestroy() {
+        browsing = false; browseGeneration++; main.removeCallbacks(listTick);
+        try { if (listing != null) listing.close(); } catch (IOException ignored) {} main.removeCallbacks(healthTick); disconnect("연결 종료", false); commands.shutdownNow(); super.onDestroy(); }
 }

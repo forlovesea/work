@@ -1,8 +1,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <application>
+        <service android:name=".ConnectionService" android:exported="false" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="User-started persistent TLS connection to a remote-control relay with network reconnection and an explicit stop action; screen capture requires separate user consent." />
+        </service>
         <service android:name=".CaptureService" android:exported="false" android:foregroundServiceType="mediaProjection" />
         <service android:name=".ControlService" android:exported="true" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" android:label="RemoteControl 터치 제어">
             <intent-filter><action android:name="android.accessibilityservice.AccessibilityService" /></intent-filter>

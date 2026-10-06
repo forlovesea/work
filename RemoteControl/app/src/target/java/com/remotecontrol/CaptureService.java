@@ -35,6 +35,16 @@ public final class CaptureService extends Service {
     private final Handler main = new Handler(Looper.getMainLooper());
     private long lastFrame;
     private String token;
+    private Thread networkThread;
+    private String room;
+    private volatile long lastIncoming;
+    private final Runnable connectionWatch = new Runnable() {
+        @Override public void run() {
+            if (!running) return;
+            if (connected && SystemClock.elapsedRealtime() - lastIncoming > 20000) closeConnections();
+            main.postDelayed(this, 2000);
+        }
+    };
     private final BroadcastReceiver screenOff = new BroadcastReceiver() {
         public void onReceive(Context c, Intent i) { finish("화면이 잠겨 공유를 중지했습니다."); }
     };
@@ -82,12 +92,36 @@ public final class CaptureService extends Service {
             StringBuilder secret = new StringBuilder();
             for (byte b : random) secret.append(String.format(Locale.ROOT, "%02x", b & 255));
             token = secret.toString();
-            new Thread(this::serve, "target-network").start();
-            main.postDelayed(() -> finish("30분 세션 시간이 만료되었습니다."), 30 * 60 * 1000L);
+            room = UUID.randomUUID().toString().replace("-", "");
+            networkThread = new Thread(this::serve, "target-network");
+            networkThread.start();
+            main.post(connectionWatch);
         } catch (Exception e) { finish("공유 시작 실패: " + e.getClass().getSimpleName()); }
         return START_NOT_STICKY;
     }
     private void serve() {
+        while (running) {
+            serveOnce();
+            boolean used = connected;
+            connected = false; output = null;
+            closeConnections();
+            if (!running) break;
+            if (used) {
+                room = UUID.randomUUID().toString().replace("-", "");
+                token = UUID.randomUUID().toString().replace("-", "");
+            }
+            invitation = "";
+            status = "중계서버 재접속 대기 · 인터넷 복구 시 자동 연결";
+            try { Thread.sleep(3000); }
+            catch (InterruptedException stopped) { break; }
+        }
+    }
+    private void closeConnections() {
+        try { if (server != null) server.close(); } catch (IOException ignored) {}
+        try { if (client != null) client.close(); } catch (IOException ignored) {}
+        try { if (relay != null) relay.close(); } catch (IOException ignored) {}
+    }
+    private void serveOnce() {
         try {
             Identity identity = new Identity();
             SSLServerSocket listener = (SSLServerSocket) identity.context.getServerSocketFactory().createServerSocket();
@@ -95,14 +129,15 @@ public final class CaptureService extends Service {
             if (!running) { listener.close(); return; }
             listener.bind(new InetSocketAddress("127.0.0.1", 0));
             listener.setEnabledProtocols(new String[]{"TLSv1.2"});
-            String room = UUID.randomUUID().toString().replace("-", "");
             SSLSocket upstream = Relay.socket(); relay = upstream;
             if (!running) { upstream.close(); return; }
-            Relay.register(upstream, relayHost, relayPort, "TARGET", room);
+            Directory.open(upstream, relayHost, relayPort,
+                    Directory.request("SHARE", ServerSettings.secret(this), ServerSettings.deviceId(this))
+                            .put("fingerprint", identity.fingerprint).put("token", token));
             if (!running) return;
-            invitation = "RC2|" + relayHost + "|" + relayPort + "|" + room + "|" + identity.fingerprint + "|" + token + "|" + Protocol.WIRE_VERSION;
+            invitation = "";
             status = "중계서버 연결됨 · Host 연결 대기";
-            upstream.setSoTimeout(5 * 60 * 1000);
+            upstream.setSoTimeout(60000);
             if (!Relay.line(upstream).equals("PAIRED")) throw new IOException("Relay pairing failed");
             upstream.setSoTimeout(0);
             Socket local = new Socket("127.0.0.1", listener.getLocalPort());
@@ -119,12 +154,14 @@ public final class CaptureService extends Service {
                     out.writeBoolean(match); out.flush();
                     if (!match) { socket.close(); finish("접속 인증 실패. 새 공유 세션을 시작하세요."); return; }
                     out.writeBoolean(allowControl); out.flush();
+                    lastIncoming = SystemClock.elapsedRealtime();
                     connected = true; invitation = ""; output = out;
-                    listener.close(); socket.setSoTimeout(0);
+                    listener.close(); socket.setSoTimeout(15000);
                     status = allowControl ? "Host 연결됨 · 화면 공유 및 터치 제어 중" : "Host 연결됨 · 화면 보기 전용";
                     long lastCommand = 0;
                     while (running) {
                         int kind = input.readUnsignedByte();
+                        lastIncoming = SystemClock.elapsedRealtime();
                         if (kind == Protocol.PING) {
                             long echo = input.readLong();
                             // Check the Target main thread as well as the end-to-end network path.
@@ -146,12 +183,16 @@ public final class CaptureService extends Service {
                     }
                 } catch (IOException e) {
                     socket.close();
-                    finish("Host 연결이 종료되었습니다."); return;
+                    return;
                 }
             }
-        } catch (Exception e) { if (running) finish("연결 종료: " + e.getClass().getSimpleName()); }
+        } catch (Exception e) {
+            if (running) status = "중계서버 재접속 중: " + e.getClass().getSimpleName();
+        }
     }
     private void sendFrame(ImageReader source) {
+        SSLSocket sendingClient = client;
+        DataOutputStream sendingOutput = output;
         try (Image image = source.acquireLatestImage()) {
             if (image == null || !running || !connected || output == null) return;
             long now = SystemClock.elapsedRealtime();
@@ -165,11 +206,13 @@ public final class CaptureService extends Service {
             ByteArrayOutputStream bytes = new ByteArrayOutputStream(); cropped.compress(Bitmap.CompressFormat.JPEG, 60, bytes);
             if (cropped != padded) cropped.recycle(); padded.recycle();
             if (bytes.size() > Protocol.MAX_FRAME) return;
-            DataOutputStream out = output;
-            if (out != null && running) {
+            DataOutputStream out = sendingOutput;
+            if (out != null && running && out == output) {
                 synchronized (out) { out.writeInt(bytes.size()); bytes.writeTo(out); out.flush(); }
             }
-        } catch (Exception e) { if (running) finish("화면 전송이 종료되었습니다."); }
+        } catch (Exception e) {
+            try { if (sendingClient != null) sendingClient.close(); } catch (IOException ignored) {}
+        }
     }
     private void finish(String message) {
         if (!running) { stopSelf(); return; }
@@ -185,6 +228,7 @@ public final class CaptureService extends Service {
     }
     @Override public void onDestroy() {
         running = false; connected = false; allowControl = false; invitation = ""; output = null;
+        if (networkThread != null) networkThread.interrupt();
         main.removeCallbacksAndMessages(null);
         try { if (server != null) server.close(); } catch (IOException ignored) {}
         try { if (client != null) client.close(); } catch (IOException ignored) {}

@@ -11,6 +11,19 @@
 
 ## 설치
 
+### 기존 서버를 v0.4.0으로 업데이트
+
+자동 Target 목록은 **서버와 두 앱 모두 v0.4.0**이 필요합니다. 이 폴더의 `relay.py`와 `update-server.sh`를 Ubuntu 서버의 같은 작업 폴더에 복사한 뒤 실행하세요.
+
+```bash
+sudo sh update-server.sh
+sudo cat /etc/remotecontrol/access.key
+```
+
+업데이트 스크립트는 기존 인증서와 서비스의 포트 설정을 유지하고, 기존 relay.py를 백업한 뒤 새 파일을 설치하고 서비스를 재시작합니다. 진행 중인 연결은 종료됩니다. `/etc/remotecontrol/access.key`가 없으면 256비트 무작위 서버 접속 키를 생성합니다. 기존 키는 보존합니다. 표시한 키를 허용한 Host·Target의 **서버 접속 키** 입력란에 최초 한 번 설정하세요. 키를 알고 있는 앱은 같은 서버의 모든 Target에 대해 목록 조회/공유 승인 후 연결 권한을 갖습니다.
+
+스크립트 실행은 기존 설치가 끝나 있고 `remotecontrol` 그룹과 서비스가 존재하는 서버를 전제로 합니다. 새 설치에는 아래 절차를 사용하세요.
+
 다음은 서버에서 실행할 예시입니다. `relay.py`와 `remotecontrol-relay.service`를 서버의 작업 폴더로 먼저 복사하세요. 도메인/인증서 경로는 실제 값으로 바꿉니다.
 
 ```bash
@@ -22,6 +35,9 @@ sudo install -m 644 relay.py /opt/remotecontrol/relay.py
 sudo install -d -o root -g remotecontrol -m 750 /etc/remotecontrol
 sudo install -o root -g remotecontrol -m 640 /path/to/fullchain.pem /etc/remotecontrol/fullchain.pem
 sudo install -o root -g remotecontrol -m 640 /path/to/privkey.pem /etc/remotecontrol/privkey.pem
+sudo sh -c 'umask 077; test -f /etc/remotecontrol/access.key || python3 -c "import secrets; print(secrets.token_hex(32))" > /etc/remotecontrol/access.key'
+sudo chown root:remotecontrol /etc/remotecontrol/access.key
+sudo chmod 640 /etc/remotecontrol/access.key
 sudo install -m 644 remotecontrol-relay.service /etc/systemd/system/remotecontrol-relay.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now remotecontrol-relay
@@ -32,7 +48,7 @@ sudo systemctl status remotecontrol-relay
 
 인증서는 자체 서명 인증서 검증을 끄는 방식으로 우회하지 않습니다. 운영 인증서를 갱신한 뒤 `/etc/remotecontrol/`에 새 인증서를 같은 소유권/권한으로 복사하고 `sudo systemctl restart remotecontrol-relay`를 실행하세요. 재시작하면 진행 중인 세션이 종료됩니다.
 
-앱의 Target 화면에서 `relay.example.com:55000`을 입력합니다. Host는 Target에서 전달받은 접속 정보에 포함된 동일 서버와 포트로 연결합니다. 예를 들어 `58000`을 사용하려면 서비스 파일의 `--port 58000`, 방화벽의 `58000/tcp`, Target의 `relay.example.com:58000`을 함께 맞춥니다. 설치된 서비스 파일을 수정했다면 `sudo systemctl daemon-reload` 후 `sudo systemctl restart remotecontrol-relay`를 실행합니다.
+Host와 Target에 같은 서버 주소(예: `61.105.141.21:55000`)와 서버 접속 키를 입력합니다. Target에서 서버 연결을 시작하면 Host 목록에 표시되고, Target 화면 공유를 승인하면 연결 가능합니다. 포트를 변경하면 서비스의 `--port`, 방화벽, 두 앱의 주소를 함께 변경하세요.
 
 ## 테스트 / 운영
 
@@ -43,17 +59,22 @@ sudo journalctl -u remotecontrol-relay -f
 
 자동 테스트는 루프백에서 중계 프로토콜/데이터 전달을 검증합니다. 실제 인증서 체인, Ubuntu systemd 실행, LTE 기기 연결 검증을 대신하지 않습니다. 실제 기기 항목은 `../docs/DEVICE_TESTS.md`를 확인하세요.
 
-서버는 인증서/개인키 파일 없이 기동하지 않습니다. `relay.py --help`에서 실행 옵션을 확인할 수 있습니다.
+서버는 인증서/개인키와 서버 접속 키 파일 없이 기동하지 않습니다. 키 파일 기본 경로는 `/etc/remotecontrol/access.key`이며 `--access-key-file`로 변경할 수 있습니다. `relay.py --help`에서 실행 옵션을 확인하세요.
 
 ## 프로토콜과 제한
 
-1. Target이 검증된 TLS 연결로 `TARGET <32자리 방 ID>\n`을 전송하면 서버는 `READY\n`을 반환합니다.
-2. Host가 별도 TLS 연결로 `HOST <동일 방 ID>\n`을 전송합니다.
-3. 서버가 양쪽에 `PAIRED\n`을 반환한 이후에는 내부 TLS 바이트를 양방향 전달합니다.
-4. 한쪽 종료 시 반대 연결도 종료합니다. 방은 재사용하지 않습니다.
+첫 줄은 TLS 안의 JSON이며 모든 작업에 `key` 인증이 필요합니다.
 
-기본 제한은 동시 소켓 256개(연결된 한 세션은 2개), 대기 5분, 연결 30분, 헤더 대기 10초, 느린 수신 측 쓰기 대기 30초입니다. 중계 방 식별자는 로그에 남기지 않으며 파일로 저장하지 않습니다. TLS 서버는 연결 IP와 트래픽 양/시점 및 방 ID는 알 수 있습니다.
+1. `PRESENCE`: Target의 안정적인 `id`와 `name`을 등록합니다. Target은 10초마다 `PING`을 보내고 서버는 `PONG`을 반환합니다. 30초 동안 응답이 없거나 소켓 종료 시 등록을 제거합니다.
+2. `LIST`: 접속 중인 기기의 `id`, `name`, `state`만 반환합니다. 상태는 `waiting`, `ready`, `busy`입니다. 세션 키는 목록에 포함하지 않습니다.
+3. `SHARE`: 사용자가 화면 공유를 승인한 Target이 `id`, `fingerprint`, `token`을 등록합니다.
+4. `CONNECT`: 인증된 Host가 기기 `id`로 요청하면 한 Host에만 세션 정보를 제공하고 양쪽에 `PAIRED`를 전송합니다. 이후 내부 TLS 바이트를 양방향 전달합니다.
+5. 한쪽 종료 시 공유 소켓을 정리합니다. Target은 공유 권한이 유지되는 동안 새 세션으로 자동 재등록합니다. Host는 목록에서 다시 선택합니다.
 
-프로토타입에는 계정 인증, 사용자별 대역폭/요금 정책, 강력한 DDoS 방어가 없습니다. 공개 운영 규모로 확장할 때는 방 등록 권한, 사용자별 제한, 모니터링을 추가하세요. 시스템 연결 한도는 기본적인 자원 제한이며 완전한 남용 방지책이 아닙니다.
+기존 인증 없는 `TARGET/HOST` 프로토콜은 운영 모드에서 거부합니다. 단위 테스트용 `Relay(access_key=None)`에서만 기존 프로토콜을 허용합니다.
+
+기본 제한은 동시 소켓 256개, 공유 소켓 대기 5분, 원격 연결 30분, 헤더 대기 10초, 느린 수신 측 쓰기 대기 30초입니다. Target은 등록 유지용 소켓 1개와 공유 소켓 1개를 사용하고 Host 원격 연결 및 목록 조회는 별도 소켓을 사용합니다. 기기 목록과 세션 키는 메모리에만 보관하며 서버 재시작 시 초기화됩니다. Target이 재접속하면 목록이 복구됩니다.
+
+서버가 지문과 세션 키를 전달하므로 서버와 관리자를 신뢰하는 구조입니다. 공통 키를 아는 앱은 서로 신뢰하는 한 그룹으로 취급합니다. 계정별 권한, 사용자별 트래픽 정책, 강력한 DDoS 방어는 구현하지 않았습니다. 기존 APK는 새 서버와 호환되지 않으므로 두 앱도 함께 업데이트하세요.
 
 참고: [Python asyncio streams](https://docs.python.org/3/library/asyncio-stream.html).

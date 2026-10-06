@@ -1,6 +1,7 @@
 import asyncio
 import unittest
 import argparse
+import json
 from relay import Relay, relay_port, DEFAULT_PORT
 
 
@@ -94,6 +95,146 @@ class RelayTests(unittest.IsolatedAsyncioTestCase):
         await reader.readline()
         other, _ = await self.client("HOST")
         self.assertEqual(await other.readline(), b"ERROR capacity\n")
+
+    async def test_reconnect_same_room_after_disconnect(self):
+        reader, writer = await self.client("TARGET")
+        self.assertEqual(await reader.readline(), b"READY\n")
+        writer.close()
+        await writer.wait_closed()
+        for _ in range(50):
+            if not self.relay.rooms:
+                break
+            await asyncio.sleep(0.01)
+        target, _ = await self.client("TARGET")
+        self.assertEqual(await target.readline(), b"READY\n")
+        host, hw = await self.client("HOST")
+        self.assertEqual(await host.readline(), b"PAIRED\n")
+        self.assertEqual(await target.readline(), b"PAIRED\n")
+        hw.write(b"reconnected")
+        await hw.drain()
+        self.assertEqual(await asyncio.wait_for(target.readexactly(11), 1), b"reconnected")
+
+
+class DirectoryTests(unittest.IsolatedAsyncioTestCase):
+    key = "c" * 64
+    device = "d" * 32
+    fingerprint = "f" * 64
+    token = "a" * 32
+
+    async def asyncSetUp(self):
+        await RelayTests.asyncSetUp(self)
+        self.relay.access_key = self.key
+
+    asyncTearDown = RelayTests.asyncTearDown
+
+    async def request(self, op, **fields):
+        reader, writer = await asyncio.open_connection("127.0.0.1", self.port)
+        self.clients.append((reader, writer))
+        data = dict(op=op, key=self.key, id=self.device)
+        data.update(fields)
+        writer.write(json.dumps(data).encode() + b"\n")
+        await writer.drain()
+        response = json.loads(await asyncio.wait_for(reader.readline(), 1))
+        return reader, writer, response
+
+    async def presence(self):
+        reader, writer, response = await self.request("PRESENCE", name="업무폰")
+        self.assertEqual(response, {"ok": True})
+        return reader, writer
+
+    async def share(self):
+        reader, writer, response = await self.request("SHARE", fingerprint=self.fingerprint, token=self.token)
+        self.assertEqual(response, {"ok": True})
+        return reader, writer
+
+    async def test_authenticated_list_states_and_no_secrets(self):
+        await self.presence()
+        _, _, response = await self.request("LIST")
+        self.assertEqual(response["devices"], [{"id": self.device, "name": "업무폰", "state": "waiting"}])
+        target, _ = await self.share()
+        _, _, response = await self.request("LIST")
+        self.assertEqual(response["devices"][0]["state"], "ready")
+        self.assertNotIn("token", json.dumps(response))
+        host, _, selected = await self.request("CONNECT")
+        self.assertEqual(selected, {"fingerprint": self.fingerprint, "token": self.token})
+        self.assertEqual(await host.readline(), b"PAIRED\n")
+        self.assertEqual(await target.readline(), b"PAIRED\n")
+        _, _, response = await self.request("LIST")
+        self.assertEqual(response["devices"][0]["state"], "busy")
+
+    async def test_unauthorized_operations_and_legacy_rejected(self):
+        for op in ("LIST", "PRESENCE", "SHARE", "CONNECT"):
+            _, _, response = await self.request(op, key="bad")
+            self.assertEqual(response, {"error": "unauthorized"})
+        reader, writer = await asyncio.open_connection("127.0.0.1", self.port)
+        self.clients.append((reader, writer))
+        writer.write(b"TARGET " + b"a" * 32 + b"\n")
+        await writer.drain()
+        self.assertEqual(await reader.readline(), b"ERROR upgrade_required\n")
+        self.assertFalse(self.relay.devices)
+        self.assertFalse(self.relay.shares)
+
+    async def test_heartbeat_and_offline_removal(self):
+        reader, writer = await self.presence()
+        writer.write(b"PING\n"); await writer.drain()
+        self.assertEqual(await reader.readline(), b"PONG\n")
+        writer.close(); await writer.wait_closed()
+        for _ in range(50):
+            if not self.relay.devices:
+                break
+            await asyncio.sleep(0.01)
+        _, _, response = await self.request("LIST")
+        self.assertEqual(response, {"devices": []})
+
+    async def test_heartbeat_timeout(self):
+        self.relay.presence_timeout = 0.05
+        reader, _ = await self.presence()
+        self.assertEqual(await asyncio.wait_for(reader.read(), 1), b"")
+        self.assertFalse(self.relay.devices)
+
+    async def test_presence_reconnect_does_not_remove_new_registration(self):
+        old, _ = await self.presence()
+        new, nw = await self.presence()
+        self.assertEqual(await asyncio.wait_for(old.read(), 1), b"")
+        nw.write(b"PING\n"); await nw.drain()
+        self.assertEqual(await new.readline(), b"PONG\n")
+        _, _, response = await self.request("LIST")
+        self.assertEqual(len(response["devices"]), 1)
+
+    async def test_single_host_tunnel_and_share_cleanup(self):
+        await self.presence()
+        target, tw = await self.share()
+        results = await asyncio.gather(self.request("CONNECT"), self.request("CONNECT"))
+        accepted = [r for r in results if "token" in r[2]]
+        rejected = [r for r in results if r[2].get("error") == "unavailable"]
+        self.assertEqual(len(accepted), 1); self.assertEqual(len(rejected), 1)
+        host, hw, _ = accepted[0]
+        self.assertEqual(await host.readline(), b"PAIRED\n")
+        self.assertEqual(await target.readline(), b"PAIRED\n")
+        tw.write(b"screen"); await tw.drain()
+        self.assertEqual(await asyncio.wait_for(host.readexactly(6), 1), b"screen")
+        hw.write(b"touch"); await hw.drain()
+        self.assertEqual(await asyncio.wait_for(target.readexactly(5), 1), b"touch")
+        hw.close(); await hw.wait_closed()
+        self.assertEqual(await asyncio.wait_for(target.read(), 1), b"")
+        self.assertFalse(self.relay.shares)
+        _, _, response = await self.request("CONNECT")
+        self.assertEqual(response, {"error": "unavailable"})
+        await self.share()
+
+    async def test_unapproved_and_offline_not_connectable(self):
+        _, _, response = await self.request("CONNECT")
+        self.assertEqual(response, {"error": "offline"})
+        await self.presence()
+        _, _, response = await self.request("CONNECT")
+        self.assertEqual(response, {"error": "unavailable"})
+
+    async def test_share_timeout_returns_to_waiting(self):
+        await self.presence()
+        target, _ = await self.share()
+        self.assertEqual(await asyncio.wait_for(target.read(), 1), b"")
+        _, _, response = await self.request("LIST")
+        self.assertEqual(response["devices"][0]["state"], "waiting")
 
 
 if __name__ == "__main__":

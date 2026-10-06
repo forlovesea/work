@@ -4,6 +4,20 @@
 
 ## 실행
 
+### 고객사 전달용 단일 EXE
+
+`dist/BatteryWatch-Monitor.exe` 하나를 전달하면 됩니다. Python 및 Qt를 따로 설치하지 않아도 됩니다. 실행파일에는 UI 이미지, 아이콘, 알림음, SNMP/Excel/업로드에 필요한 라이브러리가 포함됩니다. 현장 프로필, 토큰, 개인키, 수집 데이터와 기존 로그는 포함하지 않습니다.
+
+고객사에서는 쓰기 가능한 폴더(예: `C:\BatteryWatch`)에 EXE를 넣고 실행하여 프로필과 장비/서버 설정을 입력하세요. 설정·업로드 큐·로그는 EXE 옆에 생성되므로 프로그램 이동 시 생성된 폴더도 함께 옮겨야 합니다. 사설 CA를 사용하는 현장은 해당 CA 인증서를 별도로 제공하고 업로드 설정에서 선택하세요. 설치 폴더에 쓰기 권한이 필요합니다.
+
+재빌드(Python 3.10 및 위 의존성, PyInstaller 6.19.0 필요):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build-release.ps1
+```
+
+업로드 테스트가 통과한 후 단일 EXE를 만들고, EXE 자체로 오프라인 실행 검사를 수행합니다. 검사 결과와 프로필 선택 화면 캡처는 `build/frozen-self-test.json`, `build/frozen-self-test.png`에 저장합니다. 실제 SNMP 장비 연결과 고객사 서버 인증은 현장에서 별도로 확인해야 합니다.
+
 원본 SNMP 스택 호환을 위해 **Python 3.10**을 사용합니다.
 
 서버·Android 앱과의 데이터 흐름, 인증서/토큰 발급과 세 프로그램 설정 절차는 [통합 개발·운영 상세서](../docs/developer-guide.md)를 참고하세요.

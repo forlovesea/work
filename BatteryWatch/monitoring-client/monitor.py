@@ -109,8 +109,9 @@ import socket
 import json
 
 # Site-specific defaults are intentionally outside version control.
+APPLICATION_DIR = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, 'frozen', False) else __file__))
 try:
-    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'device-defaults.local.json'), encoding='utf-8') as defaults_file:
+    with open(os.path.join(APPLICATION_DIR, 'device-defaults.local.json'), encoding='utf-8') as defaults_file:
         DEVICE_DEFAULTS = json.load(defaults_file)
     if not isinstance(DEVICE_DEFAULTS, dict) or any(not isinstance(v, str) for v in DEVICE_DEFAULTS.values()):
         raise ValueError('device-defaults.local.json must contain string values')
@@ -2169,7 +2170,7 @@ class BatteryMonitorUI(QMainWindow):
         # =========================
         # 로그 디렉토리
         # =========================
-        base_dir = os.path.dirname(os.path.abspath(__file__))
+        base_dir = APPLICATION_DIR
         profile_name = os.path.basename(self.profile_path).replace(".ini", "")
         self.log_dir = os.path.join(base_dir, "logs", profile_name)
         self.profile_dir = os.path.dirname(self.profile_path)
@@ -8846,7 +8847,7 @@ class LocalTrapReceiver(QThread):
             
 
 if __name__ == "__main__":
-    os.chdir(os.path.dirname(os.path.abspath(__file__)))
+    os.chdir(APPLICATION_DIR)
     app = QApplication(sys.argv)
 
     # =========================

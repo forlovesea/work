@@ -1,4 +1,13 @@
 plugins { id 'com.android.application' }
+def requested = gradle.startParameter.taskNames.collect { it.toLowerCase() }
+def pushRequested = requested.any { it.contains('push') || it in ['build', 'assemble', ':app:build', ':app:assemble'] }
+ext.customerReleaseSigning = [
+    storeFile: System.getenv('BW_ANDROID_STORE_FILE'),
+    storePassword: System.getenv('BW_ANDROID_STORE_PASSWORD'),
+    keyAlias: System.getenv('BW_ANDROID_KEY_ALIAS'),
+    keyPassword: System.getenv('BW_ANDROID_KEY_PASSWORD')
+]
+def offlineReleaseRequested = requested.any { it.contains('offlinerelease') }
 android {
     namespace 'com.batterywatch.monitor'
     compileSdk 35
@@ -20,19 +29,44 @@ android {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
+    signingConfigs {
+        customerRelease {
+            if (project.ext.customerReleaseSigning.storeFile) {
+                storeFile project.file(project.ext.customerReleaseSigning.storeFile)
+                storePassword project.ext.customerReleaseSigning.storePassword
+                keyAlias project.ext.customerReleaseSigning.keyAlias
+                keyPassword project.ext.customerReleaseSigning.keyPassword
+            }
+        }
+    }
     buildTypes {
         debug { applicationIdSuffix '.debug' }
-        release { minifyEnabled false }
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.customerRelease
+        }
     }
 }
 dependencies {
     testImplementation 'junit:junit:4.13.2'
     pushImplementation 'com.google.firebase:firebase-messaging:24.1.0'
 }
-def requested = gradle.startParameter.taskNames.collect { it.toLowerCase() }
-def pushRequested = requested.any { it.contains('push') || it in ['build', 'assemble', ':app:build', ':app:assemble'] }
 if (file('google-services.json').exists() && !requested.any { it.contains('offline') }) {
     apply plugin: 'com.google.gms.google-services'
 } else if (pushRequested) {
     throw new GradleException('Push builds require app/google-services.json from your Firebase project.')
+}
+gradle.taskGraph.whenReady {
+    if (offlineReleaseRequested) {
+        def missing = project.ext.customerReleaseSigning.findAll { key, value -> !value }.keySet()
+        if (!missing.isEmpty()) {
+            throw new GradleException(
+                'Offline release signing is not configured. Set BW_ANDROID_STORE_FILE, ' +
+                'BW_ANDROID_STORE_PASSWORD, BW_ANDROID_KEY_ALIAS, and BW_ANDROID_KEY_PASSWORD.'
+            )
+        }
+        if (!file(project.ext.customerReleaseSigning.storeFile).isFile()) {
+            throw new GradleException('BW_ANDROID_STORE_FILE does not point to an existing keystore.')
+        }
+    }
 }

@@ -1,6 +1,7 @@
 """Qt adapter: snapshots are copied on the UI thread; network runs separately."""
 import hashlib
 import math
+import sys
 import threading
 from collections import deque
 from datetime import datetime
@@ -57,6 +58,12 @@ MODULE_COMMUNICATION_STATUSES = {
 }
 
 
+def application_directory():
+    if getattr(sys, 'frozen', False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).parent
+
+
 def module_communication_status(status):
     if status is None:
         return None
@@ -88,7 +95,7 @@ class UploadController(QObject):
         self.history_view = None
         self.connection_state = 'waiting'
         key = hashlib.sha256(str(Path(ui.profile_path).resolve()).encode()).hexdigest()[:20]
-        self.outbox = Outbox(Path(__file__).parent / 'data' / (key + '.sqlite3'))
+        self.outbox = Outbox(application_directory() / 'data' / (key + '.sqlite3'))
         self.label = QLabel()
         self.status.connect(self.show_status)
         ui.btn_upload_settings.clicked.connect(self.open_settings)
@@ -313,7 +320,7 @@ class UploadController(QObject):
         token_toggle.toggled.connect(update_token_visibility)
         update_token_visibility(False)
         def browse_ca():
-            initial = fields['ca_file'].text().strip() or str(Path(__file__).parent / 'certs')
+            initial = fields['ca_file'].text().strip() or str(application_directory() / 'certs')
             filename, _ = QFileDialog.getOpenFileName(
                 dialog, 'CA 인증서 파일 선택', initial,
                 'PEM 인증서 (*.pem *.crt *.cer);;모든 파일 (*)')

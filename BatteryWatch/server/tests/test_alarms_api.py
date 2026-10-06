@@ -168,8 +168,24 @@ class AlarmTests(unittest.TestCase):
         self.sample(1000, active_alarms=None, module_map=None)
         result = query(self.storage, self.viewer, '/api/v1/history', dict(site_id=['site'],device_id=['battery']))[1]
         self.assertEqual(result['history'][0]['module_data']['1']['cells'], [3.2, 3.3])
+        self.assertIsNone(result['history'][0]['alarms'])
         devices = query(self.storage, self.viewer, '/api/v1/devices', {})[1]['devices']
         self.assertIsNone(devices[0]['alarm_count'])
+
+    def test_alarm_and_history_responses_preserve_device_alarm_display_fields(self):
+        alarm = dict(text='Lithium battery communication failure', level='1',
+                     time='2026-10-06 14:20:00', row_index='3668')
+        self.sample(1000, system_name='Battery system A', active_alarms=[alarm],
+                    row_to_module={'3668': 3},
+                    module_map={'3': dict(row_index='3668')})
+        params = dict(site_id=['site'], device_id=['battery'])
+        alarms = query(self.storage, self.viewer, '/api/v1/alarms', params)[1]['device_alarms']
+        history = query(self.storage, self.viewer, '/api/v1/history', params)[1]['history'][0]
+        self.assertEqual(alarms['system_name'], 'Battery system A')
+        self.assertEqual(alarms['active_alarms'][0], alarm)
+        self.assertEqual(alarms['row_to_module']['3668'], 3)
+        self.assertEqual(history['alarms'][0], alarm)
+        self.assertEqual(history['module_map']['3']['row_index'], '3668')
 
 
 class ApiHttpTests(unittest.IsolatedAsyncioTestCase):

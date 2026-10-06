@@ -95,7 +95,15 @@ def query(storage,viewer,path,params):
         if path=='/api/v1/alarms':
             active=[dict(r) for r in db.execute('SELECT rule_key,event_id,message,last_observed FROM alarm_state WHERE site_id=? AND device_id=? AND active=1',args)]
             events=[dict(r) for r in db.execute("""SELECT e.*,a.acknowledged_at FROM alarm_events e LEFT JOIN alarm_acknowledgements a ON e.event_id=a.event_id AND a.viewer_id=? WHERE site_id=? AND device_id=? ORDER BY created_at DESC LIMIT 100""",(viewer['id'],)+args)]
-            return 200,dict(active=active,events=events)
+            row=db.execute('''SELECT s.payload FROM devices d JOIN samples s
+                ON d.collector_id=s.collector_id AND d.sample_id=s.sample_id
+                WHERE d.site_id=? AND d.device_id=?''',args).fetchone()
+            data=json.loads(row['payload']).get('data',{}) if row else {}
+            device_alarms=dict(system_name=data.get('system_name') or data.get('connection_system_name',''),
+                               active_alarms=data.get('active_alarms') if row else None,
+                               row_to_module=data.get('row_to_module',{}),
+                               module_map=data.get('module_map',{}))
+            return 200,dict(active=active,events=events,device_alarms=device_alarms)
         if path=='/api/v1/snapshot':
             row=db.execute('''SELECT s.payload,s.received_at FROM devices d JOIN samples s
                 ON d.collector_id=s.collector_id AND d.sample_id=s.sample_id
@@ -113,6 +121,9 @@ def query(storage,viewer,path,params):
             data=json.loads(r['payload'])['data']
             items.append(dict(sample_id=r['sample_id'],kind=r['kind'],captured_at=r['captured_at'],received_at=r['received_at'],
                               alarms=data.get('active_alarms',[]),faults=data.get('faults',[]),raw_trap=data.get('raw_trap'),
+                              system_name=data.get('system_name') or data.get('connection_system_name',''),
+                              row_to_module=data.get('row_to_module',{}),
+                              module_map=data.get('module_map',{}),
                               module_data=data.get('module_data'),last_poll_at=data.get('last_poll_at'),
                               connected=data.get('connected'),last_poll_ok=data.get('last_poll_ok')))
         return 200,dict(history=items)

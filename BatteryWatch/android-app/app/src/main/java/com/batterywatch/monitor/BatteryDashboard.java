@@ -66,6 +66,112 @@ public final class BatteryDashboard {
     }
     private static String value(JSONObject data,String key) { return data==null||data.isNull(key)?"—":data.optString(key,"—"); }
     private static String cell(JSONArray a,int i) { return a==null||a.isNull(i)?"—":a.optString(i,"—"); }
+    private static String alarmSeverity(Object raw) {
+        String value=raw==null||raw==JSONObject.NULL?"":raw.toString().trim();
+        if("1".equals(value)||"critical".equalsIgnoreCase(value)) return "Critical";
+        if("2".equals(value)||"major".equalsIgnoreCase(value)) return "Major";
+        if("3".equals(value)||"minor".equalsIgnoreCase(value)) return "Minor";
+        if("4".equals(value)||"warning".equalsIgnoreCase(value)||"warring".equalsIgnoreCase(value)) return "Warning";
+        return "Unknown";
+    }
+    private static int alarmSeverityColor(String severity) {
+        switch(severity) {
+            case "Critical": return Color.rgb(255,105,105);
+            case "Major": return Color.rgb(255,166,77);
+            case "Minor": return Color.rgb(255,211,92);
+            case "Warning": return Color.rgb(91,181,255);
+            default: return MUTED;
+        }
+    }
+    private static int moduleNumber(JSONObject data,JSONObject alarm) {
+        Object rawRow=alarm.opt("row_index");
+        if(rawRow==null||rawRow==JSONObject.NULL) return -1;
+        String row=rawRow.toString();
+        JSONObject rowMap=data.optJSONObject("row_to_module");
+        int number=validModuleNumber(rowMap==null?null:rowMap.opt(row));
+        if(number>0) return number;
+        JSONObject modules=data.optJSONObject("module_map");
+        if(modules!=null) for(Iterator<String> i=modules.keys();i.hasNext();) {
+            String id=i.next(); JSONObject module=modules.optJSONObject(id);
+            if(module!=null&&row.equals(module.optString("row_index")))
+                return validModuleNumber(id);
+        }
+        return -1;
+    }
+    private static int validModuleNumber(Object raw) {
+        if(raw==null||raw==JSONObject.NULL) return -1;
+        try { int number=Integer.parseInt(raw.toString()); return number>=1&&number<=10?number:-1; }
+        catch(NumberFormatException e) { return -1; }
+    }
+    public void deviceAlarms(LinearLayout parent,JSONObject data) {
+        LinearLayout section=card(parent);
+        section.addView(label("장비 알람",18,INK));
+        if(data==null) {
+            section.addView(label("장비 알람 정보를 가져오지 못했습니다.",14,MUTED));
+            return;
+        }
+        Object raw=data.opt("active_alarms");
+        List<JSONObject> alarms=new ArrayList<>();
+        boolean valid=true;
+        if(!data.has("active_alarms")||raw==null||raw==JSONObject.NULL) {
+            section.addView(label("알람 정보가 없습니다.",14,MUTED));
+            return;
+        }
+        if(raw instanceof JSONArray) {
+            JSONArray array=(JSONArray)raw;
+            for(int i=0;i<array.length();i++) {
+                JSONObject alarm=array.optJSONObject(i);
+                if(alarm==null) valid=false; else alarms.add(alarm);
+            }
+        } else if(raw instanceof JSONObject) {
+            JSONObject object=(JSONObject)raw;
+            if(object.has("text")||object.has("level")||object.has("time")) alarms.add(object);
+            else for(Iterator<String> i=object.keys();i.hasNext();) {
+                JSONObject alarm=object.optJSONObject(i.next());
+                if(alarm==null) valid=false; else alarms.add(alarm);
+            }
+        } else if(raw!=null&&raw!=JSONObject.NULL) valid=false;
+        if(!valid) {
+            section.addView(label("알람 데이터 형식을 확인할 수 없습니다.",14,AMBER));
+            return;
+        }
+        if(alarms.isEmpty()) {
+            section.addView(label("현재 발생한 장비 알람이 없습니다.",14,MUTED));
+            return;
+        }
+        String system=data.optString("system_name","").trim();
+        if(system.isEmpty()) system=data.optString("connection_system_name","").trim();
+        for(JSONObject alarm:alarms) {
+            String severity=alarmSeverity(alarm.opt("level"));
+            int color=alarmSeverityColor(severity);
+            GradientDrawable outline=background(PANEL,14);
+            outline.setStroke(dp(1),color);
+            LinearLayout item=new LinearLayout(context);
+            item.setOrientation(LinearLayout.VERTICAL);
+            item.setPadding(dp(12),dp(10),dp(12),dp(10));
+            item.setBackground(outline);
+            LinearLayout.LayoutParams itemParams=new LinearLayout.LayoutParams(-1,-2);
+            itemParams.setMargins(0,dp(5),0,dp(5));
+            section.addView(item,itemParams);
+            LinearLayout metadata=new LinearLayout(context);
+            metadata.setGravity(Gravity.CENTER_VERTICAL);
+            int module=moduleNumber(data,alarm);
+            String location=module>0
+                ?"모듈 "+module
+                :alarm.has("row_index")?"모듈 확인 필요":"시스템";
+            if(!system.isEmpty()) location=system+" · "+location;
+            String time=alarm.optString("time","").trim();
+            TextView detail=label((time.isEmpty()?"—":time)+"  |  "+location,12,MUTED);
+            metadata.addView(detail,new LinearLayout.LayoutParams(0,-2,1));
+            TextView badge=label(severity,12,color);
+            badge.setPadding(dp(8),dp(3),dp(8),dp(3));
+            badge.setBackground(background(Color.rgb(36,48,63),10));
+            metadata.addView(badge);
+            item.addView(metadata);
+            String message=alarm.optString("text","").trim();
+            item.addView(label(message.isEmpty()?"(알람 내용 없음)":message,15,INK));
+        }
+    }
     public static List<ModuleSlots.Slot> slots(JSONObject data) {
         Map<String,String> mapping=new HashMap<>(); Set<String> rows=new HashSet<>();
         JSONObject map=data.optJSONObject("module_map"), values=data.optJSONObject("module_data");
@@ -93,7 +199,11 @@ public final class BatteryDashboard {
             if(!data.isNull("last_poll_error") && !data.optString("last_poll_error").isEmpty())
                 summary.addView(label("측정 오류: "+data.optString("last_poll_error"),12,AMBER));
         }
-        if(slots.isEmpty()) { summary.addView(label("등록된 모듈 정보가 없습니다.",16,AMBER)); return; }
+        if(slots.isEmpty()) {
+            summary.addView(label("등록된 모듈 정보가 없습니다.",16,AMBER));
+            deviceAlarms(parent,data);
+            return;
+        }
         if(count>10) summary.addView(label("지원 수량(10개)을 초과한 데이터입니다. 서버 구성을 확인하세요.",14,AMBER));
         if(slots.stream().anyMatch(s->!s.mapped)) summary.addView(label("모듈 번호를 확인할 수 없는 측정 행이 있습니다. 미매핑 행으로 별도 표시합니다.",13,AMBER));
         LinearLayout selection=new LinearLayout(context); selection.setOrientation(LinearLayout.VERTICAL);
@@ -128,8 +238,7 @@ public final class BatteryDashboard {
                 selection.post(()->selection.requestRectangleOnScreen(new Rect(0,0,selection.getWidth(),dp(170)),false)); });
         }
         showModule(selection,initial,values==null||initial.row==null?null:values.optJSONObject(initial.row),fresh);
-        LinearLayout alarm=card(parent); alarm.addView(label("장비 알람",18,INK));
-        Object a=data.opt("active_alarms"); alarm.addView(label(a==null||a==JSONObject.NULL?"정보 없음":a.toString(),14,MUTED));
+        deviceAlarms(parent,data);
     }
     private static Object summaryValue(JSONObject data,String title) {
         JSONArray table=data.optJSONArray("summary_table");

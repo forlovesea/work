@@ -173,7 +173,13 @@ public class MainActivity extends Activity {
             for (int i = 0; i < history.length(); i++) {
                 JSONObject h = history.getJSONObject(i);
                 text(DisplayTime.format(h.optString("captured_at")) + " · " + h.optString("kind"), true);
-                text("알람: " + h.optString("alarms", "[]") + "\n고장: " + h.optString("faults", "[]"), false);
+                JSONObject alarmData=new JSONObject()
+                    .put("active_alarms",h.opt("alarms"))
+                    .put("system_name",h.optString("system_name"))
+                    .put("row_to_module",h.opt("row_to_module"))
+                    .put("module_map",h.opt("module_map"));
+                dashboard.deviceAlarms(content,alarmData);
+                text("고장: " + h.optString("faults", "[]"), false);
                 JSONObject modules = h.optJSONObject("module_data");
                 if (modules != null) {
                     text("실제 측정: " + DisplayTime.format(h.optString("last_poll_at")) + (h.optBoolean("connected") && h.optBoolean("last_poll_ok") ? "" : " · 통신 불량 / 이전값"), false);
@@ -187,6 +193,7 @@ public class MainActivity extends Activity {
             }
         } else {
             JSONArray active = response.getJSONArray("active"), events = response.getJSONArray("events");
+            dashboard.deviceAlarms(content,response.optJSONObject("device_alarms"));
             text("활성 알람 " + active.length() + "건", true);
             for (int i = 0; i < active.length(); i++) text(active.getJSONObject(i).optString("message"), false);
             text("발생 / 복구 이력", true);

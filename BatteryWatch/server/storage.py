@@ -85,33 +85,54 @@ class Storage:
                     captured_at=MAX(devices.captured_at,excluded.captured_at),
                     last_received_at=excluded.last_received_at''',
                     (payload['site_id'], payload['device_id'], collector_id, payload['sample_id'], payload['captured_at'], received))
-                for result in payload['data'].get('control_results', []):
-                    command = db.execute('''SELECT value_centi FROM control_commands
-                        WHERE command_id=? AND collector_id=? AND site_id=? AND device_id=?
-                        AND status='dispatched' ''',
-                        (result['command_id'],collector_id,payload['site_id'],payload['device_id'])).fetchone()
-                    if command is None:
-                        continue
-                    applied = result.get('applied_value_centi')
-                    status = 'succeeded' if (
-                        result['status'] == 'succeeded'
-                        and result.get('applied_value_centi') == command['value_centi']
-                    ) else 'failed'
-                    result_message = (
-                        result.get('message','') if status == 'succeeded'
-                        else result.get('message','') or '장비 적용값 검증 실패'
-                    )
-                    db.execute('''UPDATE control_commands SET status=?,claim_until=NULL,
-                        applied_value_centi=?,result_message=?
-                        WHERE command_id=? AND collector_id=? AND site_id=? AND device_id=?
-                        AND status='dispatched' ''',
-                        (status,applied,result_message,result['command_id'],collector_id,
-                         payload['site_id'],payload['device_id']))
+                self._save_control_results(db, collector_id, payload)
             db.execute('''INSERT INTO sessions VALUES(?,?,?,?,?,NULL)
                 ON CONFLICT(session_id) DO UPDATE SET last_seen_at=excluded.last_seen_at''',
                 (session_id, collector_id, peer, received, received))
         # Exiting the transaction commits before caller can return an ACK.
         return duplicate
+
+    def _save_control_results(self, db, collector_id, payload):
+        for result in payload['data'].get('control_results', []):
+            command = db.execute('''SELECT value_centi FROM control_commands
+                WHERE command_id=? AND collector_id=? AND site_id=? AND device_id=?
+                AND status='dispatched' ''',
+                (result['command_id'],collector_id,payload['site_id'],payload['device_id'])).fetchone()
+            if command is None:
+                continue
+            applied = result.get('applied_value_centi')
+            status = 'succeeded' if (
+                result['status'] == 'succeeded'
+                and result.get('applied_value_centi') == command['value_centi']
+            ) else 'failed'
+            result_message = (
+                result.get('message','') if status == 'succeeded'
+                else result.get('message','') or '장비 적용값 검증 실패'
+            )
+            db.execute('''UPDATE control_commands SET status=?,claim_until=NULL,
+                applied_value_centi=?,result_message=?
+                WHERE command_id=? AND collector_id=? AND site_id=? AND device_id=?
+                AND status='dispatched' ''',
+                (status,applied,result_message,result['command_id'],collector_id,
+                 payload['site_id'],payload['device_id']))
+
+    def save_history(self, collector_id, payloads):
+        """One durable transaction; do not update live devices, sessions or alarms."""
+        received = now()
+        rows = [(collector_id, p['sample_id'], p['site_id'], p['device_id'],
+                 p['kind'], p['captured_at'], received,
+                 json.dumps(p, ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=False))
+                for p in payloads]
+        with self.lock, closing(self.connect()) as db, db:
+            for row in rows:
+                existing = db.execute('SELECT payload FROM samples WHERE collector_id=? AND sample_id=?', row[:2]).fetchone()
+                if existing and existing['payload'] != row[-1]:
+                    raise SampleConflict('sample_id_conflict')
+            db.executemany('INSERT OR IGNORE INTO samples VALUES(?,?,?,?,?,?,?,?)', rows)
+            # Preserve completion receipts even when their snapshot became history.
+            for payload in payloads:
+                if payload['kind'] == 'snapshot':
+                    self._save_control_results(db, collector_id, payload)
 
     def disconnected(self, session_id):
         with self.lock, closing(self.connect()) as db, db:

@@ -185,7 +185,6 @@ public final class BatteryDashboard {
         JSONObject values=data.optJSONObject("module_data"); List<ModuleSlots.Slot> slots=slots(data);
         boolean fresh=response.optBoolean("fresh");
         LinearLayout summary=card(parent);
-        summary.addView(label(fresh?"● 정상 수신":"● 오래된 데이터 · 현재 상태 확인 필요",14,fresh?GREEN:AMBER));
         long count=slots.stream().filter(s->s.mapped).count();
         summary.addView(label("배터리 모듈  "+count+" / 10",24,INK));
         rackSummary(summary,data,slots,fresh,changeChargeLimit);

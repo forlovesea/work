@@ -7,6 +7,8 @@
     "keyfile": "certs/privkey.pem"
   },
   "max_connections": 32,
+  "history_max_inflight": 2,
+  "history_min_interval": 5,
   "idle_timeout": 3700,
   "frame_timeout": 15,
   "max_frame_bytes": 16777216,

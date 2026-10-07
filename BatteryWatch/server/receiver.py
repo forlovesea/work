@@ -1,6 +1,9 @@
 """BatteryWatch v1 TCP/TLS receiver, Python 3.10+ standard library only."""
 from communication_log import PeerLog
 import asyncio
+import base64
+import time
+import zlib
 import hashlib
 import hmac
 import ipaddress
@@ -39,15 +42,20 @@ def identifier(value):
     return isinstance(value,str) and 0<len(value)<=128 and not any(ord(c)<32 for c in value)
 
 
-def validate(message, collectors):
-    if not isinstance(message, dict) or message.get('type')!='upload':
-        raise Rejected('invalid_message')
+def authenticate(message, collectors):
     token = message.get('token')
     if not isinstance(token,str) or not 1<=len(token)<=4096:
         raise Rejected('unauthorized')
     digest = hashlib.sha256(token.encode()).hexdigest()
     collector = next((c for c in collectors if hmac.compare_digest(c['token_sha256'],digest)),None)
     if collector is None: raise Rejected('unauthorized')
+    return collector
+
+
+def validate(message, collectors):
+    if not isinstance(message, dict) or message.get('type')!='upload':
+        raise Rejected('invalid_message')
+    collector = authenticate(message, collectors)
     p = message.get('payload')
     if not isinstance(p,dict) or type(p.get('schema_version')) is not int or p['schema_version']!=1:
         raise Rejected('invalid_schema')
@@ -91,13 +99,37 @@ def validate(message, collectors):
     return collector['id'],p
 
 
+def decode_history(message, collectors):
+    if message.get('encoding') != 'gzip+base64' or not isinstance(message.get('data'), str):
+        raise Rejected('invalid_history_encoding')
+    try:
+        compressed = base64.b64decode(message['data'], validate=True)
+        inflater = zlib.decompressobj(16 + zlib.MAX_WBITS)
+        raw = inflater.decompress(compressed, MAX_FRAME + 1)
+        if len(raw) > MAX_FRAME or not inflater.eof or inflater.unused_data:
+            raise ValueError()
+        batch = json.loads(raw.decode('utf-8'))
+        json.dumps(batch, allow_nan=False)
+    except (ValueError, UnicodeError, zlib.error, RecursionError):
+        raise Rejected('invalid_history_data') from None
+    if not isinstance(batch, list) or not 1 <= len(batch) <= 100:
+        raise Rejected('invalid_history_count')
+    if len(raw) > 512 * 1024 and len(batch) > 1:
+        raise Rejected('history_batch_too_large')
+    validated = [validate(dict(type='upload', token=message['token'], payload=p), collectors)[1] for p in batch]
+    if len({p['sample_id'] for p in validated}) != len(validated):
+        raise Rejected('duplicate_history_id')
+    return validated
+
+
 def load_config(path):
     path=Path(path).resolve()
     c=json.loads(path.read_text(encoding='utf-8-sig'))
     if not isinstance(c,dict): raise ValueError('Configuration must be an object')
     for key,default,low,high in [('port',9443,1,65535),('max_connections',32,1,1024),
                                ('idle_timeout',3700,1,7200),('frame_timeout',15,1,60),
-                               ('max_frame_bytes',MAX_FRAME,1024,MAX_FRAME)]:
+                               ('max_frame_bytes',MAX_FRAME,1024,MAX_FRAME),
+                               ('history_max_inflight',2,1,16), ('history_min_interval',5,1,300)]:
         value=c.setdefault(key,default)
         if type(value) is not int or not low<=value<=high: raise ValueError('Invalid '+key)
     c.setdefault('host','127.0.0.1')
@@ -139,6 +171,8 @@ class Receiver:
         self.server=None
         self.tasks=set()
         self.writers=set()
+        self.history_inflight=0
+        self.history_next={}
 
     async def start(self):
         tls=self.config.get('tls',{})
@@ -160,6 +194,28 @@ class Receiver:
         for writer in list(self.writers): writer.close()
         # Finish any database transaction before shutdown; never ACK uncommitted data.
         if self.tasks: await asyncio.gather(*list(self.tasks),return_exceptions=True)
+
+    async def handle_history(self, message, writer):
+        identity = authenticate(message, self.config['collectors'])['id']
+        instant = time.monotonic()
+        retry = self.history_next.get(identity, 0) - instant
+        if self.history_inflight >= self.config.get('history_max_inflight', 2) or retry > 0:
+            response = dict(type='history_ack', ok=False, retry_after=max(1, min(300, int(retry) + 1)))
+        else:
+            self.history_inflight += 1
+            self.history_next[identity] = instant + self.config.get('history_min_interval', 5)
+            try:
+                def save():
+                    batch = decode_history(message, self.config['collectors'])
+                    self.storage.save_history(identity, batch)
+                    return [p['sample_id'] for p in batch]
+                ids = await asyncio.to_thread(save)
+                response = dict(type='history_ack', ok=True, sample_ids=ids)
+            finally:
+                self.history_inflight -= 1
+        raw = json.dumps(response).encode()
+        writer.write(struct.pack('!I', len(raw)) + raw)
+        await asyncio.wait_for(writer.drain(), 4)
 
     async def handle(self, reader, writer):
         log=PeerLog(LOG,writer,'수집기')
@@ -185,13 +241,18 @@ class Receiver:
                     # json.loads can produce infinity from 1e999 without parse_constant.
                     json.dumps(message,allow_nan=False)
                 except (ValueError,UnicodeError,RecursionError): raise Rejected('invalid_json') from None
+                if isinstance(message, dict) and message.get('type') == 'history_batch':
+                    if collector_id is not None:
+                        raise Rejected('history_requires_separate_connection')
+                    await self.handle_history(message, writer)
+                    return  # One bounded batch per connection; reserve capacity for live uploads.
                 identity,payload=validate(message,self.config['collectors'])
                 if collector_id is not None and identity!=collector_id: raise Rejected('identity_changed')
                 if collector_id is None:
                     log.debug('UPLOAD authenticated session=%s collector=%r',session_id,identity)
                 collector_id=identity
                 duplicate=await asyncio.to_thread(self.storage.save,identity,payload,session_id,peer)
-                ack_message=dict(type='ack',sample_id=payload['sample_id'],ok=True,duplicate=duplicate)
+                ack_message=dict(type='ack',sample_id=payload['sample_id'],ok=True,duplicate=duplicate,history_batch_v1=True)
                 if payload['kind']=='snapshot':
                     command=await asyncio.to_thread(
                         self.storage.claim_control_command,identity,payload['site_id'],payload['device_id'])
@@ -213,7 +274,8 @@ class Receiver:
             writer.close()
             try: await asyncio.wait_for(writer.wait_closed(),2)
             except (OSError,asyncio.TimeoutError): pass
-            try: await asyncio.to_thread(self.storage.disconnected,session_id)
-            except Exception: log.error('Unable to record disconnect session=%s',session_id)
+            if collector_id is not None:
+                try: await asyncio.to_thread(self.storage.disconnected,session_id)
+                except Exception: log.error('Unable to record disconnect session=%s',session_id)
             self.writers.discard(writer); self.tasks.discard(task)
             log.debug('Disconnected session=%s',session_id)

@@ -67,12 +67,13 @@ public class MainActivity extends Activity {
         exit.setOnClickListener(v -> exitApp());
         header.addView(exit, new LinearLayout.LayoutParams(dashboard.dp(80), dashboard.dp(48)));
         root.addView(header);
+        LinearLayout serverPanel = navigationPanel(root, false);
         LinearLayout actions = new LinearLayout(this);
-        button(actions, "장비", () -> navigate("devices"));
-        button(actions, "설정", this::showSettings);
-        button(actions, "새로고침", this::refresh);
-        root.addView(actions);
-        status = new TextView(this); status.setTextSize(12); status.setTextColor(BatteryDashboard.MUTED); status.setPadding(0, dashboard.dp(10), 0, dashboard.dp(10)); root.addView(status);
+        navigationButton(actions, "장비", false, false, () -> navigate("devices"));
+        navigationButton(actions, "설정", false, false, this::showSettings);
+        navigationButton(actions, "새로고침", false, false, this::refresh);
+        serverPanel.addView(actions);
+        status = new TextView(this); status.setTextSize(12); status.setTextColor(BatteryDashboard.MUTED); status.setPadding(0, dashboard.dp(10), 0, 0); serverPanel.addView(status);
         scroll = new ScrollView(this);
         content = new LinearLayout(this); content.setOrientation(LinearLayout.VERTICAL);
         scroll.addView(content); root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
@@ -103,6 +104,36 @@ public class MainActivity extends Activity {
         b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.rgb(30, 48, 62)));
         b.setOnClickListener(v -> action.run());
         parent.addView(b, new LinearLayout.LayoutParams(parent.getOrientation() == LinearLayout.HORIZONTAL ? 0 : -1, dashboard.dp(48), parent.getOrientation() == LinearLayout.HORIZONTAL ? 1 : 0));
+    }
+
+    private LinearLayout navigationPanel(LinearLayout parent, boolean devicePanel) {
+        LinearLayout panel = dashboard.card(parent);
+        android.graphics.drawable.GradientDrawable background = dashboard.background(
+            devicePanel ? Color.rgb(19, 43, 45) : Color.rgb(24, 37, 55), 18);
+        background.setStroke(dashboard.dp(1), devicePanel ? Color.rgb(43, 80, 77) : Color.rgb(49, 68, 92));
+        panel.setBackground(background);
+        return panel;
+    }
+
+    private void navigationButton(LinearLayout parent, String title, boolean devicePanel, boolean selected, Runnable action) {
+        Button button = new Button(this);
+        button.setText(title); button.setTextSize(13); button.setAllCaps(false);
+        button.setMinWidth(0); button.setMinimumWidth(0);
+        button.setPadding(dashboard.dp(4), 0, dashboard.dp(4), 0);
+        button.setTextColor(selected ? Color.rgb(12, 39, 35) :
+            devicePanel ? Color.rgb(175, 222, 210) : Color.rgb(195, 216, 244));
+        int fill = selected ? Color.rgb(116, 210, 185) :
+            devicePanel ? Color.rgb(30, 65, 62) : Color.rgb(39, 58, 82);
+        button.setBackgroundTintList(null);
+        button.setBackground(new android.graphics.drawable.RippleDrawable(
+            android.content.res.ColorStateList.valueOf(Color.argb(55, 220, 245, 255)),
+            dashboard.background(fill, 12), null));
+        button.setSelected(selected);
+        button.setElevation(0);
+        button.setOnClickListener(v -> action.run());
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dashboard.dp(48), 1);
+        if (parent.getChildCount() > 0) params.setMarginStart(dashboard.dp(8));
+        parent.addView(button, params);
     }
 
     private void text(String value, boolean heading) {
@@ -160,12 +191,21 @@ public class MainActivity extends Activity {
             }
             return;
         }
-        text(site + " / " + device, true);
+        LinearLayout devicePanel = navigationPanel(content, true);
+        TextView identity = dashboard.label(site + " / " + device, 20, BatteryDashboard.INK);
+        identity.setPadding(0, 0, 0, dashboard.dp(12));
+        devicePanel.addView(identity);
         LinearLayout tabs = new LinearLayout(this);
-        button(tabs, "상태", () -> navigate("details"));
-        button(tabs, "이력", () -> navigate("history"));
-        button(tabs, "알람", () -> navigate("alarms")); content.addView(tabs);
+        navigationButton(tabs, "상태", true, requestedPage.equals("details"), () -> navigate("details"));
+        navigationButton(tabs, "이력", true, requestedPage.equals("history"), () -> navigate("history"));
+        navigationButton(tabs, "알람", true, requestedPage.equals("alarms"), () -> navigate("alarms"));
+        devicePanel.addView(tabs);
         if (requestedPage.equals("details")) {
+            boolean fresh = response.optBoolean("fresh");
+            TextView reception = dashboard.label(fresh ? "● 정상 수신" : "● 오래된 데이터 · 현재 상태 확인 필요",
+                14, fresh ? BatteryDashboard.GREEN : BatteryDashboard.AMBER);
+            reception.setPadding(0, dashboard.dp(12), 0, 0);
+            devicePanel.addView(reception);
             dashboard.details(content, response, () -> showChargeLimitDialog(response));
         } else if (requestedPage.equals("history")) {
             JSONArray history = response.getJSONArray("history");

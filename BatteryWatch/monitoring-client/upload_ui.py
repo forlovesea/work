@@ -257,6 +257,7 @@ class UploadController(QObject):
         self.timer.stop()
         if self.config['enabled']:
             self.timer.start(self.config['interval'] * 1000)
+            QTimer.singleShot(0, self.capture)
         self.show_status(('업로드 대기' if self.config['enabled'] else '업로드 사용 안 함') +
                          f" | 주기 {self.config['interval']}초 | 전체 대기 {self.outbox.count()}건")
 

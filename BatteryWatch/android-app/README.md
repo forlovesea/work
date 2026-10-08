@@ -62,3 +62,9 @@ JDK 17, Gradle 8.11.1, Android SDK `platforms;android-35` 및 `build-tools;35.0.
 4. 서버 서비스 계정과 `push` 설정을 적용하고 앱에서 알림 권한을 허용합니다.
 
 서버 알람 규칙과 설정은 [알람·푸시 안내](../docs/alarms-and-push.md)를 참고하세요. 실제 Firebase 수신 시험은 운영 자격증명과 휴대폰이 필요합니다.
+
+## GitHub 배포 0.2.9
+
+[APK 및 릴리스 안내](https://github.com/forlovesea/work/releases/tag/batterywatch-android-v0.2.9)
+
+0.2.9(versionCode 11)는 기존 0.2.8 APK와 같은 앱 ID `com.batterywatch.monitor.offline.debug` 및 디버그 서명을 유지한 배포입니다. 기존 디버그 앱 위에 업데이트 설치할 수 있습니다. 고객용 Release 서명 빌드 및 Google Play 배포본과는 구분됩니다. Firebase 푸시가 없는 조회용 빌드이며 서버 네트워크 연결이 필요합니다.

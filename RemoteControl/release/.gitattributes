@@ -1,4 +1,2 @@
-* text eol=lf
-*.apk -text
-*.zip -text
-*.gz -text
+# Preserve exact release bytes for published SHA-256 checksums.
+* -text

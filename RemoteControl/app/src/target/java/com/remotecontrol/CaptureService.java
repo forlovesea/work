@@ -40,6 +40,7 @@ public final class CaptureService extends Service {
     private boolean frameErrorLogged;
     private boolean firstFrameSent;
     private volatile long lastIncoming;
+    private PowerManager.WakeLock screenLease;
     private final Runnable connectionWatch = new Runnable() {
         @Override public void run() {
             if (!running) return;
@@ -129,7 +130,29 @@ public final class CaptureService extends Service {
             catch (InterruptedException stopped) { break; }
         }
     }
+    // Renewed by authenticated Host heartbeats; expires even if the network stalls.
+    @SuppressWarnings("deprecation")
+    private synchronized void keepScreenAwake(boolean enabled) {
+        if (!enabled || !running || !connected) { releaseScreenLease(); return; }
+        PowerManager power = getSystemService(PowerManager.class);
+        if (power == null || !power.isInteractive()) { releaseScreenLease(); return; }
+        try {
+            if (screenLease == null) {
+                screenLease = power.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK, "RemoteControl:screenLease");
+                screenLease.setReferenceCounted(false);
+            }
+            screenLease.acquire(15000);
+        } catch (RuntimeException error) {
+            releaseScreenLease();
+            Diagnostics.record(this, "target", "screen keep-awake failed", error);
+        }
+    }
+    private synchronized void releaseScreenLease() {
+        if (screenLease != null && screenLease.isHeld()) screenLease.release();
+        screenLease = null;
+    }
     private void closeConnections() {
+        releaseScreenLease();
         Diagnostics.record(this, "target", "application closing connections running=" + running + " connected=" + connected, null);
         SSLServerSocket closingServer = server;
         SSLSocket closingClient = client;
@@ -198,6 +221,10 @@ public final class CaptureService extends Service {
                     while (running) {
                         int kind = input.readUnsignedByte();
                         lastIncoming = SystemClock.elapsedRealtime();
+                        if (kind == Protocol.KEEP_AWAKE) {
+                            keepScreenAwake(input.readBoolean());
+                            continue;
+                        }
                         if (kind == Protocol.PING) {
                             long echo = input.readLong();
                             // Check the Target main thread as well as the end-to-end network path.
@@ -309,6 +336,7 @@ public final class CaptureService extends Service {
     private void finish(String message) {
         if (!running) { stopSelf(); return; }
         status = message; running = false; connected = false; invitation = "";
+        releaseScreenLease();
         main.post(this::stopSelf);
     }
     @Override public void onConfigurationChanged(android.content.res.Configuration configuration) {

@@ -4,7 +4,7 @@ public final class Protocol {
     public static final int MIN_RELAY_PORT = 55000, MAX_RELAY_PORT = 60000;
     public static final int DEFAULT_RELAY_PORT = 55000;
     public static final int MAX_FRAME = 2 * 1024 * 1024;
-    public static final int GESTURE = 1, BACK = 2, HOME = 3, PING = 4;
+    public static final int GESTURE = 1, BACK = 2, HOME = 3, PING = 4, KEEP_AWAKE = 5;
     public static final int PONG = -1;
     public static final String WIRE_VERSION = "2";
     private Protocol() {}

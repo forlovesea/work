@@ -44,7 +44,7 @@ public final class ConnectionService extends Service {
                 try (SSLSocket connection = Relay.socket()) {
                     socket = connection;
                     if (!running) break;
-                    Directory.open(connection, host, port, Directory.request("PRESENCE", secret, deviceId).put("name", deviceName).put("wake", true));
+                    Directory.open(connection, host, port, Directory.request("PRESENCE", secret, deviceId).put("name", deviceName));
                     if (!running) break;
                     Diagnostics.record(this, "target", "relay presence connected", null);
                     status = "중계서버 연결됨 · 자동 재접속 사용 중";
@@ -52,13 +52,7 @@ public final class ConnectionService extends Service {
                     while (running) {
                         connection.getOutputStream().write("PING\n".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
                         connection.getOutputStream().flush();
-                        String response = Relay.line(connection);
-                        if (response.matches("WAKE [0-9a-f]{32}")) {
-                            String result = wakeScreen() ? "awake" : "blocked";
-                            connection.getOutputStream().write(("WAKE_RESULT " + response.substring(5)
-                                    + " " + result + "\n").getBytes(java.nio.charset.StandardCharsets.US_ASCII));
-                            connection.getOutputStream().flush();
-                        } else if (!response.equals("PONG")) throw new IOException("서버 응답 오류");
+                        if (!Relay.line(connection).equals("PONG")) throw new IOException("서버 응답 오류");
                         Thread.sleep(10000);
                     }
                 } catch (Exception error) {
@@ -73,28 +67,6 @@ public final class ConnectionService extends Service {
         }, "relay-presence");
         worker.start();
         return START_NOT_STICKY;
-    }
-    // Bounded wake lock: no background Activity launch, unlock, or capture consent.
-    @SuppressWarnings("deprecation")
-    private boolean wakeScreen() throws InterruptedException {
-        PowerManager power = getSystemService(PowerManager.class);
-        PowerManager.WakeLock wake = null;
-        try {
-            if (!running || power == null) return false;
-            if (power.isInteractive()) return true;
-            wake = power.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK
-                    | PowerManager.ACQUIRE_CAUSES_WAKEUP, "RemoteControl:remoteWake");
-            wake.acquire(3000);
-            for (int i = 0; i < 10 && running && !power.isInteractive(); i++) Thread.sleep(100);
-            boolean awake = running && power.isInteractive();
-            Diagnostics.record(this, "target", "remote wake result=" + awake, null);
-            return awake;
-        } catch (RuntimeException error) {
-            Diagnostics.record(this, "target", "remote wake blocked", error);
-            return false;
-        } finally {
-            if (wake != null && wake.isHeld()) wake.release();
-        }
     }
     @Override public void onDestroy() {
         running = false; active = false; status = "서버 연결 종료";

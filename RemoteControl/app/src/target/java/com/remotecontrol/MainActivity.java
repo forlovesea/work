@@ -66,7 +66,7 @@ public final class MainActivity extends Activity {
         connectServer = Ui.button(this, page, "서버 연결 / 자동 재접속 시작", v -> {
             if (readEndpoint()) connectServer();
         });
-        Ui.text(this, page, "서버 연결 중에는 같은 접속 키를 가진 Host가 화면을 깨울 수 있습니다. 잠금 해제나 화면 공유 승인은 자동으로 수행하지 않습니다.");
+        Ui.text(this, page, "Host의 화면 켜짐 유지 옵션을 사용하면 화면 공유 연결 중 자동 화면 꺼짐을 방지합니다. 연결 종료 또는 유지 신호 중단 시 해제됩니다.");
         connectionStatus = Ui.text(this, page, ConnectionService.status);
         control = new CheckBox(this); control.setText("이번 세션에서 터치 제어 허용"); page.addView(control);
         Ui.button(this, page, "터치 제어 권한 설정", v -> new AlertDialog.Builder(this)

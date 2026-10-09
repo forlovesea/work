@@ -20,7 +20,7 @@ public final class MainActivity extends Activity {
     private android.view.View title;
     private boolean browsing, loading, fullScreen, smallView;
     private String pendingKeySave;
-    private final java.util.Set<String> waking = new java.util.HashSet<>();
+    private volatile boolean keepTargetAwake, keepAwakeSent;
     private volatile int browseGeneration;
     private String listHost, listKey;
     private int listPort;
@@ -94,6 +94,15 @@ public final class MainActivity extends Activity {
         toolbarButton(navigation, "홈", () -> command(Protocol.HOME, 0, 0, 0, 0, 1));
         toolbarButton(navigation, "화면 보기", this::viewOptions);
         toolbarButton(navigation, "연결 종료", () -> disconnect("연결을 종료했습니다.", false));
+        CheckBox keepScreen = new CheckBox(this);
+        keepScreen.setText("연결 중 Target 화면 켜짐 유지");
+        keepTargetAwake = ServerSettings.preferences(this).getBoolean("keep_target_awake", false);
+        keepScreen.setChecked(keepTargetAwake);
+        keepScreen.setOnCheckedChangeListener((button, checked) -> {
+            keepTargetAwake = checked;
+            ServerSettings.preferences(this).edit().putBoolean("keep_target_awake", checked).apply();
+        });
+        page.addView(keepScreen);
         screen = new ImageView(this); screen.setBackgroundColor(Color.rgb(15, 23, 42));
         screen.setScaleType(ImageView.ScaleType.MATRIX);
         screen.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> fitImage());
@@ -272,10 +281,7 @@ public final class MainActivity extends Activity {
                         Button device = Ui.button(this, deviceRows, name + " · " + label + " · " + id.substring(0, Math.min(6, id.length())),
                                 v -> connect(id, name, host, port, key));
                         device.setEnabled(state.equals("ready") && socket == null && relay == null);
-                        Button wake = Ui.button(this, deviceRows,
-                                item.optBoolean("wake") ? "화면 깨우기" : "깨우기 미지원 · 서버/Target 업데이트 필요",
-                                v -> wakeDevice(id, name, host, port, key, (Button) v));
-                        wake.setEnabled(item.optBoolean("wake") && !waking.contains(id));
+
                     }
                     if (socket == null && relay == null) status.setText("서버 연결됨 · Target " + rows.length() + "대 · 5초마다 갱신");
                 });
@@ -289,32 +295,6 @@ public final class MainActivity extends Activity {
                 });
             }
         }, "host-directory").start();
-    }
-    private void wakeDevice(String id, String name, String host, int port, String key, Button button) {
-        if (!waking.add(id)) return;
-        button.setEnabled(false);
-        Toast.makeText(this, name + " · 화면 깨우기 요청 중…", Toast.LENGTH_SHORT).show();
-        final int request = browseGeneration;
-        new Thread(() -> {
-            String message;
-            try (SSLSocket connection = Relay.socket()) {
-                org.json.JSONObject result = Directory.open(connection, host, port, Directory.request("WAKE", key, id));
-                message = "awake".equals(result.optString("status"))
-                        ? "화면 켜짐 확인 · 잠금 해제/공유 승인은 Target에서 확인하세요."
-                        : "화면을 켜지 못했습니다. Target의 화면 켜기 권한/기기 제한을 확인하세요.";
-            } catch (Exception error) {
-                message = "깨우기 실패: " + failureDetail(error);
-                Diagnostics.record(this, "host", "remote wake failed", error);
-            }
-            final String resultMessage = message;
-            main.post(() -> {
-                waking.remove(id);
-                if (request != browseGeneration || isFinishing() || isDestroyed()) return;
-                button.setEnabled(true);
-                new android.app.AlertDialog.Builder(this).setTitle(name + " · 화면 깨우기")
-                        .setMessage(resultMessage).setPositiveButton("확인", null).show();
-            });
-        }, "host-wake").start();
     }
     private void connect(String deviceId, String deviceName, String host, int port, String key) {
         if (socket != null || relay != null || !connect.isEnabled()) return;
@@ -366,7 +346,7 @@ public final class MainActivity extends Activity {
                 stage = "화면 스트림 수신";
                 synchronized (this) {
                     if (session != generation) return;
-                    controlAllowed = allowed; output = out;
+                    controlAllowed = allowed; keepAwakeSent = false; output = out;
                 }
                 link.setSoTimeout(0);
                 main.post(() -> { if (session == generation) {
@@ -509,7 +489,14 @@ public final class MainActivity extends Activity {
         commands.execute(() -> {
             DataOutputStream out = output;
             if (session != generation || out == null) return;
-            try { out.writeByte(Protocol.PING); out.writeLong(sent); out.flush(); }
+            try {
+                boolean enabled = keepTargetAwake;
+                if (enabled || keepAwakeSent) {
+                    out.writeByte(Protocol.KEEP_AWAKE); out.writeBoolean(enabled);
+                    keepAwakeSent = enabled;
+                }
+                out.writeByte(Protocol.PING); out.writeLong(sent); out.flush();
+            }
             catch (IOException e) { main.post(() -> { if (session == generation) disconnect("Target 상태 확인 연결이 종료되었습니다."); }); }
         });
     }

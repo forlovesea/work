@@ -30,6 +30,9 @@ public final class Directory {
                 if (response.has("error")) {
                     String error = response.getString("error");
                     if (error.equals("unauthorized")) throw new IOException("서버 접속 키가 올바르지 않습니다.");
+                    if (error.equals("wake_unsupported")) throw new IOException("Target 앱을 업데이트하세요.");
+                    if (error.equals("wake_busy")) throw new IOException("깨우기 요청 처리 중입니다. 잠시 후 다시 시도하세요.");
+                    if (error.equals("wake_timeout")) throw new IOException("Target 응답 없음 · 절전 또는 네트워크 상태를 확인하세요.");
                     if (error.equals("offline")) throw new IOException("Target이 오프라인입니다.");
                     throw new IOException("Target에 연결할 수 없습니다. 목록을 새로고침하세요.");
                 }

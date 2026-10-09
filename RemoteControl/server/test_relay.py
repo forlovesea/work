@@ -150,7 +150,7 @@ class DirectoryTests(unittest.IsolatedAsyncioTestCase):
     async def test_authenticated_list_states_and_no_secrets(self):
         await self.presence()
         _, _, response = await self.request("LIST")
-        self.assertEqual(response["devices"], [{"id": self.device, "name": "업무폰", "state": "waiting"}])
+        self.assertEqual(response["devices"], [{"id": self.device, "name": "업무폰", "state": "waiting", "wake": False}])
         target, _ = await self.share()
         _, _, response = await self.request("LIST")
         self.assertEqual(response["devices"][0]["state"], "ready")
@@ -163,7 +163,7 @@ class DirectoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response["devices"][0]["state"], "busy")
 
     async def test_unauthorized_operations_and_legacy_rejected(self):
-        for op in ("LIST", "PRESENCE", "SHARE", "CONNECT"):
+        for op in ("LIST", "PRESENCE", "SHARE", "CONNECT", "WAKE"):
             _, _, response = await self.request(op, key="bad")
             self.assertEqual(response, {"error": "unauthorized"})
         reader, writer = await asyncio.open_connection("127.0.0.1", self.port)
@@ -228,6 +228,57 @@ class DirectoryTests(unittest.IsolatedAsyncioTestCase):
         await self.presence()
         _, _, response = await self.request("CONNECT")
         self.assertEqual(response, {"error": "unavailable"})
+
+    async def wait_pending(self):
+        for _ in range(100):
+            if self.relay.devices[self.device]["pending"] is not None:
+                return
+            await asyncio.sleep(0.001)
+        self.fail("wake not queued")
+
+    async def test_wake_without_share_and_confirmed_results(self):
+        target, tw, _ = await self.request("PRESENCE", name="Target", wake=True)
+        for result in ("awake", "blocked"):
+            pending = asyncio.create_task(self.request("WAKE"))
+            await self.wait_pending()
+            _, _, duplicate = await self.request("WAKE")
+            self.assertEqual(duplicate, {"error": "wake_busy"})
+            tw.write(b"PING\n"); await tw.drain()
+            command = await asyncio.wait_for(target.readline(), 1)
+            self.assertTrue(command.startswith(b"WAKE "))
+            self.assertFalse(pending.done())
+            tw.write(b"WAKE_RESULT " + command.split()[1] + b" " + result.encode() + b"\n")
+            await tw.drain()
+            self.assertEqual((await pending)[2], {"status": result})
+            tw.write(b"PING\n"); await tw.drain()
+            self.assertEqual(await target.readline(), b"PONG\n")
+        self.assertFalse(self.relay.shares)
+
+    async def test_wake_offline_and_old_target(self):
+        self.assertEqual((await self.request("WAKE"))[2], {"error": "offline"})
+        await self.presence()
+        self.assertEqual((await self.request("WAKE"))[2], {"error": "wake_unsupported"})
+
+    async def test_wake_timeout_discards_undelivered_command(self):
+        self.relay.wake_timeout = 0.03
+        target, tw, _ = await self.request("PRESENCE", name="Target", wake=True)
+        self.assertEqual((await self.request("WAKE"))[2], {"error": "wake_timeout"})
+        tw.write(b"PING\n"); await tw.drain()
+        self.assertEqual(await target.readline(), b"PONG\n")
+        self.assertIsNone(self.relay.devices[self.device]["pending"])
+
+    async def test_wake_disconnect_and_invalid_ack(self):
+        for invalid_ack in (False, True):
+            target, tw, _ = await self.request("PRESENCE", name="Target", wake=True)
+            pending = asyncio.create_task(self.request("WAKE"))
+            await self.wait_pending()
+            if invalid_ack:
+                tw.write(b"PING\n"); await tw.drain()
+                await target.readline()
+                tw.write(b"WAKE_RESULT wrong awake\n"); await tw.drain()
+            else:
+                tw.close(); await tw.wait_closed()
+            self.assertEqual((await pending)[2], {"error": "offline"})
 
     async def test_share_timeout_returns_to_waiting(self):
         await self.presence()

@@ -49,6 +49,9 @@ public final class ServerSettings {
             return new String(cipher.doFinal(Base64.decode(prefs.getString("secret", ""), Base64.NO_WRAP)), java.nio.charset.StandardCharsets.UTF_8);
         } catch (Exception unavailable) { return ""; }
     }
+    public static void clearSecret(Context context) {
+        preferences(context).edit().remove("secret").remove("iv").apply();
+    }
     public static String[] endpoint(String address) {
         String[] parts = address.trim().split(":", -1);
         if (parts.length != 2 || !parts[0].matches("[a-zA-Z0-9.-]{1,253}") || !parts[1].matches("[0-9]{1,5}")

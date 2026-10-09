@@ -6,6 +6,9 @@ import android.media.projection.*;
 import android.os.*;
 import android.provider.Settings;
 import android.widget.*;
+import android.text.method.HideReturnsTransformationMethod;
+import android.text.method.PasswordTransformationMethod;
+import java.io.IOException;
 
 public final class MainActivity extends Activity {
     private TextView status, connectionStatus;
@@ -15,6 +18,7 @@ public final class MainActivity extends Activity {
     private String relayHost;
     private int relayPort;
     private boolean requestedControl;
+    private String pendingKeySave;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable refresh = new Runnable() {
         public void run() {
@@ -31,20 +35,38 @@ public final class MainActivity extends Activity {
     };
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        Diagnostics.installCrashHandler(this, "target");
+        Diagnostics.record(this, "target", "app started", null);
         LinearLayout page = Ui.page(this, "Target · 제어받는 기기", true);
+        Ui.headerAction(this, page, "진단 로그 공유", v -> shareDiagnostics());
         Ui.text(this, page, "LTE 또는 Wi-Fi에서 공인 중계서버에 연결합니다. 공유 중에는 화면이 상대방에게 표시됩니다.");
         serverAddress = new EditText(this); serverAddress.setSingleLine(true);
         serverAddress.setHint("중계서버 도메인:포트 (예: relay.example.com:55000)");
         serverAddress.setText(ServerSettings.preferences(this).getString("address", getPreferences(MODE_PRIVATE).getString("relay", "61.105.141.21:55000"))); page.addView(serverAddress);
+        LinearLayout keyRow = new LinearLayout(this);
+        keyRow.setOrientation(LinearLayout.HORIZONTAL);
         accessKey = new EditText(this); accessKey.setSingleLine(true); accessKey.setHint("서버 접속 키 (최초 설정)");
         accessKey.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        accessKey.setText(ServerSettings.secret(this)); page.addView(accessKey);
+        accessKey.setText(ServerSettings.secret(this));
+        keyRow.addView(accessKey, new LinearLayout.LayoutParams(0, -2, 1));
+        CheckBox showKey = new CheckBox(this); showKey.setText("표시");
+        showKey.setOnCheckedChangeListener((button, checked) -> setKeyVisibility(accessKey, checked));
+        keyRow.addView(showKey);
+        Ui.button(this, keyRow, "키 위치", v -> showAccessKeyHelp());
+        page.addView(keyRow);
+        LinearLayout keyFileRow = new LinearLayout(this);
+        keyFileRow.setOrientation(LinearLayout.HORIZONTAL);
+        addKeyFileButton(keyFileRow, "키 파일 저장", v -> saveKeyFile());
+        addKeyFileButton(keyFileRow, "키 파일 불러오기", v -> selectKeyFile(31));
+        addKeyFileButton(keyFileRow, "키파일 삭제", v -> selectKeyFile(32));
+        page.addView(keyFileRow);
         deviceName = new EditText(this); deviceName.setSingleLine(true); deviceName.setHint("Host 목록에 표시할 스마트폰 이름");
         deviceName.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(60)});
         deviceName.setText(ServerSettings.preferences(this).getString("name", Build.MODEL)); page.addView(deviceName);
         connectServer = Ui.button(this, page, "서버 연결 / 자동 재접속 시작", v -> {
             if (readEndpoint()) connectServer();
         });
+        Ui.text(this, page, "서버 연결 중에는 같은 접속 키를 가진 Host가 화면을 깨울 수 있습니다. 잠금 해제나 화면 공유 승인은 자동으로 수행하지 않습니다.");
         connectionStatus = Ui.text(this, page, ConnectionService.status);
         control = new CheckBox(this); control.setText("이번 세션에서 터치 제어 허용"); page.addView(control);
         Ui.button(this, page, "터치 제어 권한 설정", v -> new AlertDialog.Builder(this)
@@ -70,6 +92,69 @@ public final class MainActivity extends Activity {
     private void connectServer() {
         startForegroundService(new Intent(this, ConnectionService.class).putExtra("host", relayHost).putExtra("port", relayPort));
     }
+    private void addKeyFileButton(LinearLayout row, String label, android.view.View.OnClickListener listener) {
+        Button button = new Button(this);
+        button.setText(label);
+        button.setTextSize(11);
+        button.setMinWidth(0);
+        button.setPadding(2, 0, 2, 0);
+        button.setOnClickListener(listener);
+        row.addView(button, new LinearLayout.LayoutParams(0, -2, 1));
+    }
+    private void saveKeyFile() {
+        String key = accessKey.getText().toString().trim();
+        if (!key.matches("[0-9a-fA-F]{64}")) {
+            Toast.makeText(this, "서버 접속 키를 먼저 입력하세요. 64자리 hex 형식이어야 합니다.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        pendingKeySave = key;
+        launchKeyFilePicker(ServerKeyFile.createIntent(), 30);
+    }
+    private void selectKeyFile(int request) {
+        launchKeyFilePicker(ServerKeyFile.openIntent(), request);
+    }
+    private void launchKeyFilePicker(Intent intent, int request) {
+        try {
+            startActivityForResult(intent, request);
+        } catch (android.content.ActivityNotFoundException error) {
+            pendingKeySave = null;
+            Toast.makeText(this, "이 기기에 파일 선택 앱이 없어 키 파일을 처리할 수 없습니다.", Toast.LENGTH_LONG).show();
+        }
+    }
+    private void handleKeyFileResult(int request, int result, Intent data) {
+        if (request == 30 && result != RESULT_OK) pendingKeySave = null;
+        if (result != RESULT_OK || data == null || data.getData() == null) return;
+        android.net.Uri uri = data.getData();
+        try {
+            if (request == 30) {
+                if (pendingKeySave == null) throw new IOException("저장할 키가 없습니다. 다시 시도하세요.");
+                ServerKeyFile.write(this, uri, pendingKeySave);
+                pendingKeySave = null;
+                Toast.makeText(this, "공유 위치에 서버 접속 키를 저장했습니다.", Toast.LENGTH_LONG).show();
+            } else if (request == 31) {
+                accessKey.setText(ServerKeyFile.read(this, uri));
+                Toast.makeText(this, "서버 접속 키를 불러왔습니다. 서버 연결 시 앱에도 저장됩니다.", Toast.LENGTH_LONG).show();
+            } else if (request == 32) {
+                new AlertDialog.Builder(this)
+                        .setTitle("키 파일 삭제")
+                        .setMessage("선택한 파일을 삭제하고 이 앱에 저장된 서버 접속 키도 지울까요?")
+                        .setNegativeButton("취소", null)
+                        .setPositiveButton("삭제", (dialog, which) -> {
+                            try {
+                                ServerKeyFile.delete(this, uri);
+                                ServerSettings.clearSecret(this);
+                                accessKey.setText("");
+                                Toast.makeText(this, "키 파일과 앱에 저장된 키를 삭제했습니다.", Toast.LENGTH_LONG).show();
+                            } catch (IOException error) {
+                                Toast.makeText(this, "키 파일을 삭제할 수 없습니다: " + error.getMessage(), Toast.LENGTH_LONG).show();
+                            }
+                        }).show();
+            }
+        } catch (IOException error) {
+            pendingKeySave = null;
+            Toast.makeText(this, "키 파일 작업 실패: " + error.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
     private boolean readEndpoint() {
         String[] endpoint = serverAddress.getText().toString().trim().split(":", -1);
         try {
@@ -90,6 +175,26 @@ public final class MainActivity extends Activity {
         }
         return true;
     }
+    private void showAccessKeyHelp() {
+        new AlertDialog.Builder(this)
+                .setTitle("서버 접속 키 위치")
+                .setMessage("Ubuntu 서버의 기본 키 파일은 /etc/remotecontrol/access.key 입니다.\n\n서버에서 다음 명령으로 확인하세요:\n\nsudo cat /etc/remotecontrol/access.key\n\n서버 설정에서 --access-key-file 경로를 따로 지정했다면 그 파일을 확인하세요. 이 키는 Host와 Target에 동일하게 입력하며, 허용한 사용자에게만 안전하게 전달하세요.")
+                .setPositiveButton("확인", null).show();
+    }
+    private void shareDiagnostics() {
+        try {
+            Diagnostics.share(this);
+        } catch (IOException error) {
+            Toast.makeText(this, "진단 로그를 읽을 수 없습니다: " + error.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+    private static void setKeyVisibility(EditText field, boolean visible) {
+        int selection = field.getSelectionStart();
+        field.setTransformationMethod(visible
+                ? HideReturnsTransformationMethod.getInstance()
+                : PasswordTransformationMethod.getInstance());
+        field.setSelection(Math.max(0, Math.min(selection, field.length())));
+    }
     private void startSharing() {
         if (!readEndpoint()) return;
         if (!ConnectionService.active) connectServer();
@@ -108,6 +213,10 @@ public final class MainActivity extends Activity {
     }
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if (request >= 30 && request <= 32) {
+            handleKeyFileResult(request, result, data);
+            return;
+        }
         if (request == 10 && result == RESULT_OK && data != null)
             startForegroundService(new Intent(this, CaptureService.class).putExtra("result", result)
                     .putExtra("data", data).putExtra("control", requestedControl)

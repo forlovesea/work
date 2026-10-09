@@ -5,6 +5,8 @@ import android.graphics.*;
 import android.os.*;
 import android.view.MotionEvent;
 import android.widget.*;
+import android.text.method.HideReturnsTransformationMethod;
+import android.text.method.PasswordTransformationMethod;
 import java.io.*;
 import java.net.*;
 import java.util.concurrent.*;
@@ -17,6 +19,8 @@ public final class MainActivity extends Activity {
     private ScrollView deviceList;
     private android.view.View title;
     private boolean browsing, loading, fullScreen, smallView;
+    private String pendingKeySave;
+    private final java.util.Set<String> waking = new java.util.HashSet<>();
     private volatile int browseGeneration;
     private String listHost, listKey;
     private int listPort;
@@ -43,6 +47,7 @@ public final class MainActivity extends Activity {
     private final ThreadPoolExecutor commands = new ThreadPoolExecutor(1, 1, 0, TimeUnit.SECONDS,
             new ArrayBlockingQueue<>(8), new ThreadPoolExecutor.DiscardPolicy());
     private final AtomicBoolean pendingFrame = new AtomicBoolean();
+    private final AtomicBoolean firstFrameLogged = new AtomicBoolean();
     private volatile SSLSocket socket;
     private volatile SSLSocket relay;
     private volatile DataOutputStream output;
@@ -54,15 +59,33 @@ public final class MainActivity extends Activity {
     private boolean touching;
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        Diagnostics.installCrashHandler(this, "host");
+        Diagnostics.record(this, "host", "app started", null);
         page = Ui.page(this, "Host · 원격 스마트폰");
         title = page.getChildAt(0);
+        Ui.headerAction(this, page, "진단 로그 공유", v -> shareDiagnostics());
         settingsPanel = new LinearLayout(this); settingsPanel.setOrientation(LinearLayout.VERTICAL); page.addView(settingsPanel);
         serverAddress = new EditText(this); serverAddress.setSingleLine(true); serverAddress.setHint("중계서버 주소:포트");
         serverAddress.setText(ServerSettings.preferences(this).getString("address", "61.105.141.21:55000")); settingsPanel.addView(serverAddress);
+        LinearLayout keyRow = new LinearLayout(this);
+        keyRow.setOrientation(LinearLayout.HORIZONTAL);
         accessKey = new EditText(this); accessKey.setSingleLine(true); accessKey.setHint("서버 접속 키 (최초 설정)");
         accessKey.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        accessKey.setText(ServerSettings.secret(this)); settingsPanel.addView(accessKey);
+        accessKey.setText(ServerSettings.secret(this));
+        keyRow.addView(accessKey, new LinearLayout.LayoutParams(0, -2, 1));
+        CheckBox showKey = new CheckBox(this); showKey.setText("표시");
+        showKey.setOnCheckedChangeListener((button, checked) -> setKeyVisibility(accessKey, checked));
+        keyRow.addView(showKey);
+        Ui.button(this, keyRow, "키 위치", v -> showAccessKeyHelp());
+        settingsPanel.addView(keyRow);
+        LinearLayout keyFileRow = new LinearLayout(this);
+        keyFileRow.setOrientation(LinearLayout.HORIZONTAL);
+        addKeyFileButton(keyFileRow, "키 파일 저장", v -> saveKeyFile());
+        addKeyFileButton(keyFileRow, "키 파일 불러오기", v -> selectKeyFile(31));
+        addKeyFileButton(keyFileRow, "키파일 삭제", v -> selectKeyFile(32));
+        settingsPanel.addView(keyFileRow);
         connect = Ui.button(this, settingsPanel, "서버 연결 / 목록 새로고침", v -> browse());
+        Ui.button(this, settingsPanel, "프로그램 종료", v -> exitApplication());
         status = Ui.text(this, page, "서버에 연결하면 Target 목록이 표시됩니다.");
         deviceList = new ScrollView(this); deviceRows = new LinearLayout(this); deviceRows.setOrientation(LinearLayout.VERTICAL);
         deviceList.addView(deviceRows); page.addView(deviceList, new LinearLayout.LayoutParams(-1, dp(140)));
@@ -105,6 +128,77 @@ public final class MainActivity extends Activity {
         });
     }
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
+    private void addKeyFileButton(LinearLayout row, String label, android.view.View.OnClickListener listener) {
+        Button button = new Button(this);
+        button.setText(label);
+        button.setTextSize(11);
+        button.setMinWidth(0);
+        button.setPadding(2, 0, 2, 0);
+        button.setOnClickListener(listener);
+        row.addView(button, new LinearLayout.LayoutParams(0, -2, 1));
+    }
+    private void saveKeyFile() {
+        String key = accessKey.getText().toString().trim();
+        if (!key.matches("[0-9a-fA-F]{64}")) {
+            Toast.makeText(this, "서버 접속 키를 먼저 입력하세요. 64자리 hex 형식이어야 합니다.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        pendingKeySave = key;
+        launchKeyFilePicker(ServerKeyFile.createIntent(), 30);
+    }
+    private void selectKeyFile(int request) {
+        launchKeyFilePicker(ServerKeyFile.openIntent(), request);
+    }
+    private void launchKeyFilePicker(android.content.Intent intent, int request) {
+        try {
+            startActivityForResult(intent, request);
+        } catch (android.content.ActivityNotFoundException error) {
+            pendingKeySave = null;
+            Toast.makeText(this, "이 기기에 파일 선택 앱이 없어 키 파일을 처리할 수 없습니다.", Toast.LENGTH_LONG).show();
+        }
+    }
+    @Override protected void onActivityResult(int request, int result, android.content.Intent data) {
+        super.onActivityResult(request, result, data);
+        if (request == 30 && result != RESULT_OK) pendingKeySave = null;
+        if (result != RESULT_OK || data == null || data.getData() == null) return;
+        android.net.Uri uri = data.getData();
+        try {
+            if (request == 30) {
+                if (pendingKeySave == null) throw new IOException("저장할 키가 없습니다. 다시 시도하세요.");
+                ServerKeyFile.write(this, uri, pendingKeySave);
+                pendingKeySave = null;
+                Toast.makeText(this, "공유 위치에 서버 접속 키를 저장했습니다.", Toast.LENGTH_LONG).show();
+            } else if (request == 31) {
+                accessKey.setText(ServerKeyFile.read(this, uri));
+                Toast.makeText(this, "서버 접속 키를 불러왔습니다. 서버 연결 시 앱에도 저장됩니다.", Toast.LENGTH_LONG).show();
+            } else if (request == 32) {
+                new android.app.AlertDialog.Builder(this)
+                        .setTitle("키 파일 삭제")
+                        .setMessage("선택한 파일을 삭제하고 이 앱에 저장된 서버 접속 키도 지울까요?")
+                        .setNegativeButton("취소", null)
+                        .setPositiveButton("삭제", (dialog, which) -> {
+                            try {
+                                ServerKeyFile.delete(this, uri);
+                                ServerSettings.clearSecret(this);
+                                accessKey.setText("");
+                                Toast.makeText(this, "키 파일과 앱에 저장된 키를 삭제했습니다.", Toast.LENGTH_LONG).show();
+                            } catch (IOException error) {
+                                Toast.makeText(this, "키 파일을 삭제할 수 없습니다: " + error.getMessage(), Toast.LENGTH_LONG).show();
+                            }
+                        }).show();
+            }
+        } catch (IOException error) {
+            pendingKeySave = null;
+            Toast.makeText(this, "키 파일 작업 실패: " + error.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+    private void exitApplication() {
+        browsing = false;
+        browseGeneration++;
+        if (listing != null) try { listing.close(); } catch (IOException ignored) {}
+        disconnect("프로그램 종료", false);
+        finishAndRemoveTask();
+    }
     private void toolbarButton(LinearLayout row, String label, Runnable action) {
         Button button = new Button(this); button.setText(label); button.setTextSize(12); button.setMinWidth(0);
         row.addView(button, new LinearLayout.LayoutParams(0, -2, 1)); button.setOnClickListener(v -> action.run());
@@ -178,10 +272,15 @@ public final class MainActivity extends Activity {
                         Button device = Ui.button(this, deviceRows, name + " · " + label + " · " + id.substring(0, Math.min(6, id.length())),
                                 v -> connect(id, name, host, port, key));
                         device.setEnabled(state.equals("ready") && socket == null && relay == null);
+                        Button wake = Ui.button(this, deviceRows,
+                                item.optBoolean("wake") ? "화면 깨우기" : "깨우기 미지원 · 서버/Target 업데이트 필요",
+                                v -> wakeDevice(id, name, host, port, key, (Button) v));
+                        wake.setEnabled(item.optBoolean("wake") && !waking.contains(id));
                     }
                     if (socket == null && relay == null) status.setText("서버 연결됨 · Target " + rows.length() + "대 · 5초마다 갱신");
                 });
             } catch (Exception error) {
+                Diagnostics.record(this, "host", "relay directory listing failed", error);
                 main.post(() -> {
                     if (request != browseGeneration) return;
                     loading = false; deviceRows.removeAllViews();
@@ -191,14 +290,43 @@ public final class MainActivity extends Activity {
             }
         }, "host-directory").start();
     }
+    private void wakeDevice(String id, String name, String host, int port, String key, Button button) {
+        if (!waking.add(id)) return;
+        button.setEnabled(false);
+        Toast.makeText(this, name + " · 화면 깨우기 요청 중…", Toast.LENGTH_SHORT).show();
+        final int request = browseGeneration;
+        new Thread(() -> {
+            String message;
+            try (SSLSocket connection = Relay.socket()) {
+                org.json.JSONObject result = Directory.open(connection, host, port, Directory.request("WAKE", key, id));
+                message = "awake".equals(result.optString("status"))
+                        ? "화면 켜짐 확인 · 잠금 해제/공유 승인은 Target에서 확인하세요."
+                        : "화면을 켜지 못했습니다. Target의 화면 켜기 권한/기기 제한을 확인하세요.";
+            } catch (Exception error) {
+                message = "깨우기 실패: " + failureDetail(error);
+                Diagnostics.record(this, "host", "remote wake failed", error);
+            }
+            final String resultMessage = message;
+            main.post(() -> {
+                waking.remove(id);
+                if (request != browseGeneration || isFinishing() || isDestroyed()) return;
+                button.setEnabled(true);
+                new android.app.AlertDialog.Builder(this).setTitle(name + " · 화면 깨우기")
+                        .setMessage(resultMessage).setPositiveButton("확인", null).show();
+            });
+        }, "host-wake").start();
+    }
     private void connect(String deviceId, String deviceName, String host, int port, String key) {
         if (socket != null || relay != null || !connect.isEnabled()) return;
+        Diagnostics.record(this, "host", "Target connection requested", null);
         disconnect("연결 중…", false); connect.setEnabled(false);
+        firstFrameLogged.set(false); connect.setEnabled(false);
         health.connecting(); renderHealth();
         final int session = generation;
         new Thread(() -> {
             SSLSocket link = null;
             SSLSocket upstream = null;
+            String stage = "중계서버 연결";
             try {
                 upstream = Relay.socket();
                 synchronized (this) {
@@ -206,23 +334,36 @@ public final class MainActivity extends Activity {
                     relay = upstream;
                 }
                 org.json.JSONObject selected = Directory.open(upstream, host, port, Directory.request("CONNECT", key, deviceId));
+                Diagnostics.record(this, "host", "relay returned Target session metadata", null);
+                stage = "Target 세션 확인";
                 String fingerprint = selected.getString("fingerprint"), token = selected.getString("token");
                 if (!fingerprint.matches("[0-9a-fA-F]{64}") || !token.matches("[0-9a-f]{32}")) throw new IOException("잘못된 서버 응답");
                 if (!Relay.line(upstream).equals("PAIRED")) throw new IOException("Target 연결 실패");
+                Diagnostics.record(this, "host", "relay paired Target session", null);
                 upstream.setSoTimeout(0);
-                Socket tunnel = Relay.localTunnel(upstream);
+                Socket tunnel = Relay.localTunnel(upstream, (event, error) -> Diagnostics.record(this, "host", event, error));
                 try { link = (SSLSocket) Tls.client(fingerprint).getSocketFactory().createSocket(tunnel, "target", 0, true); }
                 catch (Exception e) { tunnel.close(); throw e; }
+                stage = "Target 인증서 확인";
                 synchronized (this) {
                     if (session != generation) return;
                     socket = link;
                 }
-                link.setEnabledProtocols(new String[]{"TLSv1.2"}); link.setSoTimeout(10000); link.startHandshake();
+                Tls.configure(link); link.setSoTimeout(30000);
+                Diagnostics.record(this, "host", "TLS handshake starting clientMode=" + link.getUseClientMode()
+                        + " protocols=" + java.util.Arrays.toString(link.getEnabledProtocols()), null);
+                Diagnostics.record(this, "host", "TLS enabled suites=" + java.util.Arrays.toString(link.getEnabledCipherSuites()), null);
+                link.startHandshake();
+                Diagnostics.record(this, "host", "Target TLS handshake completed: "
+                        + link.getSession().getProtocol() + " " + link.getSession().getCipherSuite(), null);
+                stage = "Target 세션 키 확인";
                 DataOutputStream out = new DataOutputStream(link.getOutputStream());
                 DataInputStream input = new DataInputStream(link.getInputStream());
                 out.writeUTF(token); out.flush();
-                if (!input.readBoolean()) throw new IOException("접속 키가 올바르지 않습니다.");
+                if (!input.readBoolean()) throw new IOException("Target 세션 키가 일치하지 않습니다.");
+                Diagnostics.record(this, "host", "Target session token accepted", null);
                 boolean allowed = input.readBoolean();
+                stage = "화면 스트림 수신";
                 synchronized (this) {
                     if (session != generation) return;
                     controlAllowed = allowed; output = out;
@@ -263,20 +404,89 @@ public final class MainActivity extends Activity {
                         main.post(() -> {
                             pendingFrame.set(false);
                             if (session != generation || bitmap == null) { if (bitmap != null) bitmap.recycle(); return; }
+                            if (firstFrameLogged.compareAndSet(false, true)) {
+                                Diagnostics.record(this, "host", "first screen frame decoded: " + bounds.outWidth + "x" + bounds.outHeight, null);
+                            }
                             current = bitmap; screen.setImageBitmap(bitmap); fitImage();
                             health.frame(); renderHealth();
                         });
                     }
                 }
             } catch (Exception e) {
-                String reason = e instanceof java.security.GeneralSecurityException || e instanceof javax.net.ssl.SSLException
-                        ? "Target 인증 실패. 서버와 앱 설정을 확인하세요." : "연결 종료: " + (e instanceof IOException ? e.getMessage() : e.getClass().getSimpleName());
+                Diagnostics.record(this, "host", "Target connection failed at " + stage, e);
+                String reason = connectionFailure(stage, e);
                 main.post(() -> { if (session == generation) disconnect(reason); });
             } finally {
                 if (link != null) try { link.close(); } catch (IOException ignored) {}
                 if (upstream != null) try { upstream.close(); } catch (IOException ignored) {}
             }
         }, "host-network").start();
+    }
+    private String connectionFailure(String stage, Exception error) {
+        if (stage.equals("중계서버 연결")) {
+            return "중계서버 TLS 연결 실패: " + failureDetail(error)
+                    + " 서버 주소와 TLS 인증서 설정을 확인하세요.";
+        }
+        if (stage.equals("Target 인증서 확인")) {
+            if (hasCauseMessage(error, "Target 인증서 불일치")) {
+                return "Target 인증서가 서버에 등록된 정보와 다릅니다. Target에서 화면 공유를 중지하고 다시 시작한 뒤 Host 목록을 새로고침하세요.";
+            }
+            if (hasCauseMessageIgnoreCase(error, "connection closed")) {
+                return "TLS 연결이 도중에 끊겼습니다. 양쪽 앱의 진단 로그를 공유해 주세요. 상세: "
+                        + failureDetail(error);
+            }
+            return "Target TLS 인증 실패: " + failureDetail(error)
+                    + " Host와 Target 앱을 같은 최신 버전으로 업데이트하고 Target 화면 공유를 다시 시작하세요.";
+        }
+        if (stage.equals("Target 세션 키 확인")) {
+            return "Target 세션 인증 실패: " + failureDetail(error)
+                    + " Target 화면 공유를 중지하고 다시 시작한 뒤 Host 목록을 새로고침하세요.";
+        }
+        if (stage.equals("Target 세션 확인")) {
+            return "중계서버에서 Target 세션을 연결하지 못했습니다: " + failureDetail(error)
+                    + " Target 화면 공유 상태를 확인하고 목록을 새로고침하세요.";
+        }
+        return "연결 중단 (" + stage + "): " + failureDetail(error);
+    }
+    private void showAccessKeyHelp() {
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("서버 접속 키 위치")
+                .setMessage("Ubuntu 서버의 기본 키 파일은 /etc/remotecontrol/access.key 입니다.\n\n서버에서 다음 명령으로 확인하세요:\n\nsudo cat /etc/remotecontrol/access.key\n\n서버 설정에서 --access-key-file 경로를 따로 지정했다면 그 파일을 확인하세요. 이 키는 Host와 Target에 동일하게 입력하며, 허용한 사용자에게만 안전하게 전달하세요.")
+                .setPositiveButton("확인", null).show();
+    }
+    private void shareDiagnostics() {
+        try {
+            Diagnostics.share(this);
+        } catch (IOException error) {
+            Toast.makeText(this, "진단 로그를 읽을 수 없습니다: " + error.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+    private static void setKeyVisibility(EditText field, boolean visible) {
+        int selection = field.getSelectionStart();
+        field.setTransformationMethod(visible
+                ? HideReturnsTransformationMethod.getInstance()
+                : PasswordTransformationMethod.getInstance());
+        field.setSelection(Math.max(0, Math.min(selection, field.length())));
+    }
+    private static boolean hasCauseMessage(Throwable error, String expected) {
+        for (Throwable cause = error; cause != null; cause = cause.getCause()) {
+            if (cause.getMessage() != null && cause.getMessage().contains(expected)) return true;
+        }
+        return false;
+    }
+    private static boolean hasCauseMessageIgnoreCase(Throwable error, String expected) {
+        for (Throwable cause = error; cause != null; cause = cause.getCause()) {
+            if (cause.getMessage() != null && cause.getMessage().toLowerCase(java.util.Locale.ROOT)
+                    .contains(expected.toLowerCase(java.util.Locale.ROOT))) return true;
+        }
+        return false;
+    }
+    private static String failureDetail(Exception error) {
+        for (Throwable cause = error; cause != null; cause = cause.getCause()) {
+            String message = cause.getMessage();
+            if (message != null && !message.trim().isEmpty()) return message;
+        }
+        return error.getClass().getSimpleName();
     }
     private void command(int kind, float x1, float y1, float x2, float y2, int duration) {
         final int session = generation;
@@ -338,6 +548,8 @@ public final class MainActivity extends Activity {
     }
     private void disconnect(String message) { disconnect(message, true); }
     private synchronized void disconnect(String message, boolean error) {
+        Diagnostics.record(this, "host", "application disconnect requested: " + message, null);
+        if (error) Diagnostics.record(this, "host", "connection disconnected: " + message, null);
         generation++; controlAllowed = false; output = null; commands.getQueue().clear();
         health.disconnected(error); renderHealth();
         try { if (socket != null) socket.close(); } catch (IOException ignored) {}

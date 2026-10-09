@@ -26,6 +26,23 @@ public final class Ui {
         } else activity.setContentView(layout);
         TextView heading = text(activity, layout, title);
         heading.setTextSize(25);
+        try {
+            String version = activity.getPackageManager().getPackageInfo(activity.getPackageName(), 0).versionName;
+            if (version != null && !version.isEmpty()) {
+                int separator = title.indexOf(" \u00b7 ");
+                int insertAt = separator >= 0 ? separator : title.length();
+                android.text.SpannableStringBuilder label = new android.text.SpannableStringBuilder(title);
+                String suffix = "\u00a0v" + version;
+                label.insert(insertAt, suffix);
+                label.setSpan(new android.text.style.RelativeSizeSpan(0.56f), insertAt, insertAt + suffix.length(),
+                        android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                label.setSpan(new android.text.style.ForegroundColorSpan(Color.rgb(85, 99, 115)),
+                        insertAt, insertAt + suffix.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                heading.setText(label);
+            }
+        } catch (android.content.pm.PackageManager.NameNotFoundException ignored) {
+            // Keep the title usable if package metadata is unavailable.
+        }
         return layout;
     }
     public static TextView text(Activity a, LinearLayout parent, String value) {
@@ -35,5 +52,20 @@ public final class Ui {
     public static Button button(Activity a, LinearLayout parent, String label, View.OnClickListener click) {
         Button button = new Button(a); button.setText(label); button.setOnClickListener(click);
         parent.addView(button); return button;
+    }
+    public static void headerAction(Activity activity, LinearLayout page, String label, View.OnClickListener click) {
+        TextView title = (TextView) page.getChildAt(0);
+        page.removeViewAt(0);
+        LinearLayout header = new LinearLayout(activity);
+        header.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        header.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+        Button action = new Button(activity);
+        action.setText(label);
+        action.setTextSize(12);
+        action.setMinWidth(0);
+        action.setPadding(8, 0, 8, 0);
+        action.setOnClickListener(click);
+        header.addView(action);
+        page.addView(header, 0);
     }
 }

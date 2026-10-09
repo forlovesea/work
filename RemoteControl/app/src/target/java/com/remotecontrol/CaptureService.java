@@ -37,6 +37,8 @@ public final class CaptureService extends Service {
     private String token;
     private Thread networkThread;
     private String room;
+    private boolean frameErrorLogged;
+    private boolean firstFrameSent;
     private volatile long lastIncoming;
     private final Runnable connectionWatch = new Runnable() {
         @Override public void run() {
@@ -45,14 +47,10 @@ public final class CaptureService extends Service {
             main.postDelayed(this, 2000);
         }
     };
-    private final BroadcastReceiver screenOff = new BroadcastReceiver() {
-        public void onReceive(Context c, Intent i) { finish("화면이 잠겨 공유를 중지했습니다."); }
-    };
     boolean canControl() { return running && connected && allowControl; }
     @Override public IBinder onBind(Intent intent) { return null; }
     @Override public void onCreate() {
         super.onCreate(); instance = this;
-        registerReceiver(screenOff, new IntentFilter(Intent.ACTION_SCREEN_OFF));
     }
     @Override public int onStartCommand(Intent intent, int flags, int id) {
         if (intent != null && "STOP".equals(intent.getAction())) { finish("공유를 중지했습니다."); return START_NOT_STICKY; }
@@ -68,12 +66,16 @@ public final class CaptureService extends Service {
         else startForeground(1, notice);
         if (intent == null || !intent.hasExtra("data")) { finish("공유 권한이 필요합니다."); return START_NOT_STICKY; }
         running = true; status = "보안 연결 준비 중…"; allowControl = intent.getBooleanExtra("control", false);
+        Diagnostics.record(this, "target", "screen sharing service started", null);
         relayHost = intent.getStringExtra("relayHost"); relayPort = intent.getIntExtra("relayPort", Protocol.DEFAULT_RELAY_PORT);
         try {
             MediaProjectionManager manager = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
             projection = manager.getMediaProjection(intent.getIntExtra("result", 0), intent.getParcelableExtra("data"));
             projection.registerCallback(new MediaProjection.Callback() {
-                @Override public void onStop() { finish("시스템에서 화면 공유를 종료했습니다."); }
+                @Override public void onStop() {
+                    Diagnostics.record(CaptureService.this, "target", "system revoked screen capture; relay presence remains independent", null);
+                    finish("시스템이 화면 공유를 중지했습니다. 중계서버 연결은 유지됩니다. 잠금 해제 후 화면 공유를 다시 시작하세요.");
+                }
                 @Override public void onCapturedContentResize(int w, int h) {
                     if (w != screenWidth || h != screenHeight) finish("화면 크기가 변경되었습니다. 공유를 다시 시작하세요.");
                 }
@@ -88,6 +90,8 @@ public final class CaptureService extends Service {
             reader.setOnImageAvailableListener(this::sendFrame, new Handler(frames.getLooper()));
             display = projection.createVirtualDisplay("RemoteControl", width, height, metrics.densityDpi,
                     DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, reader.getSurface(), null, main);
+            Diagnostics.record(this, "target", "screen capture initialized: " + width + "x" + height
+                    + " source=" + screenWidth + "x" + screenHeight, null);
             byte[] random = new byte[16]; new SecureRandom().nextBytes(random);
             StringBuilder secret = new StringBuilder();
             for (byte b : random) secret.append(String.format(Locale.ROOT, "%02x", b & 255));
@@ -96,11 +100,15 @@ public final class CaptureService extends Service {
             networkThread = new Thread(this::serve, "target-network");
             networkThread.start();
             main.post(connectionWatch);
-        } catch (Exception e) { finish("공유 시작 실패: " + e.getClass().getSimpleName()); }
+        } catch (Exception e) {
+            Diagnostics.record(this, "target", "screen sharing setup failed", e);
+            finish("공유 시작 실패: " + e.getClass().getSimpleName());
+        }
         return START_NOT_STICKY;
     }
     private void serve() {
         while (running) {
+            status = "보안 연결 준비 중…";
             serveOnce();
             boolean used = connected;
             connected = false; output = null;
@@ -111,42 +119,69 @@ public final class CaptureService extends Service {
                 token = UUID.randomUUID().toString().replace("-", "");
             }
             invitation = "";
-            status = "중계서버 재접속 대기 · 인터넷 복구 시 자동 연결";
+            if (!status.startsWith("Target TLS 핸드셰이크 실패: ")
+                    && !status.startsWith("Target 보안 연결 실패: ")
+                    && !status.startsWith("화면 프레임 생성 실패 ")
+                    && !status.startsWith("화면 전송 연결 종료: ")) {
+                status = "중계서버 재접속 대기 · 인터넷 복구 시 자동 연결";
+            }
             try { Thread.sleep(3000); }
             catch (InterruptedException stopped) { break; }
         }
     }
     private void closeConnections() {
-        try { if (server != null) server.close(); } catch (IOException ignored) {}
-        try { if (client != null) client.close(); } catch (IOException ignored) {}
-        try { if (relay != null) relay.close(); } catch (IOException ignored) {}
+        Diagnostics.record(this, "target", "application closing connections running=" + running + " connected=" + connected, null);
+        SSLServerSocket closingServer = server;
+        SSLSocket closingClient = client;
+        SSLSocket closingRelay = relay;
+        Thread closer = new Thread(() -> {
+            try { if (closingServer != null) closingServer.close(); } catch (IOException ignored) {}
+            try { if (closingClient != null) closingClient.close(); } catch (IOException ignored) {}
+            try { if (closingRelay != null) closingRelay.close(); } catch (IOException ignored) {}
+        }, "target-close");
+        closer.start();
     }
     private void serveOnce() {
+        String stage = "Target identity initialization";
         try {
-            Identity identity = new Identity();
+            Identity identity = new Identity(this);
+            stage = "local TLS listener setup";
             SSLServerSocket listener = (SSLServerSocket) identity.context.getServerSocketFactory().createServerSocket();
             server = listener;
             if (!running) { listener.close(); return; }
             listener.bind(new InetSocketAddress("127.0.0.1", 0));
-            listener.setEnabledProtocols(new String[]{"TLSv1.2"});
+            Tls.configure(listener, "EC");
+            Diagnostics.record(this, "target", "Target identity ready: ECDSA certificate", null);
+            stage = "relay SHARE registration";
             SSLSocket upstream = Relay.socket(); relay = upstream;
             if (!running) { upstream.close(); return; }
             Directory.open(upstream, relayHost, relayPort,
                     Directory.request("SHARE", ServerSettings.secret(this), ServerSettings.deviceId(this))
                             .put("fingerprint", identity.fingerprint).put("token", token));
             if (!running) return;
+            Diagnostics.record(this, "target", "relay accepted SHARE registration", null);
             invitation = "";
             status = "중계서버 연결됨 · Host 연결 대기";
             upstream.setSoTimeout(60000);
             if (!Relay.line(upstream).equals("PAIRED")) throw new IOException("Relay pairing failed");
+            Diagnostics.record(this, "target", "relay paired Host session", null);
             upstream.setSoTimeout(0);
             Socket local = new Socket("127.0.0.1", listener.getLocalPort());
-            Relay.bridge(upstream, local);
+            Relay.bridge(upstream, local, (event, error) -> Diagnostics.record(this, "target", event, error));
             while (running && !connected) {
                 SSLSocket socket = (SSLSocket) listener.accept(); client = socket;
                 if (!running) { socket.close(); return; }
+                boolean handshakeComplete = false;
                 try {
-                    socket.setSoTimeout(10000); socket.startHandshake();
+                    stage = "Target TLS handshake";
+                    socket.setSoTimeout(30000); Tls.configure(socket, "EC");
+                    Diagnostics.record(this, "target", "TLS handshake starting clientMode=" + socket.getUseClientMode()
+                            + " protocols=" + Arrays.toString(socket.getEnabledProtocols()), null);
+                    Diagnostics.record(this, "target", "TLS enabled suites=" + Arrays.toString(socket.getEnabledCipherSuites()), null);
+                    socket.startHandshake();
+                    handshakeComplete = true;
+                    Diagnostics.record(this, "target", "Host TLS handshake completed: "
+                            + socket.getSession().getProtocol() + " " + socket.getSession().getCipherSuite(), null);
                     DataInputStream input = new DataInputStream(socket.getInputStream());
                     DataOutputStream out = new DataOutputStream(socket.getOutputStream());
                     String supplied = input.readUTF();
@@ -154,6 +189,7 @@ public final class CaptureService extends Service {
                     out.writeBoolean(match); out.flush();
                     if (!match) { socket.close(); finish("접속 인증 실패. 새 공유 세션을 시작하세요."); return; }
                     out.writeBoolean(allowControl); out.flush();
+                    Diagnostics.record(this, "target", "Host session token accepted", null);
                     lastIncoming = SystemClock.elapsedRealtime();
                     connected = true; invitation = ""; output = out;
                     listener.close(); socket.setSoTimeout(15000);
@@ -182,35 +218,91 @@ public final class CaptureService extends Service {
                         if (now - lastCommand >= 60) { ControlService.command(kind, x1, y1, x2, y2, duration); lastCommand = now; }
                     }
                 } catch (IOException e) {
+                    if (!status.startsWith("화면 전송 연결 종료: ")) {
+                        Diagnostics.record(this, "target", handshakeComplete
+                                ? "Host session ended"
+                                : "TLS handshake failed; suites=" + Arrays.toString(socket.getEnabledCipherSuites()), e);
+                        status = handshakeComplete
+                                ? "Host 연결 종료: " + failureDetail(e)
+                                : "Target TLS 핸드셰이크 실패: " + failureDetail(e);
+                    }
                     socket.close();
                     return;
                 }
             }
         } catch (Exception e) {
-            if (running) status = "중계서버 재접속 중: " + e.getClass().getSimpleName();
+            if (running) {
+                Diagnostics.record(this, "target", "screen sharing failed at " + stage, e);
+                status = "Target 보안 연결 실패: " + failureDetail(e);
+            }
         }
+    }
+    private static String failureDetail(Throwable error) {
+        for (Throwable cause = error; cause != null; cause = cause.getCause()) {
+            String message = cause.getMessage();
+            if (message != null && !message.trim().isEmpty()) return message;
+        }
+        return error.getClass().getSimpleName();
     }
     private void sendFrame(ImageReader source) {
         SSLSocket sendingClient = client;
         DataOutputStream sendingOutput = output;
+        Bitmap bitmap = null;
+        byte[] frame;
+        int frameWidth = 0, frameHeight = 0;
         try (Image image = source.acquireLatestImage()) {
             if (image == null || !running || !connected || output == null) return;
             long now = SystemClock.elapsedRealtime();
             if (now - lastFrame < 200) return;
             lastFrame = now;
             Image.Plane plane = image.getPlanes()[0];
-            int paddedWidth = plane.getRowStride() / plane.getPixelStride();
-            Bitmap padded = Bitmap.createBitmap(paddedWidth, image.getHeight(), Bitmap.Config.ARGB_8888);
-            padded.copyPixelsFromBuffer(plane.getBuffer());
-            Bitmap cropped = Bitmap.createBitmap(padded, 0, 0, image.getWidth(), image.getHeight());
-            ByteArrayOutputStream bytes = new ByteArrayOutputStream(); cropped.compress(Bitmap.CompressFormat.JPEG, 60, bytes);
-            if (cropped != padded) cropped.recycle(); padded.recycle();
-            if (bytes.size() > Protocol.MAX_FRAME) return;
-            DataOutputStream out = sendingOutput;
-            if (out != null && running && out == output) {
-                synchronized (out) { out.writeInt(bytes.size()); bytes.writeTo(out); out.flush(); }
+            int width = image.getWidth(), height = image.getHeight();
+            frameWidth = width;
+            frameHeight = height;
+            byte[] compact = FramePixels.compactRgba(plane.getBuffer().duplicate(), width, height,
+                    plane.getRowStride(), plane.getPixelStride());
+            bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+            bitmap.copyPixelsFromBuffer(java.nio.ByteBuffer.wrap(compact));
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            if (!bitmap.compress(Bitmap.CompressFormat.JPEG, 60, bytes)) {
+                throw new IOException("JPEG 화면 프레임 인코딩 실패");
+            }
+            frame = bytes.toByteArray();
+            if (frame.length == 0 || frame.length > Protocol.MAX_FRAME) {
+                throw new IOException("화면 프레임 크기가 허용 범위를 벗어났습니다.");
             }
         } catch (Exception e) {
+            if (running && connected) {
+                status = "화면 프레임 생성 실패 (연결 유지): " + failureDetail(e);
+                if (!frameErrorLogged) {
+                    Diagnostics.record(this, "target", "screen frame creation failed; session kept alive", e);
+                    frameErrorLogged = true;
+                }
+            }
+            return;
+        } finally {
+            if (bitmap != null) bitmap.recycle();
+        }
+        DataOutputStream out = sendingOutput;
+        if (out == null || !running || !connected || out != output) return;
+        try {
+            synchronized (out) {
+                out.writeInt(frame.length);
+                out.write(frame);
+                out.flush();
+            }
+            if (status.startsWith("화면 프레임 생성 실패 ")) {
+                status = allowControl ? "Host 연결됨 · 화면 공유 및 터치 제어 중"
+                        : "Host 연결됨 · 화면 보기 전용";
+            }
+            if (!firstFrameSent) {
+                Diagnostics.record(this, "target", "first screen frame sent: " + frameWidth + "x" + frameHeight, null);
+                firstFrameSent = true;
+            }
+            frameErrorLogged = false;
+        } catch (IOException e) {
+            if (running && connected) status = "화면 전송 연결 종료: " + failureDetail(e);
+            Diagnostics.record(this, "target", "screen frame write failed", e);
             try { if (sendingClient != null) sendingClient.close(); } catch (IOException ignored) {}
         }
     }
@@ -230,14 +322,13 @@ public final class CaptureService extends Service {
         running = false; connected = false; allowControl = false; invitation = ""; output = null;
         if (networkThread != null) networkThread.interrupt();
         main.removeCallbacksAndMessages(null);
-        try { if (server != null) server.close(); } catch (IOException ignored) {}
-        try { if (client != null) client.close(); } catch (IOException ignored) {}
-        try { if (relay != null) relay.close(); } catch (IOException ignored) {}
+        closeConnections();
         if (display != null) display.release();
         if (reader != null) reader.close();
         if (projection != null) projection.stop();
         if (frames != null) frames.quitSafely();
-        unregisterReceiver(screenOff); instance = null;
+        instance = null;
+        Diagnostics.record(this, "target", "screen sharing service stopped: " + status, null);
         if (status.startsWith("Host") || status.startsWith("보안")) status = "공유를 중지했습니다.";
         stopForeground(STOP_FOREGROUND_REMOVE); super.onDestroy();
     }

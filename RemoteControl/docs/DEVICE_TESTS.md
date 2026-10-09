@@ -51,3 +51,27 @@
 - [ ] 30분 제한과 연속 재접속에서 메모리/소켓/화면 공유 리소스가 정리된다.
 
 검증 시 OS/제조사/기기명/결과를 기록합니다. 접속 키나 개인 화면은 로그에 넣지 않습니다.
+
+
+## v0.4.3 TLS Keystore regression (device verification pending)
+
+- [ ] Upgrade an existing Target installation with a v3 identity. Restart sharing and confirm `TLS identity=v4 authorizedDigests=` includes `NONE` and `SHA-256`.
+- [ ] Confirm `TLS signing self-check algorithm=NONEwithECDSA verified=true` before SHARE registration.
+- [ ] On SM-F711N / Android 15 and SM-A235N / Android 14, confirm both handshake-completed events, session token acceptance, and first frame receipt.
+- [ ] Restart sharing and reconnect twice; confirm the v4 identity remains usable.
+- [ ] Check a fresh Target installation as well as an upgrade.
+
+The previous SHA256withECDSA self-check did not exercise Conscrypt's prehashed NONEwithECDSA signing path. v4 authorizes DIGEST_NONE and retains SHA-256 for certificate signing. Old TLS aliases are retired only after the new signing check succeeds. Private keys remain in AndroidKeyStore and certificate pinning remains enabled.
+
+References: [Android key digest authorizations](https://developer.android.com/reference/android/security/keystore/KeyGenParameterSpec.Builder#setDigests(java.lang.String...)), [Android 35 Conscrypt signing callback](https://android.googlesource.com/platform/prebuilts/fullsdk/sources/+/refs/heads/androidx-constraintlayout-release/android-35/com/android/org/conscrypt/CryptoUpcalls.java).
+
+## v0.4.4 원격 화면 깨우기 (실기기 검증 대기)
+
+- [ ] Target 서버 연결 후 공유를 시작하지 않고 화면을 끈다. Host의 화면 깨우기로 화면 켜짐 확인을 받는다.
+- [ ] 화면이 이미 켜진 경우에도 정상 응답하며 잠금 해제/공유 승인이 자동 실행되지 않는다.
+- [ ] PIN 잠금 상태에서 화면만 켜지고 잠금이 유지된다.
+- [ ] 공유 중 화면을 끈 뒤 깨운다. OS가 공유를 종료했다면 Target에서 재승인이 필요하다.
+- [ ] 깊은 절전/네트워크 차단 시 성공으로 표시하지 않는다. 만료된 미전달 요청은 재접속 후 실행되지 않는다.
+- [ ] 연결 종료/앱 종료 후 원격 깨우기가 불가능하다.
+- [ ] 구버전 Target 또는 서버에서는 미지원 안내가 표시된다.
+- [ ] 두 Host의 동시 요청, 화면 켜기 권한 제한, Samsung Android 15 및 지원 OS별 동작을 확인한다.

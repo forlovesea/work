@@ -78,3 +78,17 @@ sudo journalctl -u remotecontrol-relay -f
 서버가 지문과 세션 키를 전달하므로 서버와 관리자를 신뢰하는 구조입니다. 공통 키를 아는 앱은 서로 신뢰하는 한 그룹으로 취급합니다. 계정별 권한, 사용자별 트래픽 정책, 강력한 DDoS 방어는 구현하지 않았습니다. 기존 APK는 새 서버와 호환되지 않으므로 두 앱도 함께 업데이트하세요.
 
 참고: [Python asyncio streams](https://docs.python.org/3/library/asyncio-stream.html).
+
+## v0.4.4 화면 깨우기 업데이트
+
+Host의 화면 깨우기는 이 버전의 `relay.py`가 필요합니다. 서버에 GitHub 저장소를 받아 둔 경우 저장소 루트에서 다음 명령으로 업데이트하세요.
+
+```sh
+git pull --ff-only origin main
+cd RemoteControl/server
+sudo sh update-server.sh
+```
+
+저장소가 없다면 먼저 `git clone https://github.com/forlovesea/work.git`으로 받은 뒤 `work/RemoteControl/server`로 이동하세요. `update-server.sh`는 기존 서비스가 설치된 서버용입니다. 최초 설치는 위 설치 절차를 따르세요. 기존 인증서, 접속 키, 서비스 인수를 유지합니다. Host와 Target도 v0.4.4로 업데이트하세요.
+
+인증된 WAKE 요청은 해당 Target의 다음 PING 응답에 요청 ID와 함께 전달됩니다. Target의 화면 상태 응답을 최대 12초 기다리고, 중복 요청은 거부하며 미전달 만료 요청은 폐기합니다. 기존 Target에는 WAKE를 전달하지 않습니다. 서버가 받는 awake는 Target이 보고한 화면 활성 상태이며 잠금 해제나 화면 공유의 성공을 의미하지 않습니다.

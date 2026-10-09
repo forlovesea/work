@@ -7,6 +7,9 @@ import javax.net.ssl.*;
 
 /** TLS relay transport. Screen/control traffic inside this tunnel has its own pinned TLS session. */
 public final class Relay {
+    public interface Trace { void record(String event, Throwable error); }
+    private static final Trace SILENT = (event, error) -> {};
+    private static final java.util.concurrent.atomic.AtomicLong BRIDGES = new java.util.concurrent.atomic.AtomicLong();
     public static SSLSocket socket() throws IOException {
         return (SSLSocket) SSLSocketFactory.getDefault().createSocket();
     }
@@ -32,23 +35,50 @@ public final class Relay {
         throw new IOException("Invalid relay response");
     }
     public static Socket localTunnel(Socket relay) throws IOException {
+        return localTunnel(relay, SILENT);
+    }
+    public static Socket localTunnel(Socket relay, Trace trace) throws IOException {
         try (ServerSocket listener = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))) {
             Socket client = new Socket("127.0.0.1", listener.getLocalPort());
-            try { Socket peer = listener.accept(); bridge(relay, peer); return client; }
+            try { Socket peer = listener.accept(); bridge(relay, peer, trace); return client; }
             catch (IOException e) { client.close(); throw e; }
         }
     }
     public static void bridge(Socket left, Socket right) {
-        copy(left, right); copy(right, left);
+        bridge(left, right, SILENT);
     }
-    private static void copy(Socket from, Socket to) {
+    public static void bridge(Socket left, Socket right, Trace trace) {
+        String id = "bridge=" + BRIDGES.incrementAndGet();
+        java.util.concurrent.atomic.AtomicBoolean ended = new java.util.concurrent.atomic.AtomicBoolean();
+        trace.record(id + " started", null);
+        copy(left, right, trace, id + " direction=relay-to-local", ended);
+        copy(right, left, trace, id + " direction=local-to-relay", ended);
+    }
+    private static void copy(Socket from, Socket to, Trace trace, String label,
+                             java.util.concurrent.atomic.AtomicBoolean ended) {
         new Thread(() -> {
+            long started = System.nanoTime(), received = 0, forwarded = 0;
+            String phase = "open-streams", reason = "EOF";
+            IOException failure = null;
             try {
                 byte[] buffer = new byte[16384]; int size;
                 InputStream input = from.getInputStream(); OutputStream output = to.getOutputStream();
-                while ((size = input.read(buffer)) != -1) { output.write(buffer, 0, size); output.flush(); }
-            } catch (IOException ignored) {
+                while (true) {
+                    phase = "read"; size = input.read(buffer);
+                    if (size == -1) break;
+                    received += size;
+                    if (received == size) trace.record(label + " first-read bytes=" + size, null);
+                    phase = "write"; output.write(buffer, 0, size);
+                    phase = "flush"; output.flush(); forwarded += size;
+                }
+            } catch (IOException error) {
+                reason = "IOException"; failure = error;
             } finally {
+                boolean first = ended.compareAndSet(false, true);
+                trace.record(label + " ended first=" + first + " reason=" + reason + " phase=" + phase
+                        + " received=" + received + " forwarded=" + forwarded
+                        + " elapsedMs=" + (System.nanoTime() - started) / 1000000
+                        + " fromClosed=" + from.isClosed() + " toClosed=" + to.isClosed(), failure);
                 try { from.close(); } catch (IOException ignored) {}
                 try { to.close(); } catch (IOException ignored) {}
             }

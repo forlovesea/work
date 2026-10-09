@@ -8,6 +8,7 @@ import re
 import ssl
 import json
 import hmac
+import secrets
 from pathlib import Path
 
 DEFAULT_PORT = 55000
@@ -35,6 +36,7 @@ class Relay:
         self.presence_timeout = presence_timeout
         self.devices = {}
         self.shares = {}
+        self.wake_timeout = 12
 
     async def json_send(self, writer, value):
         await self.send(writer, json.dumps(value, ensure_ascii=True, separators=(",", ":")))
@@ -54,7 +56,8 @@ class Relay:
             for device_id, device in self.devices.items():
                 share = self.shares.get(device_id)
                 state = "waiting" if share is None else "busy" if share["pair"].done() else "ready"
-                result.append({"id": device_id, "name": device["name"], "state": state})
+                result.append({"id": device_id, "name": device["name"], "state": state,
+                               "wake": device["wake"]})
             await self.json_send(writer, {"devices": result})
             return
         device_id = request.get("id", "")
@@ -64,7 +67,8 @@ class Relay:
             name = request.get("name", "")
             if not isinstance(name, str) or not 1 <= len(name.strip()) <= 60 or any(ord(c) < 32 for c in name):
                 raise ValueError("name")
-            device = {"name": name.strip(), "writer": writer}
+            device = {"name": name.strip(), "writer": writer,
+                      "wake": request.get("wake") is True, "pending": None}
             old = self.devices.get(device_id)
             self.devices[device_id] = device
             if old:
@@ -75,13 +79,47 @@ class Relay:
                     beat = await asyncio.wait_for(reader.readline(), self.presence_timeout)
                     if beat != b"PING\n":
                         return
-                    await self.send(writer, "PONG")
+                    pending = device["pending"]
+                    if pending is None:
+                        await self.send(writer, "PONG")
+                        continue
+                    await self.send(writer, "WAKE " + pending[0])
+                    answer = await asyncio.wait_for(reader.readline(), 5)
+                    match = re.fullmatch(rb"WAKE_RESULT ([0-9a-f]{32}) (awake|blocked)\n", answer)
+                    if not match or match[1].decode() != pending[0]:
+                        return
+                    if not pending[1].done():
+                        pending[1].set_result({"status": match[2].decode()})
             finally:
+                pending = device["pending"]
+                if pending is not None and not pending[1].done():
+                    pending[1].set_result({"error": "offline"})
                 if self.devices.get(device_id) is device:
                     self.devices.pop(device_id, None)
             return
         if device_id not in self.devices:
             await self.json_send(writer, {"error": "offline"})
+            return
+        if operation == "WAKE":
+            device = self.devices[device_id]
+            if not device["wake"]:
+                await self.json_send(writer, {"error": "wake_unsupported"})
+                return
+            if device["pending"] is not None:
+                await self.json_send(writer, {"error": "wake_busy"})
+                return
+            pending = (secrets.token_hex(16), asyncio.get_running_loop().create_future())
+            device["pending"] = pending
+            try:
+                try:
+                    result = await asyncio.wait_for(asyncio.shield(pending[1]), self.wake_timeout)
+                except asyncio.TimeoutError:
+                    result = {"error": "wake_timeout"}
+                await self.json_send(writer, result)
+            finally:
+                if device["pending"] is pending:
+                    device["pending"] = None
+                pending[1].cancel()
             return
         if operation == "SHARE":
             fingerprint, token = request.get("fingerprint", ""), request.get("token", "")

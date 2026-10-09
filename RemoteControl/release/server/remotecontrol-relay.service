@@ -1,0 +1,23 @@
+[Unit]
+Description=RemoteControl TLS relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=remotecontrol
+Group=remotecontrol
+WorkingDirectory=/opt/remotecontrol
+ExecStart=/usr/bin/python3 /opt/remotecontrol/relay.py --port 55000 --cert /etc/remotecontrol/fullchain.pem --key /etc/remotecontrol/privkey.pem
+Restart=on-failure
+RestartSec=3
+CapabilityBoundingSet=
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target

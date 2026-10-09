@@ -1,0 +1,12 @@
+RemoteControl v0.4.5 / versionCode 9
+Package date: 2026-10-10 (Asia/Seoul)
+Source commit: e2161877668793ec073deaf6f8f4103111ebbb97
+APK signing: Android Debug, APK Signature Scheme v2 verified
+Signing certificate SHA-256: e77ae18940a64d522c6485cde6a90f9c06bc67ef213c4f6c0005b062ac43368c
+Android minimum: 8.0 / API 26
+Server target: Ubuntu 20.04+, Python 3.8+, systemd
+Server protocol tests: 22 passed on packaged source
+Installer: Python 3.8 syntax, CLI help, port boundaries, atomic-write/refusal behavior checked
+Ubuntu install/systemd execution and physical Android wake-lock behavior: NOT tested in this Windows environment
+host existing v0.4.5 build validation: {'tests': 31, 'failures': 0, 'errors': 0}, lint no errors (warnings remain)
+target existing v0.4.5 build validation: {'tests': 31, 'failures': 0, 'errors': 0}, lint no errors (warnings remain)

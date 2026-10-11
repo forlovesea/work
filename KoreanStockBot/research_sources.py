@@ -12,6 +12,8 @@ from broker import NoRedirect
 from live import SafetyStop, Store
 from etf_research import financial_summary
 
+NEWS_URL='https://naverapihub.apigw.ntruss.com/search/v1/news'
+
 
 class Sources:
     def __init__(self,cache,now):
@@ -21,7 +23,7 @@ class Sources:
 
     def get(self,url,params,headers=None):
         public_params={k:v for k,v in params.items() if k!='crtfc_key'}
-        bucket=self.now.strftime('%Y-%m-%dT%H') if 'openapi.naver.com' in url else self.now.date().isoformat()
+        bucket=self.now.strftime('%Y-%m-%dT%H') if url==NEWS_URL else self.now.date().isoformat()
         key=hashlib.sha256(json.dumps([url,public_params,bucket],sort_keys=True).encode()).hexdigest()
         path=self.cache/(key+'.json')
         if path.exists(): return json.loads(path.read_text(encoding='utf-8'))
@@ -33,9 +35,12 @@ class Sources:
             # URLs contain DART credentials: never expose the underlying exception.
             raise SafetyStop('Research provider connection/response failed; no credentials logged') from None
         # Do not cache error responses.
+        if not isinstance(result,dict): raise SafetyStop('Invalid research provider response')
         if 'status' in result and result['status'] not in ('000','013'):
             raise SafetyStop('DART API returned an error; check key/quota locally')
-        if 'errorCode' in result: raise SafetyStop('NAVER API returned an error; check key/quota locally')
+        if 'errorCode' in result or 'error' in result: raise SafetyStop('NAVER API HUB returned an error; check News permission/key/quota locally')
+        if url==NEWS_URL and (not isinstance(result,dict) or not isinstance(result.get('items'),list)):
+            raise SafetyStop('Invalid NAVER API HUB news response')
         store=Store(path)
         store.data=result
         store.save()
@@ -66,9 +71,9 @@ class Sources:
         client=os.environ.get('NAVER_CLIENT_ID')
         secret=os.environ.get('NAVER_CLIENT_SECRET')
         if not client or not secret: raise SafetyStop('Set NAVER_CLIENT_ID and NAVER_CLIENT_SECRET locally')
-        result=self.get('https://openapi.naver.com/v1/search/news.json',
-                        dict(query=query,display=50,start=1,sort='date'),
-                        {'X-Naver-Client-Id':client,'X-Naver-Client-Secret':secret})
+        result=self.get(NEWS_URL,
+                        dict(query=query,display=50,start=1,sort='date',format='json'),
+                        {'X-NCP-APIGW-API-KEY-ID':client,'X-NCP-APIGW-API-KEY':secret})
         return result['items']
 
     def corporations(self):

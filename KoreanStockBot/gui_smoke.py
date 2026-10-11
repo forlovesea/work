@@ -14,14 +14,25 @@ def descendants(widget):
 def smoke(mode):
     failures=[]
     def run(root,*args,**kwargs):
+        from app_version import VERSION
+        assert 'v'+VERSION in root.title()
         root.withdraw()
         def check():
             try:
                 widgets=list(descendants(root))
                 buttons={str(w.cget('text')):w for w in widgets if isinstance(w,ttk.Button)}
+                buttons['Manual'].invoke()
+                manual=root._manual_window
+                assert manual.winfo_exists() and 'Manual' in manual.title()
+                for nav in [w for w in descendants(manual) if isinstance(w,tk.Button)]:
+                    nav.invoke(); root.update_idletasks()
+                manual.geometry('460x420'); root.update_idletasks()
+                buttons['Manual'].invoke(); assert root._manual_window is manual
+                manual.destroy()
                 if mode!='paper':
                     assert '실전 시작' in buttons and '읽기 전용 점검' in buttons
                     assert '모의 재생' not in buttons
+                    assert any(isinstance(w,ttk.Label) and '실행 대기 · 실전 시작 후' in str(w.cget('text')) for w in widgets)
                 buttons['수익률 그래프'].invoke()
                 root.update_idletasks()
                 selector=next(w for w in widgets if isinstance(w,ttk.Combobox) and '직접 기간' in w.cget('values'))
@@ -36,7 +47,9 @@ def smoke(mode):
                 day.invoke()
                 assert any(isinstance(w,ttk.Entry) and w.get().endswith('-15') for w in widgets)
             except Exception as exc: failures.append(exc)
-            finally:root.destroy()
+            finally:
+                for pending in root.tk.splitlist(root.tk.call('after','info')):root.after_cancel(pending)
+                root.destroy()
         root.after(50,check)
         original(root)
     original=tk.Tk.mainloop

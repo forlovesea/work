@@ -87,7 +87,7 @@ class EtfBot(LiveBot):
             if self.b.orders() or self.holdings(): raise SafetyStop('Unexpected account position/order')
             if self.s['halted']: return {'status':'HALTED','quantity':0}
             window=self.market()
-            if not window: return {'status':'OUTSIDE_REGULAR_SESSION'}
+            if not window: return self.market_status
             self.previous_day=window[0]['previousBusinessDay']['date']
             # Period rollover and target latches also apply while cash-only.
             hit,loss=self.observe(dec(self.s['cash']),self.clock())

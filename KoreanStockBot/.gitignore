@@ -7,3 +7,5 @@ STOP
 research/
 inputs/
 .venv/
+Release/
+build/

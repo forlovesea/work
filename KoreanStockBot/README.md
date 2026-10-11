@@ -1,5 +1,8 @@
 # 국내 주식 전략 실험실
 
+**EXE 배포:** `Release/KoreanStockBot/KoreanStockBotETF.exe`(ETF), `KoreanStockBotStock.exe`(단일 종목), `KoreanStockBotPaper.exe`(모의).
+`_internal`과 작업 EXE를 포함한 폴더 전체가 필요합니다. 빌드·검증은 [EXE_BUILD_GUIDE.md](EXE_BUILD_GUIDE.md)를 참고하세요.
+
 **실전 GUI 연결:** `start_etf.bat`와 `start_live.bat`도 다크 테마 GUI를 엽니다.
 인증·계좌 설정 → 읽기 전용 점검 → 실전 시작 버튼을 사용하세요.
 기간별 그래프·달력·중지 방법은 [GUI_GUIDE.md](GUI_GUIDE.md)를 확인하세요.

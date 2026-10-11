@@ -35,7 +35,7 @@ def crypt(data,decrypt=False):
 
 
 def save_credentials(values,path=DEFAULT_PATH):
-    values={k:v for k,v in values.items() if k in KEYS and isinstance(v,str) and v}
+    values={k:v.strip() for k,v in values.items() if k in KEYS and isinstance(v,str) and v.strip()}
     payload=crypt(json.dumps(values).encode('utf-8'))
     path=Path(path); path.parent.mkdir(parents=True,exist_ok=True)
     tmp=path.with_suffix('.tmp')
@@ -50,7 +50,7 @@ def load_credentials(path=DEFAULT_PATH):
     values=json.loads(crypt(path.read_bytes(),decrypt=True))
     if not isinstance(values,dict) or any(k not in KEYS or not isinstance(v,str) for k,v in values.items()):
         raise SafetyStop('Invalid encrypted credential record')
-    return values
+    return {k:v.strip() for k,v in values.items()}
 
 
 def load_environment():

@@ -24,6 +24,7 @@ def launch(etf=False):
             if not os.environ.get(key):
                 os.environ[key]=getpass.getpass(label+' (화면 비표시/평문 저장 없음): ').strip()
         if etf:
+            print('뉴스 인증: NAVER API HUB에서 News 선택 후 발급한 Client ID/Secret을 사용하세요. 사용량·요금을 확인하세요.')
             print('자동 수집용 최초 인증 설정입니다. CSV나 종목 목록은 필요하지 않습니다.')
             for key in ('KRX_ID','KRX_PW','DART_API_KEY','NAVER_CLIENT_ID','NAVER_CLIENT_SECRET'):
                 if not os.environ.get(key): os.environ[key]=getpass.getpass(key+' (비표시): ').strip()

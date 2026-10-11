@@ -17,7 +17,7 @@ CSV, 종목 목록, 재무제표, 기사를 직접 준비하지 않습니다. �
 | [토스증권 Open API](https://home.tossinvest.com/ko/open-api) | 웹 설정 → Open API 신청, 키 발급, 공인 IP 등록 | Client ID, Client Secret, 조회된 accountSeq |
 | [KRX](https://data.krx.co.kr/contents/MDC/MAIN/main/index.cmd) | 회원가입 및 로그인 확인 | KRX_ID, KRX_PW |
 | [OpenDART](https://opendart.fss.or.kr/) | 인증키 신청 | DART_API_KEY |
-| [네이버 개발자센터](https://developers.naver.com/docs/serviceapi/search/news/news.md) | 애플리케이션 등록, 검색 API 설정 | NAVER_CLIENT_ID, NAVER_CLIENT_SECRET |
+| [NAVER API HUB](https://guide.ncloud-docs.com/docs/apihub-application) | 네이버 클라우드 콘솔에서 이용 신청 → Application 등록 → NAVER Search의 News 선택 → 인증 정보 확인 | NAVER_CLIENT_ID, NAVER_CLIENT_SECRET |
 
 가입·본인인증·권한 부여는 프로그램이 대신할 수 없습니다. 키는 채팅이나 소스코드에 넣지 말고 실행 콘솔에 입력합니다. 선택적 저장 파일 `runtime/credentials.dpapi`는 Windows DPAPI로 암호화합니다. PC와 프로그램이 켜져 있고 인터넷에 연결되어 있어야 합니다.
 
@@ -75,4 +75,6 @@ CSV, 종목 목록, 재무제표, 기사를 직접 준비하지 않습니다. �
 
 기존 `prepare_etf.bat`와 입력 템플릿은 수동 분석 보조 도구입니다. 자동 모드에서는 필요 없으며 기본 주문 프로그램은 `research/auto_latest.json`을 읽습니다.
 
-명세: [DART 기업코드](https://opendart.fss.or.kr/guide/detail.do?apiGrpCd=DS001&apiId=2019018), [DART 재무제표](https://opendart.fss.or.kr/guide/detail.do?apiGrpCd=DS003&apiId=2019020), [네이버 뉴스](https://developers.naver.com/docs/serviceapi/search/news/news.md), [토스 OpenAPI](https://openapi.tossinvest.com/openapi-docs/latest/openapi.json).
+기존 개발자센터 검색 API는 2026년 7월 31일 신규 신청이 종료되었습니다. API HUB 앱의 News 권한 키를 입력하세요. 이용 요금·사용량 제한·알림은 클라우드 콘솔에서 확인합니다. 기존 키를 저장했다면 GUI의 인증·계좌 설정에서 새 값으로 암호화 저장합니다. 환경변수 이름은 동일합니다.
+
+명세: [DART 기업코드](https://opendart.fss.or.kr/guide/detail.do?apiGrpCd=DS001&apiId=2019018), [DART 재무제표](https://opendart.fss.or.kr/guide/detail.do?apiGrpCd=DS003&apiId=2019020), [API HUB 뉴스](https://api.ncloud-docs.com/docs/naver-api-hub-search-news), [토스 OpenAPI](https://openapi.tossinvest.com/openapi-docs/latest/openapi.json).

@@ -100,11 +100,10 @@ class AutoResearch:
             self.next_attempt=self.clock()+300
             return self.state
         child_env={k:v for k,v in os.environ.items() if not k.upper().startswith('TOSS_')}
-        venv=self.root/'.venv'/'Scripts'/'python.exe'
-        executable=str(venv) if venv.exists() else sys.executable
+        from app_paths import worker_command
         try:
-            self.child=self.popen([executable,'-X','utf8',str(self.root/'auto_research.py'),
-                                   '--worker','--as-of',day,'--output',str(self.output)],
+            self.child=self.popen(worker_command('auto_research',self.root)+
+                                  ['--worker','--as-of',day,'--output',str(self.output)],
                                   cwd=str(self.root),env=child_env,stdin=subprocess.DEVNULL,
                                   stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
                                   creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)

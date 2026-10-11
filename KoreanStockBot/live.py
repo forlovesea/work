@@ -21,7 +21,7 @@ from broker import TossBroker, BrokerError
 if __name__ == '__main__':
     sys.modules.setdefault('live',sys.modules[__name__])
 
-ROOT = Path(__file__).resolve().parent
+from app_paths import ROOT
 KST = timezone(timedelta(hours=9))
 
 
@@ -303,10 +303,16 @@ class LiveBot:
         if today['date']!=now.date().isoformat():
             raise SafetyStop('Market calendar date mismatch')
         session=(today.get('integrated') or {}).get('regularMarket')
+        next_session=((cal.get('nextBusinessDay') or {}).get('integrated') or {}).get('regularMarket') or {}
+        self.market_status={'status':'OUTSIDE_REGULAR_SESSION','market_state':'HOLIDAY',
+                            'checked_at':now.isoformat(),'next_open':next_session.get('startTime')}
         if not session:
             return None
         start=stamp(session['startTime'])+timedelta(minutes=2)
         end=stamp(session['singlePriceAuctionStartTime'])-timedelta(minutes=2)
+        self.market_status.update(market_state='BEFORE_OPEN' if now<start else 'SESSION_FINISHED',
+            next_open=session['startTime'] if now<start else next_session.get('startTime'))
+        if now<start: self.market_status['bot_start']=start.isoformat()
         if not start<=now<end:
             return None
         return cal,start,end
@@ -369,7 +375,7 @@ class LiveBot:
         self.check_conditions()
         window=self.market()
         if not window:
-            return {'status':'OUTSIDE_REGULAR_SESSION'}
+            return self.market_status
         cal,start,end=window
         stocks=self.b.get('stocks',{'symbols':self.symbol})
         if len(stocks)!=1 or stocks[0]['symbol']!=self.symbol:
@@ -504,6 +510,7 @@ def main(argv=None,broker=None):
             bot=EtfBot(broker,config,store,live=args.live)
         else:
             bot=LiveBot(broker,config,store,live=args.live)
+        print(json.dumps({'status':'INITIALIZING'},ensure_ascii=False),flush=True)
         bot.initialize()
         if args.recover_order:
             bot.recover(args.recover_order)

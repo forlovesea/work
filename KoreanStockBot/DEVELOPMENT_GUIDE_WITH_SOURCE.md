@@ -4,13 +4,15 @@
 
 작성 기준: 2026-10-11 / Python 3.10 이상 / Windows
 
+EXE 배포 추가: release_entry.py, app_paths.py, KoreanStockBot.spec, build_release.ps1을 구현했습니다. 최신 빌드 방법은 7장과 EXE_BUILD_GUIDE.md를 참고하세요.
+
 ## 1. 이 프로그램은 무엇인가요?
 
 국내 주식과 코스닥 관련 ETF의 데이터를 확인하고 정해진 규칙에 따라 매수·매도를 판단하는 Python 프로그램입니다. 화면을 담당하는 GUI와 거래를 담당하는 엔진을 분리했습니다. 사람이 GUI의 실전 시작을 승인하면 엔진은 조건에 따라 실제 주문을 전송합니다.
 
 모의매매는 합성 데이터 또는 과거 CSV로 실험합니다. 실전의 읽기 전용 점검은 계좌와 시세를 조회하지만 실제 주문이나 가상 체결을 만들지 않습니다. 실전 자동주문과 모의매매는 서로 다른 실행 모드입니다.
 
-현재까지 확인한 범위는 자동 테스트 69개와 세 GUI의 창·기간 선택·그래프·달력 동작입니다. 실제 계좌 연결·체결, 전략 수익성, EXE 배포는 검증되지 않았습니다. 10%는 목표이며 수익 보장이 아닙니다.
+자동 테스트 73개와 세 GUI의 창·기간 선택·그래프·달력 동작을 확인했습니다. EXE의 오프라인 의존성·암호화·GUI 검사도 통과했습니다. 실제 계좌 연결·체결, API HUB 실키 호출, 전략 수익성 및 별도 깨끗한 PC에서의 실행은 검증하지 않았습니다. 10%는 목표이며 수익 보장이 아닙니다.
 
 ## 2. 용어부터 이해하기
 
@@ -107,34 +109,46 @@ Python은 일반적인 사용에 EXE 변환이 필요하지 않습니다. py_com
 
 GUI의 인증·계좌 설정 → 계좌 조회 → 암호화 저장 → 읽기 전용 점검으로 연결을 확인합니다. 실전 시작 버튼은 실제 주문 확인창을 거칩니다. ETF와 단일 종목을 같은 폴더에서 동시에 운용하지 않습니다.
 
-## 7. EXE로 만드는 방법과 현재 한계
+## 7. Windows EXE 빌드
 
-현재 배포 방식은 Python + 소스 폴더 + BAT입니다. 이 프로젝트에는 검증된 PyInstaller spec이나 EXE 빌드가 없습니다. 아래 절차는 향후 EXE 배포 작업의 설계 안내이며, 현재 코드를 그대로 묶으면 실전 기능이 정상 동작한다고 보장할 수 없습니다.
+현재 구현은 `release_entry.py`와 `KoreanStockBot.spec`을 사용합니다. 하나의 공통 라이브러리 폴더를 공유하는 다섯 EXE를 생성합니다.
 
-왜 단순 변환이 안 되나요? live_gui.py와 auto_research.py는 Python 실행 파일로 다른 .py 파일을 실행합니다. PyInstaller로 묶은 앱의 sys.executable은 Python이 아니라 앱 EXE를 가리킵니다. 또한 __file__ 기반 경로와 쓰기 가능한 데이터 경로를 분리해야 합니다. [PyInstaller 실행 경로 설명](https://pyinstaller.org/en/stable/runtime-information.html)
+- KoreanStockBotETF.exe: ETF GUI
+- KoreanStockBotStock.exe: 단일 종목 GUI
+- KoreanStockBotPaper.exe: 모의 GUI
+- trader.exe: GUI가 호출하는 거래 엔진
+- research.exe: 거래 엔진이 호출하는 ETF 자료 수집기
 
-먼저 필요한 소스 변경:
+`app_paths.py`는 소스 실행에서는 프로젝트 폴더, EXE에서는 실행 파일 폴더를 설정·장부 공통 경로로 선택합니다. 소스에서는 Python + .py, 배포에서는 전용 작업 EXE를 호출합니다. 거래·수집기에는 콘솔 출력을 유지하고 GUI가 숨김 실행하여 상태 파이프를 읽습니다.
 
-1. GUI·거래 엔진·수집기를 각각 실행할 진입 파일을 만듭니다. 예: gui_entry.py, trader_entry.py, research_entry.py. 현재 저장소에 이 파일들은 없습니다.
-2. 소스 실행 때는 Python + .py, EXE 실행 때는 전용 trader.exe·research.exe를 호출하도록 실행 경로 함수를 만듭니다. GUI EXE를 Python처럼 호출하면 안 됩니다.
-3. 설정·runtime·research·STOP의 공통 쓰기 경로를 하나로 통일합니다. 임시 압축 해제 폴더나 프로그램 설치 전용 폴더에 장부를 저장하지 않습니다.
-4. GUI만 --windowed로 만들고 거래·수집 작업은 로그 파이프가 가능한 콘솔 빌드로 만듭니다. GUI에서 자식 프로세스는 숨김 실행합니다.
-5. pykrx의 지연 import, 패키지 데이터와 의존성을 수집합니다. 원본 설정 파일은 포함하되 키·장부·캐시·개인 자료는 묶지 않습니다.
+### 빌드
 
-필요한 변경을 마친 뒤 사용할 명령 형태는 아래와 같습니다. 아직 없는 진입 파일 이름을 쓴 설계 예제이므로 지금 그대로 실행하는 명령이 아닙니다.
+프로젝트 폴더의 PowerShell에서 실행합니다.
 
 ```powershell
-# EXE 전용 개발환경에서 설치. 버전을 검증한 뒤 빌드 요구사항에 고정
-.venv\Scripts\python.exe -m pip install pyinstaller
-# 아래 세 진입 파일과 경로 변경을 구현한 뒤 실행
-.venv\Scripts\python.exe -m PyInstaller --onedir --windowed --name KoreanStockBot gui_entry.py
-.venv\Scripts\python.exe -m PyInstaller --onedir --console --name trader trader_entry.py
-.venv\Scripts\python.exe -m PyInstaller --onedir --console --collect-all pykrx --name research research_entry.py
+.venv\Scripts\python.exe -m pip install -r requirements-build.txt
+.venv\Scripts\python.exe -X utf8 -m unittest -v
+powershell -NoProfile -ExecutionPolicy Bypass -File build_release.ps1
 ```
 
-각 onedir 결과 폴더의 지원 파일을 유지하고 실행 경로 설계에 맞춰 배치합니다. EXE 하나만 꺼내 복사하지 않습니다. 먼저 onedir로 문제를 확인한 뒤 필요할 때 onefile을 검토합니다. Windows용은 Windows에서 빌드합니다. [PyInstaller 사용법](https://pyinstaller.org/en/stable/usage.html)
+`Release/KoreanStockBot/`에 결과가 생성됩니다. 기존 배포 폴더에 runtime 또는 research가 있으면 덮어쓰지 않고 중단합니다. 운용 중인 배포 폴더를 빌드 출력 위치로 사용하지 마세요. 새 체크아웃에서 빌드하세요.
 
-배포 검증 순서: 깨끗한 PC에서 창 열기 → 설정 읽기·암호화 → 가짜 API로 시작·중지·복구 → 읽기 전용 실제 인증 → 키 없는 배포물 확인. EXE 빌드 성공과 실제 거래 검증은 별도 단계입니다. 이 문서 작성 작업에서는 EXE를 생성하거나 실전 주문하지 않았습니다.
+### 오프라인 검증
+
+```powershell
+Release\KoreanStockBot\trader.exe --self-test
+Release\KoreanStockBot\research.exe --self-test
+Release\KoreanStockBot\trader.exe --gui-smoke
+```
+
+인증정보 읽기·API 호출·주문 없이 패키지 의존성, 암호화 왕복, 모의 계산, 세 GUI의 그래프·달력 동작을 확인합니다. 실제 인증을 사용하는 KRX 수집과 토스 체결의 검증을 대신하지 않습니다.
+
+### 전달·업데이트
+
+EXE만 분리하지 말고 `_internal`, 설정, 보조 EXE를 포함한 폴더 전체를 전달합니다. 개인 runtime·캐시·키는 배포물에 포함하지 않습니다. 기존 계좌를 계속 운용할 때는 거래 중지·주문 확인 후 기존 설정과 장부를 보존하는 이전이 필요합니다. 다른 폴더에서 같은 계좌 봇을 동시에 실행하지 않습니다.
+
+PyInstaller는 파이썬 환경과 의존성을 묶는 배포 도구이며 소스코드 보호나 수익성을 보장하지 않습니다. 코드 서명은 적용하지 않았습니다. Windows 64비트에서 빌드하며 다른 운영체제용 EXE는 아닙니다.
+
 
 ## 8. 설정값을 읽는 방법
 
@@ -368,6 +382,9 @@ def observe(self,equity,now):
 - 토스 인증·허용 IP: https://developers.tossinvest.com/docs/auth
 - pykrx: https://github.com/sharebook-kr/pykrx
 - OpenDART: https://opendart.fss.or.kr/
-- 네이버 검색: https://developers.naver.com/docs/serviceapi/search/news/news.md
+- NAVER API HUB 뉴스: https://api.ncloud-docs.com/docs/naver-api-hub-search-news
+- NAVER API HUB 가입·앱 등록: https://guide.ncloud-docs.com/docs/apihub-application
+
+뉴스 연동은 https://naverapihub.apigw.ntruss.com/search/v1/news 에 format=json으로 요청합니다. 인증 헤더는 X-NCP-APIGW-API-KEY-ID와 X-NCP-APIGW-API-KEY입니다. 로컬 설정 이름 NAVER_CLIENT_ID / NAVER_CLIENT_SECRET은 유지하되 API HUB에서 발급한 값을 입력합니다. 기존 API로 자동 전환하지 않습니다. 뉴스 캐시는 시간 단위이며 새 URL로 기존 캐시와 분리됩니다. test_news_hub.py에서 요청 형식·시간별 캐시·오류 응답 저장 방지를 검사합니다.
 
 각 문서는 외부 서비스의 변경에 따라 달라질 수 있습니다. API 변경 시 최신 명세와 코드의 요청·응답 필드를 대조하세요.

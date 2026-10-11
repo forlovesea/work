@@ -6,7 +6,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from engine import Config, PaperEngine, demo_bars, read_bars
 
-ROOT = Path(__file__).resolve().parent
+from app_paths import ROOT
 
 
 def return_series(rows, capital, period='전체', start='', end=''):
@@ -43,7 +43,8 @@ def gui(mode='paper'):
     root = tk.Tk()
     real=mode!='paper'
     mode_name={'paper':'모의매매','etf':'ETF 자동매매','stock':'단일 종목 자동매매'}[mode]
-    root.title('투자 전략 스튜디오 | '+mode_name)
+    from app_version import VERSION
+    root.title('투자 전략 스튜디오 v'+VERSION+' | '+mode_name)
     root.geometry(f'{min(1120,root.winfo_screenwidth()-80)}x{min(860,root.winfo_screenheight()-120)}')
     root.minsize(560,400)
     colors = dict(bg='#151618', panel='#202226', text='#F2F4F7', muted='#ABB2BD',
@@ -64,6 +65,8 @@ def gui(mode='paper'):
     style.map('TButton',background=[('active','#343A44')],foreground=[('active',colors['text'])])
     style.configure('Primary.TButton',background=colors['accent'],foreground='white',bordercolor=colors['accent'])
     style.map('Primary.TButton',background=[('active','#2865CC')],foreground=[('active','white')])
+    from button_theme import install_buttons, button_style
+    install_buttons(root,style)
     style.configure('TScrollbar',background='#454C58',troughcolor=colors['bg'],arrowcolor=colors['text'],bordercolor=colors['bg'])
     style.map('TScrollbar',background=[('active','#647085')])
     style.configure('TCombobox',fieldbackground=colors['panel'],foreground=colors['text'],arrowcolor=colors['text'],padding=6)
@@ -109,6 +112,8 @@ def gui(mode='paper'):
     header=ttk.Frame(content)
     header.pack(fill='x',padx=28,pady=(20,10))
     ttk.Label(header,text='투자 전략 스튜디오',font=('맑은 고딕',24,'bold')).pack(side='left')
+    from manual_gui import open_manual
+    ttk.Button(header,text='Manual',command=lambda:open_manual(root,mode),style='Violet.TButton').pack(side='right',padx=(12,0))
     tk.Label(header,text='●  '+mode_name,bg='#28364C',fg='#9FC3FF',font=('맑은 고딕',10,'bold'),padx=14,pady=8).pack(side='right')
     ttk.Label(content, text='실전 시작 시 실제 주문 발생 · 원화 현금 한도 · 10% 수익 보장 없음' if real else '실제 주문 없음 · 수익 보장 없음 · 10%는 목표 시나리오입니다',style='Muted.TLabel').pack(anchor='w',padx=28)
     ttk.Label(content, textvariable=source,style='Muted.TLabel').pack(anchor='w',padx=28,pady=(5,12))
@@ -252,7 +257,7 @@ def gui(mode='paper'):
         last.pack(side='left')
         end_button=ttk.Button(datebar,text='달력',command=lambda:pick_date(end_date,parent,'종료일'))
         end_button.pack(side='left',padx=4)
-        button=ttk.Button(datebar,text='기간 적용',command=apply_period)
+        button=ttk.Button(datebar,text='기간 적용',command=apply_period,style='Success.TButton')
         button.pack(side='left',padx=8)
         controls=(first,last,button,check,start_button,end_button)
         period_controls.append(controls)
@@ -350,7 +355,7 @@ def gui(mode='paper'):
             graph_window.lift()
             return
         graph_window=tk.Toplevel(root)
-        graph_window.title('누적 수익률 그래프 | '+mode_name)
+        graph_window.title('누적 수익률 그래프 v'+VERSION+' | '+mode_name)
         graph_window.geometry('1000x560')
         graph_window.minsize(780,400)
         graph_window.configure(bg=colors['bg'])
@@ -460,7 +465,7 @@ def gui(mode='paper'):
         paper_actions=[('수익률 그래프',open_graph)]
         root.protocol('WM_DELETE_WINDOW',controller.close)
     for label,cmd in paper_actions:
-        ttk.Button(buttons,text=label,command=cmd,style='Primary.TButton' if label=='백테스트' else 'TButton').pack(side='left',padx=4)
+        ttk.Button(buttons,text=label,command=cmd,style=button_style(label),cursor='hand2').pack(side='left',padx=4)
     chart.bind('<Configure>',lambda event:draw_return(chart))
     draw_return(chart)
     root.mainloop()

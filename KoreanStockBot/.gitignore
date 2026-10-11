@@ -1,0 +1,9 @@
+__pycache__/
+reports/
+.env
+*.secret
+runtime/
+STOP
+research/
+inputs/
+.venv/

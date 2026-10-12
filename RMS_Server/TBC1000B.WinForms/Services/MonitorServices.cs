@@ -7,6 +7,8 @@ public sealed record ConnectionOptions(string Address, int Port, string GetCommu
 
 public interface IMonitorService : IAsyncDisposable
 {
+    event EventHandler? PacketSent;
+    event EventHandler? PacketReceived;
     event EventHandler<MonitorSnapshot>? SnapshotChanged;
     event EventHandler<TrapEntry>? TrapReceived;
     event EventHandler<IReadOnlyDictionary<string, string>>? RawTrapReceived;
@@ -24,6 +26,8 @@ public interface IMonitorService : IAsyncDisposable
 // UI 포팅 단계용 서비스. 실제 SNMP 구현은 이 인터페이스 뒤에 연결한다.
 public sealed class PreviewMonitorService : IMonitorService
 {
+    public event EventHandler? PacketSent { add { } remove { } }
+    public event EventHandler? PacketReceived { add { } remove { } }
     private readonly MonitorSnapshot _snapshot = new();
     public event EventHandler<MonitorSnapshot>? SnapshotChanged;
     public event EventHandler<TrapEntry>? TrapReceived { add { } remove { } }

@@ -7,6 +7,8 @@ public sealed class SnmpClient
     private int _requestId = Environment.TickCount & 0x7FFFFFFF;
     public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(2.5);
     public int Retries { get; init; } = 1;
+    public event EventHandler? PacketSent;
+    public event EventHandler? PacketReceived;
 
     public Task<IReadOnlyList<SnmpVariable>> GetAsync(string address, int port, string community, IEnumerable<string> oids, CancellationToken token) =>
         SendAsync(address, port, community, SnmpCodec.GetRequest, oids.Select(o => new SnmpVariable(o, SnmpDataType.Null, null)).ToArray(), 0, 0, token);
@@ -35,8 +37,12 @@ public sealed class SnmpClient
             token.ThrowIfCancellationRequested(); using var udp = new UdpClient();
             try
             {
-                await udp.SendAsync(packet, packet.Length, address, port); using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token); timeout.CancelAfter(Timeout);
-                var received = await udp.ReceiveAsync(timeout.Token); var response = SnmpCodec.Decode(received.Buffer);
+                await udp.SendAsync(packet, packet.Length, address, port);
+                PacketSent?.Invoke(this, EventArgs.Empty);
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token); timeout.CancelAfter(Timeout);
+                var received = await udp.ReceiveAsync(timeout.Token);
+                PacketReceived?.Invoke(this, EventArgs.Empty);
+                var response = SnmpCodec.Decode(received.Buffer);
                 if (response.PduType != SnmpCodec.Response || response.RequestId != requestId) throw new InvalidDataException("SNMP 응답 ID가 요청과 일치하지 않습니다.");
                 if (!string.Equals(response.Community, community, StringComparison.Ordinal)) throw new InvalidDataException("SNMP community가 일치하지 않습니다.");
                 if (response.ErrorStatus != 0) throw new SnmpException(response.ErrorStatus, response.ErrorIndex); return response.Variables;

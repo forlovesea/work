@@ -26,6 +26,10 @@ def main():
         assert (ROOT/'trader.exe').exists() and (ROOT/'research.exe').exists()
         print(json.dumps({'status':'PASS','worker':name,'root':str(ROOT),'bars':len(bot.equity),'news_provider':NEWS_URL,'command':worker_command('live')},ensure_ascii=False))
         return
+    if '--candidate-gui-smoke' in sys.argv:
+        from scope_gui_smoke import run
+        run()
+        return
     if '--gui-smoke' in sys.argv:
         from gui_smoke import smoke
         for mode in ('paper','etf','stock'):smoke(mode)
@@ -51,6 +55,9 @@ if __name__=='__main__':
     try:main()
     except KeyboardInterrupt:pass
     except Exception as exc:
+        if '--candidate-report' in sys.argv:
+            from candidate_feedback import failure
+            print(json.dumps(failure(exc),ensure_ascii=False),flush=True)
         from live import SafetyStop
         from broker import BrokerError
         safe=str(exc) if isinstance(exc,(SafetyStop,BrokerError)) else type(exc).__name__

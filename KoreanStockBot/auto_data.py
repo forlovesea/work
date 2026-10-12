@@ -120,18 +120,20 @@ def write_csv(path,rows,columns):
 
 
 def collect_inputs(day,directory,sources,krx=None):
+    from collection_log import audited
     directory=Path(directory)
     raw_path=directory/('krx-'+day+'.json')
     cached=Store(raw_path).data
     if cached is None:
         krx=krx or KrxData()
-        daily=krx.daily(day)
-        metadata=krx.metadata()
-        catalog=normalize_catalog(daily,metadata,day)
+        daily=audited(sources,'KRX_ETF_DAILY','KRX',krx.daily,day)
+        metadata=audited(sources,'KRX_ETF_METADATA','KRX',krx.metadata)
+        catalog=audited(sources,'KRX_CATALOG_VALIDATE','KRX',normalize_catalog,daily,metadata,day)
         store=Store(raw_path); store.data={'daily':daily,'metadata':metadata}; store.save()
     else:
-        catalog=normalize_catalog(cached['daily'],cached['metadata'],day)
+        catalog=audited(sources,'KRX_CATALOG_CACHE','KRX',normalize_catalog,cached['daily'],cached['metadata'],day)
     catalog_path=directory/'universe.csv'
+    if hasattr(sources,'record'):sources.record('KRX','cache' if cached is not None else 'network')
     write_csv(catalog_path,catalog,list(catalog[0]))
     top=universe(catalog_path,day)
     corps=sources.corporations()
@@ -142,17 +144,20 @@ def collect_inputs(day,directory,sources,krx=None):
         path=directory/(etf['symbol']+'-'+day+'.json')
         try:
             items=Store(path).data
+            from_cache=items is not None
             if items is None:
                 krx=krx or KrxData()
-                items=krx.composition(day,etf['isin'])
-                normalized=normalize_composition(items,etf['symbol'],day,corps)
+                items=audited(sources,'KRX_COMPOSITION_REQUEST','KRX',krx.composition,day,etf['isin'])
+                normalized=audited(sources,'KRX_COMPOSITION_VALIDATE','KRX',normalize_composition,items,etf['symbol'],day,corps)
                 store=Store(path); store.data=items; store.save()
             else:
-                normalized=normalize_composition(items,etf['symbol'],day,corps)
+                normalized=audited(sources,'KRX_COMPOSITION_CACHE','KRX',normalize_composition,items,etf['symbol'],day,corps)
             compositions.extend(normalized)
+            if hasattr(sources,'record'):sources.record('KRX','cache' if from_cache else 'network')
         except (SafetyStop,ValueError,KeyError,TypeError):
             # The ETF retains its rank; absent holdings prevents this ETF from buying.
             failures.append(etf['symbol'])
+            if hasattr(sources,'record'):sources.record('KRX','error')
     holdings_path=directory/'holdings.csv'
     write_csv(holdings_path,compositions,['as_of','etf_symbol','stock_symbol','corp_code','name','weight','source_url'])
     return catalog_path,holdings_path,failures

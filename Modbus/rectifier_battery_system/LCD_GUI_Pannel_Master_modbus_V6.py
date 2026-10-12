@@ -177,6 +177,7 @@ class PollWorker(QThread):
     time_signal = Signal(str)
     cell_signal = Signal(int, str)
     battery_signal = Signal(int, str)
+    activity_signal = Signal(str)
     log_signal = Signal(str)
     alarm_signal = Signal(str)
     alarm_count_signal = Signal(int)
@@ -213,6 +214,8 @@ class PollWorker(QThread):
         self.module_alarms = {}
         self.alarm_received = {}
         self.global_alarms = None
+        self.discovery_pending = list(range(1, 11)) if self.auto_detect else []
+        self.discovery_due = 0.0
         self.log_enabled = True
 
     def stop(self):
@@ -224,6 +227,8 @@ class PollWorker(QThread):
         return frame + struct.pack('<H', count_crc(frame))
 
     def log_frame(self, title, data):
+        if title in ('TX', 'RX'):
+            self.activity_signal.emit(title)
         if self.log_enabled:
             self.log_signal.emit(f'[{title}] ' + data.hex(' ').upper())
 
@@ -313,7 +318,7 @@ class PollWorker(QThread):
         elif self.global_alarms[0] & 0xFF == 1:
             lines.append('Battery Missing (Major)')
         if self.auto_detect and not self.monitored_modules:
-            unknown.append('No battery modules detected / reconnect to scan again')
+            unknown.append('No battery modules detected / automatic scan in progress')
         for n in sorted(self.monitored_modules):
             result = self.module_alarms.get(n)
             if result is not None:
@@ -330,20 +335,32 @@ class PollWorker(QThread):
         self.alarm_count_signal.emit(-1 if unknown else count)
 
     def discover_modules(self):
-        for n in range(1, 11):
-            if not self.running:
-                return
-            if self.poll_battery(n):
-                self.monitored_modules.add(n)
-        self.discovery_signal.emit(sorted(self.monitored_modules))
+        """Probe one unknown module; leave time for live data between probes."""
+        if not self.auto_detect or not self.running or time.monotonic() < self.discovery_due:
+            return
+        if not self.discovery_pending:
+            self.discovery_pending = [n for n in range(1, 11) if n not in self.monitored_modules]
+        if not self.discovery_pending:
+            return
+        n = self.discovery_pending.pop(0)
+        found = self.poll_battery(n)
+        if found:
+            self.monitored_modules.add(n)
+        if found or not self.discovery_pending:
+            self.discovery_signal.emit(sorted(self.monitored_modules))
+        # Refresh detected batteries between probes. Retry absent modules less
+        # often after a complete sweep; an empty bus gets another scan sooner.
+        if self.discovery_pending:
+            delay = 2.0 if self.monitored_modules else 0.1
+        else:
+            delay = 30.0 if self.monitored_modules else 3.0
+        self.discovery_due = time.monotonic() + delay
 
     def run(self):
         try:
             self.master = ModbusMaster(self.port, self.baudrate)
             self.master.connect()
             self.connected_signal.emit()
-            if self.auto_detect:
-                self.discover_modules()
             system_due = 0
             while self.running:
                 started = time.monotonic()
@@ -353,9 +370,11 @@ class PollWorker(QThread):
                     if time.monotonic() < self.retry_due.get(n, 0):
                         continue
                     self.poll_battery(n)
+                if self.running and self.auto_detect:
+                    self.discover_modules()
                 # Secondary reads only after every battery has had a turn.
                 # One module per cycle keeps alarm traffic from blocking all ten.
-                if self.running and time.monotonic() >= system_due:
+                if self.running and (self.monitored_modules or not self.auto_detect) and time.monotonic() >= system_due:
                     self.poll_time()
                     self.global_alarms = self.read_registers(0x5022, 1)
                     system_due = time.monotonic() + 5
@@ -414,6 +433,8 @@ class TimeBatteryGui(QWidget):
         self.battery_cache = {}
         self.barcode_cache = {}
         self.received_at = {}
+        self.activity_at = {}
+        self.activity_pending = set()
         self.module_active = {}
         self.data_valid = {}
         self.closing = False
@@ -428,6 +449,9 @@ class TimeBatteryGui(QWidget):
         self.age_timer = QTimer(self)
         self.age_timer.timeout.connect(self.refresh_ages)
         self.age_timer.start(1000)
+        self.activity_timer = QTimer(self)
+        self.activity_timer.timeout.connect(self.refresh_activity_leds)
+        self.activity_timer.start(20)
 
     def is_valid_module_data(self, text: str) -> bool:
         try:
@@ -601,13 +625,6 @@ class TimeBatteryGui(QWidget):
         # [temp1, temp2, ..., temp15, volt1, volt2, ..., volt15] 순서로 반환
         return temps + volts
     
-    def reset_cell_time_style(self):
-        self.lbl_cell_update_time.setStyleSheet("""
-            font-size: 13px;
-            color: #6c757d;
-            margin-left: 8px;
-        """)
-    
     def update_cell_table(self, n, text):
         # =========================
         # 🔥 1. 캐시 저장 (핵심)
@@ -701,26 +718,7 @@ class TimeBatteryGui(QWidget):
         # =========================
         #self.lbl_current_module.setText(f"[Module-{self.current_displayed_module}]")
 
-        # =========================
-        # 🔥 8. 업데이트 시간 표시
-        # =========================
-        stamp = self.received_at.get(n)
-        age = time.monotonic() - stamp if stamp is not None else 0
-        self.lbl_cell_update_time.setText(f"Last received {age:.0f}s ago")
 
-        # =========================
-        # 🔥 9. 갱신 강조 효과
-        # =========================
-        self.lbl_cell_update_time.setStyleSheet("""
-            font-size: 13px;
-            color: red;
-            font-weight: bold;
-            margin-left: 8px;
-        """)
-
-        QTimer.singleShot(500, self.reset_cell_time_style)
-        
-    
     def on_module_button_clicked(self, n):
 
         self.user_selected = True
@@ -972,12 +970,20 @@ class TimeBatteryGui(QWidget):
             border-radius:5px;
         """)
 
-        self.lbl_cell_update_time = QLabel("Updated --:--:--")
-        self.lbl_cell_update_time.setStyleSheet("color:gray;")
 
         cell_header_layout.addWidget(cell_title)
         cell_header_layout.addWidget(self.lbl_current_module)
-        cell_header_layout.addWidget(self.lbl_cell_update_time)
+        self.activity_leds = {}
+        for direction in ('TX', 'RX'):
+            caption = QLabel(f'{direction}:')
+            caption.setStyleSheet('color: #374151; font-weight: bold;')
+            cell_header_layout.addWidget(caption)
+            led = QLabel()
+            led.setFixedSize(24, 12)
+            led.setToolTip(f'{direction} serial activity')
+            self.activity_leds[direction] = led
+            cell_header_layout.addWidget(led)
+        self.refresh_activity_leds()
         cell_header_layout.addStretch()
 
         right_layout.addLayout(cell_header_layout)
@@ -1165,18 +1171,43 @@ class TimeBatteryGui(QWidget):
         numbers = ', '.join(map(str, modules)) or '-'
         self.lbl_connection.setText(f'Connected · Auto: {len(modules)}개 ({numbers})')
         if not modules:
-            self.text_battery.setPlainText('검출된 모듈이 없습니다. 연결 상태를 확인한 후 다시 연결하세요.')
+            self.text_battery.setPlainText('검출된 모듈이 없습니다. 연결 상태를 확인하세요. 자동으로 재검색합니다.')
 
     def set_summary_cell(self, n, col, text):
         item = QTableWidgetItem(str(text))
         item.setTextAlignment(Qt.AlignCenter)
         self.table_modules.setItem(n - 1, col, item)
 
+    def on_activity(self, direction):
+        if self.is_connected and direction in self.activity_leds:
+            # Coalesce fast traffic without extending the current pulse.
+            self.activity_pending.add(direction)
+            self.refresh_activity_leds()
+
+    def refresh_activity_leds(self):
+        now = time.monotonic()
+        for direction, led in self.activity_leds.items():
+            elapsed = now - self.activity_at.get(direction, float('-inf'))
+            # Every pulse includes 100 ms on and at least 80 ms off, even
+            # during continuous traffic. Keep at most one pending pulse.
+            if self.is_connected and elapsed >= 0.18 and direction in self.activity_pending:
+                self.activity_pending.discard(direction)
+                self.activity_at[direction] = now
+                elapsed = 0
+            active = self.is_connected and elapsed < 0.10
+            color = '#198754' if active else '#9ca3af'
+            border = '#146c43' if active else '#6b7280'
+            led.setStyleSheet(f'background-color: {color}; border: 1px solid {border}; border-radius: 4px;')
+            led.setAccessibleName(f'{direction}: {"active" if active else "idle"}')
+
     def reset_monitor(self):
         self.cell_cache.clear()
         self.battery_cache.clear()
         self.barcode_cache.clear()
         self.received_at.clear()
+        self.activity_at.clear()
+        self.activity_pending.clear()
+        self.refresh_activity_leds()
         self.module_active.clear()
         self.data_valid.clear()
         self.selected_module = None
@@ -1190,7 +1221,6 @@ class TimeBatteryGui(QWidget):
         self.lbl_barcode.setText('Barcode: -')
         self.lbl_time.setText('Time : -')
         self.lbl_current_module.setText('[Module -]')
-        self.lbl_cell_update_time.setText('Waiting for data')
         for n, btn in self.module_buttons.items():
             btn.setEnabled(False)
             self.set_module_btn_state(btn, 0)
@@ -1218,8 +1248,6 @@ class TimeBatteryGui(QWidget):
             self.set_summary_cell(n, 1, state)
             self.table_modules.item(n - 1, 1).setBackground(
                 QColor('#e7f5ec' if state == '수신 정상' else '#fff3cd'))
-            if n == self.current_displayed_module:
-                self.lbl_cell_update_time.setText(f'{state} · {age:.0f}s ago')
 
     def connect_port(self):
         port = self.cmb_port.currentText()
@@ -1234,6 +1262,7 @@ class TimeBatteryGui(QWidget):
                                  else int(self.cmb_modules.currentText()))
         self.worker.discovery_signal.connect(self.on_modules_discovered)
         self.worker.log_enabled = self.log_enabled
+        self.worker.activity_signal.connect(self.on_activity)
         self.worker.log_signal.connect(self.append_log)
         self.worker.time_signal.connect(self.update_time)
         self.worker.battery_signal.connect(self.on_battery_received)
@@ -1263,6 +1292,9 @@ class TimeBatteryGui(QWidget):
         worker = self.worker
         self.worker = None
         self.is_connected = False
+        self.activity_at.clear()
+        self.activity_pending.clear()
+        self.refresh_activity_leds()
         if worker:
             worker.deleteLater()
         self.lbl_connection.setText('Disconnected')

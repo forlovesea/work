@@ -9,6 +9,11 @@ namespace TBC1000B.WinForms.Views;
 public sealed class MainForm : Form
 {
     private readonly IMonitorService _service;
+    private readonly TrafficLed _txLed = new() { Text = "TX", ActiveColor = Color.FromArgb(245, 158, 11) };
+    private readonly TrafficLed _rxLed = new() { Text = "RX", ActiveColor = Color.FromArgb(34, 197, 94) };
+    private readonly System.Windows.Forms.Timer _trafficTimer = new() { Interval = 50 };
+    private int _pendingTx, _pendingRx;
+    private long _txLitUntil, _rxLitUntil;
     private readonly Profile _profile;
     private readonly ProfileStore _profileStore;
     private readonly OperationRecordService _operationRecorder;
@@ -101,10 +106,14 @@ public sealed class MainForm : Form
         BuildUi();
         PopulateStaticRows();
         _service.SnapshotChanged += QueueSnapshotChanged;
+        _service.PacketSent += OnPacketSent;
+        _service.PacketReceived += OnPacketReceived;
+        _trafficTimer.Tick += (_, _) => UpdateTrafficLeds();
+        _trafficTimer.Start();
         _service.TrapReceived += OnTrapReceived;
         _service.RawTrapReceived += async (_, trap) => { if (_mode.Equals("Master", StringComparison.OrdinalIgnoreCase)) await _slaveCoordinator.ForwardAsync(trap); };
         _service.TrapListenerFailed += (_, error) => BeginInvoke(() => ShowTrapListenerFailure(error));
-        _slaveCoordinator.ForwardedTrapReceived += (_, trap) => OnTrapReceived(this, TrapDataParser.Parse(trap));
+        _slaveCoordinator.ForwardedTrapReceived += (_, trap) => { OnPacketReceived(this, EventArgs.Empty); OnTrapReceived(this, TrapDataParser.Parse(trap)); };
         _connect.Click += ToggleConnectionAsync;
         foreach (var input in new[] { _ip, _port, _get, _set, _trap, _trapPort })
             input.KeyDown += ConnectionInputKeyDown;
@@ -114,6 +123,19 @@ public sealed class MainForm : Form
         _moduleOrderBlinkTimer.Tick += (_, _) => { _moduleOrderBlinkOn = !_moduleOrderBlinkOn; UpdateOrderView(); };
         _moduleOrderBlinkTimer.Start();
         FormClosing += OnFormClosingAsync;
+    }
+
+    // Coalesce worker-thread events; only the UI timer touches controls.
+    private void OnPacketSent(object? sender, EventArgs e) => Interlocked.Exchange(ref _pendingTx, 1);
+    private void OnPacketReceived(object? sender, EventArgs e) => Interlocked.Exchange(ref _pendingRx, 1);
+
+    private void UpdateTrafficLeds()
+    {
+        var now = Environment.TickCount64;
+        if (Interlocked.Exchange(ref _pendingTx, 0) != 0) _txLitUntil = now + 200;
+        if (Interlocked.Exchange(ref _pendingRx, 0) != 0) _rxLitUntil = now + 200;
+        _txLed.IsActive = now < _txLitUntil;
+        _rxLed.IsActive = now < _rxLitUntil;
     }
 
     private void ApplyProfile()
@@ -161,7 +183,7 @@ public sealed class MainForm : Form
         flow.Controls.Add(new Label { Text = "접속상태", AutoSize = true, Margin = new Padding(12, 7, 2, 0) });
         flow.Controls.Add(_connectionDot); flow.Controls.Add(_timeout);
         foreach (var item in new[] { ("CRIT", 1), ("MAJOR", 2), ("MINOR", 3), ("WARN", 4) }) { var check = new CheckBox { Text = item.Item1, Checked = _profile.AlarmLevels.GetValueOrDefault(item.Item2), AutoSize = true, Margin = new Padding(8, 6, 0, 0) }; check.CheckedChanged += (_, _) => { _profile.AlarmLevels[item.Item2] = check.Checked; _profileStore.Save(_profile); UpdateAlarmSound(_latestSnapshot); }; flow.Controls.Add(check); }
-        _soundButton.Width = 48; _soundButton.Height = 34; _soundButton.Margin = new Padding(6, 0, 6, 0); _soundButton.Level = _profile.AlarmVolume; _soundButton.Click += (_, _) => { _profile.AlarmVolume = (_profile.AlarmVolume + 1) % 4; _soundButton.Level = _profile.AlarmVolume; _profileStore.Save(_profile); UpdateAlarmSound(_latestSnapshot); }; flow.Controls.Add(_soundButton);
+        _soundButton.Width = 48; _soundButton.Height = flow.Controls.OfType<CheckBox>().Last().GetPreferredSize(Size.Empty).Height; _soundButton.Margin = new Padding(6, 6, 6, 0); _soundButton.Level = _profile.AlarmVolume; _soundButton.Click += (_, _) => { _profile.AlarmVolume = (_profile.AlarmVolume + 1) % 4; _soundButton.Level = _profile.AlarmVolume; _profileStore.Save(_profile); UpdateAlarmSound(_latestSnapshot); }; flow.Controls.Add(_soundButton);
         var order = UiTheme.Button("모듈 설치 순서 설정", UiTheme.Accent);
         order.Font = Font;
         order.AutoSize = true;
@@ -221,7 +243,8 @@ public sealed class MainForm : Form
         AddPair(bottom, "설비번호", new TextBox { Width = 120 }); AddPair(bottom, "운용 관리자", new TextBox { Width = 120 });
         AddPair(bottom, "제조사", new TextBox { Width = 120 }); AddPair(bottom, "모델명", new TextBox { Width = 120 }); AddPair(bottom, "상면", new TextBox { Width = 140 });
         var save = UiTheme.Button("저장"); save.Width = 60; bottom.Controls.Add(save);
-        bottom.Controls.Add(new Label { Text = "TX ●   RX ●", ForeColor = Color.DimGray, AutoSize = true, Margin = new Padding(10, 7, 0, 0) });
+        bottom.Controls.Add(_txLed);
+        bottom.Controls.Add(_rxLed);
         bottom.Controls.Add(_updated);
         table.Controls.Add(top, 0, 0); table.Controls.Add(bottom, 0, 1);
         return group;
@@ -921,6 +944,9 @@ public sealed class MainForm : Form
     {
         RemoveOwnedMasterMarker();
         _service.SnapshotChanged -= QueueSnapshotChanged;
+        _service.PacketSent -= OnPacketSent;
+        _service.PacketReceived -= OnPacketReceived;
+        _trafficTimer.Stop(); _trafficTimer.Dispose();
         _lifetime.Cancel(); _resourceTimer.Stop(); _alarmBlinkTimer.Stop();
         await _service.DisconnectAsync(); await _service.DisposeAsync(); _lifetime.Dispose();
         await _operationRecorder.DisposeAsync();

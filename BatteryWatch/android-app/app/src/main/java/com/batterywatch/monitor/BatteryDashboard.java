@@ -71,7 +71,7 @@ public final class BatteryDashboard {
         if("1".equals(value)||"critical".equalsIgnoreCase(value)) return "Critical";
         if("2".equals(value)||"major".equalsIgnoreCase(value)) return "Major";
         if("3".equals(value)||"minor".equalsIgnoreCase(value)) return "Minor";
-        if("4".equals(value)||"warning".equalsIgnoreCase(value)||"warring".equalsIgnoreCase(value)) return "Warning";
+        if("4".equals(value)||"warning".equalsIgnoreCase(value)||"warnning".equalsIgnoreCase(value)||"warring".equalsIgnoreCase(value)) return "Warning";
         return "Unknown";
     }
     private static int alarmSeverityColor(String severity) {
@@ -82,6 +82,61 @@ public final class BatteryDashboard {
             case "Warning": return Color.rgb(91,181,255);
             default: return MUTED;
         }
+    }
+    private List<JSONObject> currentAlarms(JSONObject response) {
+        List<JSONObject> alarms=new ArrayList<>();
+        if(response==null) return alarms;
+        JSONObject data=response.optJSONObject("device_alarms");
+        Object raw=data==null?null:data.opt("active_alarms");
+        if(raw instanceof JSONArray) {
+            JSONArray array=(JSONArray)raw;
+            for(int i=0;i<array.length();i++) if(array.optJSONObject(i)!=null) alarms.add(array.optJSONObject(i));
+        } else if(raw instanceof JSONObject) {
+            JSONObject object=(JSONObject)raw;
+            if(object.has("text")||object.has("level")||object.has("time")) alarms.add(object);
+            else for(Iterator<String> keys=object.keys();keys.hasNext();) {
+                JSONObject alarm=object.optJSONObject(keys.next());
+                if(alarm!=null) alarms.add(alarm);
+            }
+        }
+        // The server also reports a single aggregate device condition: do not count it twice.
+        JSONArray active=response.optJSONArray("active");
+        boolean hasDeviceAlarms=!alarms.isEmpty();
+        if(active!=null) for(int i=0;i<active.length();i++) {
+            JSONObject alarm=active.optJSONObject(i);
+            if(alarm!=null&&(!"device_alarms".equals(alarm.optString("rule_key"))||!hasDeviceAlarms)) alarms.add(alarm);
+        }
+        return alarms;
+    }
+    public void styleAlarmButton(Button button, JSONObject response) {
+        if(response==null) return;
+        List<JSONObject> alarms=currentAlarms(response);
+        int count=alarms.size();
+        button.setText(count==0?"알람":"알람("+count+")");
+        if(count==0) return;
+        int highest=5;
+        for(JSONObject alarm:alarms) {
+            String severity=alarmSeverity(alarm.has("level")?alarm.opt("level"):alarm.opt("severity"));
+            int rank="Critical".equals(severity)?1:"Major".equals(severity)?2:
+                "Minor".equals(severity)?3:"Warning".equals(severity)?4:5;
+            highest=Math.min(highest,rank);
+        }
+        int fill=highest==1?Color.rgb(220,38,38):highest==2?Color.rgb(255,153,64):
+            highest==3?Color.rgb(255,225,153):highest==4?Color.rgb(174,216,245):Color.rgb(213,198,238);
+        button.setTextColor(highest==1?Color.WHITE:Color.rgb(30,40,55));
+        button.setBackground(new android.graphics.drawable.RippleDrawable(
+            android.content.res.ColorStateList.valueOf(Color.argb(55,255,255,255)),background(fill,12),null));
+        String severity=highest==1?"Critical":highest==2?"Major":highest==3?"Minor":highest==4?"Warning":"Unknown";
+        button.setContentDescription("알람 "+count+"건, 최고 심각도 "+severity);
+        android.view.animation.AlphaAnimation blink=new android.view.animation.AlphaAnimation(1f,0.45f);
+        blink.setDuration(700);
+        blink.setRepeatMode(android.view.animation.Animation.REVERSE);
+        blink.setRepeatCount(android.view.animation.Animation.INFINITE);
+        button.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+            @Override public void onViewAttachedToWindow(View view) { view.startAnimation(blink); }
+            @Override public void onViewDetachedFromWindow(View view) { view.clearAnimation(); }
+        });
+        if(button.isAttachedToWindow()) button.startAnimation(blink);
     }
     private static int moduleNumber(JSONObject data,JSONObject alarm) {
         Object rawRow=alarm.opt("row_index");
@@ -139,10 +194,26 @@ public final class BatteryDashboard {
             section.addView(label("현재 발생한 장비 알람이 없습니다.",14,MUTED));
             return;
         }
+        renderAlarmCards(section,data,alarms,false);
+    }
+    public void currentAlarmCards(LinearLayout parent,JSONObject response) {
+        List<JSONObject> alarms=currentAlarms(response);
+        LinearLayout section=card(parent);
+        section.addView(label("현재 알람 "+alarms.size()+"건",18,INK));
+        if(alarms.isEmpty()) {
+            section.addView(label("현재 발생한 알람이 없습니다.",14,MUTED));
+            return;
+        }
+        JSONObject data=response.optJSONObject("device_alarms");
+        renderAlarmCards(section,data==null?new JSONObject():data,alarms,true);
+    }
+    private void renderAlarmCards(LinearLayout section,JSONObject data,List<JSONObject> alarms,boolean numbered) {
         String system=data.optString("system_name","").trim();
         if(system.isEmpty()) system=data.optString("connection_system_name","").trim();
+        int number=0;
         for(JSONObject alarm:alarms) {
-            String severity=alarmSeverity(alarm.opt("level"));
+            boolean serverAlarm=alarm.has("rule_key");
+            String severity=alarmSeverity(alarm.has("level")?alarm.opt("level"):alarm.opt("severity"));
             int color=alarmSeverityColor(severity);
             GradientDrawable outline=background(PANEL,14);
             outline.setStroke(dp(1),color);
@@ -153,6 +224,7 @@ public final class BatteryDashboard {
             LinearLayout.LayoutParams itemParams=new LinearLayout.LayoutParams(-1,-2);
             itemParams.setMargins(0,dp(5),0,dp(5));
             section.addView(item,itemParams);
+            if(numbered) item.addView(label("알람("+(++number)+") · "+(serverAlarm?"서버 감시":"장비 알람"),16,INK));
             LinearLayout metadata=new LinearLayout(context);
             metadata.setGravity(Gravity.CENTER_VERTICAL);
             int module=moduleNumber(data,alarm);
@@ -161,15 +233,27 @@ public final class BatteryDashboard {
                 :alarm.has("row_index")?"모듈 확인 필요":"시스템";
             if(!system.isEmpty()) location=system+" · "+location;
             String time=alarm.optString("time","").trim();
+            if(serverAlarm) {
+                location="서버 감시";
+                time=alarm.isNull("last_observed")?"":DisplayTime.epoch(alarm.optDouble("last_observed"));
+                if(!time.isEmpty()) time="최근 감지 "+time;
+            }
             TextView detail=label((time.isEmpty()?"—":time)+"  |  "+location,12,MUTED);
             metadata.addView(detail,new LinearLayout.LayoutParams(0,-2,1));
-            TextView badge=label(severity,12,color);
+            TextView badge=label("Unknown".equals(severity)?"미분류":severity,12,color);
             badge.setPadding(dp(8),dp(3),dp(8),dp(3));
             badge.setBackground(background(Color.rgb(36,48,63),10));
             metadata.addView(badge);
             item.addView(metadata);
             String message=alarm.optString("text","").trim();
+            if(serverAlarm) {
+                String rule=alarm.optString("rule_key");
+                message="communication".equals(rule)?"측정 통신 이상":
+                    "device_alarms".equals(rule)?"장비 알람 발생 · 상세 정보 없음":alarm.optString("message","");
+            }
             item.addView(label(message.isEmpty()?"(알람 내용 없음)":message,15,INK));
+            if(serverAlarm&&"communication".equals(alarm.optString("rule_key")))
+                item.addView(label("장비의 정상 측정 데이터를 받지 못하고 있습니다. 연결 상태와 데이터 갱신 시각을 확인하세요.",12,MUTED));
         }
     }
     public static List<ModuleSlots.Slot> slots(JSONObject data) {

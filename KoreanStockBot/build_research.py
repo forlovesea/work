@@ -7,6 +7,7 @@ from research_sources import Sources
 
 
 def build(catalog,composition,as_of,output,sources=None,now=None):
+    from collection_log import audited
     now=now or now_kst()
     from datetime import date
     if not 0<=(now.date()-date.fromisoformat(as_of)).days<=10:
@@ -23,11 +24,11 @@ def build(catalog,composition,as_of,output,sources=None,now=None):
         if etf['tradable']:
             for row in rows:
                 corp=row['corp_code']
-                if corp not in financials: financials[corp]=sources.financial(corp)
+                if corp not in financials: financials[corp]=audited(sources,'DART_FINANCIAL_ANALYSIS','DART',sources.financial,corp)
             # ETF-specific news plus the three largest constituent names; never execute news text.
             names=[etf['name']]+[r['name'] for r in sorted(rows,key=lambda r:-float(r['weight']))[:3]]
             items=[]
-            for name in names: items.extend(sources.news(name))
+            for name in names: items.extend(audited(sources,'NAVER_NEWS_ANALYSIS','NAVER',sources.news,name))
             news=news_summary(items,names,now)
         else:
             news={'count':0,'risk':False,'positive_count':0,'articles':[]}

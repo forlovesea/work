@@ -115,7 +115,7 @@ public class MainActivity extends Activity {
         return panel;
     }
 
-    private void navigationButton(LinearLayout parent, String title, boolean devicePanel, boolean selected, Runnable action) {
+    private Button navigationButton(LinearLayout parent, String title, boolean devicePanel, boolean selected, Runnable action) {
         Button button = new Button(this);
         button.setText(title); button.setTextSize(13); button.setAllCaps(false);
         button.setMinWidth(0); button.setMinimumWidth(0);
@@ -134,6 +134,7 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dashboard.dp(48), 1);
         if (parent.getChildCount() > 0) params.setMarginStart(dashboard.dp(8));
         parent.addView(button, params);
+        return button;
     }
 
     private void text(String value, boolean heading) {
@@ -157,11 +158,15 @@ public class MainActivity extends Activity {
                 String path = requestedPage.equals("devices") ? "/api/v1/devices" :
                     "/api/v1/" + (requestedPage.equals("details") ? "snapshot" : requestedPage) + ApiClient.query(selectedSite, selectedDevice);
                 JSONObject response = api.get(path);
+                // Fetch current alarms even while viewing status or historical measurements.
+                JSONObject alarms = requestedPage.equals("devices") ? null :
+                    requestedPage.equals("alarms") ? response :
+                    api.get("/api/v1/alarms" + ApiClient.query(selectedSite, selectedDevice));
                 runOnUiThread(() -> {
                     busy = false;
                     if (closing || isFinishing() || isDestroyed()) return;
                     if (requestGeneration != generation) { refresh(); return; }
-                    try { int y = scroll.getScrollY(); render(requestedPage, response); scroll.post(() -> scroll.scrollTo(0, y)); }
+                    try { int y = scroll.getScrollY(); render(requestedPage, response, alarms); scroll.post(() -> scroll.scrollTo(0, y)); }
                     catch (Exception e) { status.setText("서버 데이터 형식을 확인하세요."); }
                 });
             } catch (Exception e) {
@@ -176,7 +181,7 @@ public class MainActivity extends Activity {
         });
     }
 
-    private void render(String requestedPage, JSONObject response) throws JSONException {
+    private void render(String requestedPage, JSONObject response, JSONObject alarms) throws JSONException {
         content.removeAllViews(); content.setAlpha(1f); status.setTextColor(BatteryDashboard.MUTED);
         status.setText("서버 응답: " + DisplayTime.format(response.optString("server_time", "")));
         if (requestedPage.equals("devices")) {
@@ -198,7 +203,8 @@ public class MainActivity extends Activity {
         LinearLayout tabs = new LinearLayout(this);
         navigationButton(tabs, "상태", true, requestedPage.equals("details"), () -> navigate("details"));
         navigationButton(tabs, "이력", true, requestedPage.equals("history"), () -> navigate("history"));
-        navigationButton(tabs, "알람", true, requestedPage.equals("alarms"), () -> navigate("alarms"));
+        Button alarmButton = navigationButton(tabs, "알람", true, requestedPage.equals("alarms"), () -> navigate("alarms"));
+        dashboard.styleAlarmButton(alarmButton, alarms);
         devicePanel.addView(tabs);
         if (requestedPage.equals("details")) {
             boolean fresh = response.optBoolean("fresh");
@@ -232,10 +238,8 @@ public class MainActivity extends Activity {
                 if (!h.isNull("raw_trap")) text("Trap: " + h.opt("raw_trap"), false);
             }
         } else {
-            JSONArray active = response.getJSONArray("active"), events = response.getJSONArray("events");
-            dashboard.deviceAlarms(content,response.optJSONObject("device_alarms"));
-            text("활성 알람 " + active.length() + "건", true);
-            for (int i = 0; i < active.length(); i++) text(active.getJSONObject(i).optString("message"), false);
+            JSONArray events = response.getJSONArray("events");
+            dashboard.currentAlarmCards(content,response);
             text("발생 / 복구 이력", true);
             for (int i = 0; i < events.length(); i++) {
                 JSONObject e = events.getJSONObject(i);

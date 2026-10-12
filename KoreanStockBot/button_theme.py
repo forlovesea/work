@@ -1,4 +1,4 @@
-"""Rounded, shaded ttk buttons with keyboard, hover, press and disabled states."""
+"""Consistent compact ttk buttons with clear action colors and states."""
 import tkinter as tk
 
 
@@ -11,37 +11,27 @@ def button_style(label):
 
 
 def install_buttons(root,style):
-    images=[]
-    def image(fill,edge,pressed=False):
-        size=36; radius=9; top=2 if pressed else 0; bottom=34 if pressed else 31
-        photo=tk.PhotoImage(master=root,width=size,height=size)
-        def inside(x,y,inset=0):
-            left=inset; right=size-1-inset; high=top+inset; low=bottom-inset
-            if not left<=x<=right or not high<=y<=low:return False
-            r=max(1,radius-inset)
-            cx=min(max(x,left+r),right-r); cy=min(max(y,high+r),low-r)
-            return (x-cx)**2+(y-cy)**2<=r*r
-        for y in range(size):
-            for x in range(size):
-                if inside(x,y):photo.put(fill if inside(x,y,2) else edge,(x,y))
-                elif not pressed and y>bottom and 9<=x<27:photo.put('#080E18',(x,y))
-        images.append(photo); return photo
     palettes={
-        'TButton':('#2D4260','#6C88AD','#3E5A80','#20324D'),
-        'Primary.TButton':('#2862D8','#85B7FF','#397BEF','#1C49AA'),
-        'Success.TButton':('#12645C','#53D6B9','#197F72','#0C493F'),
-        'Danger.TButton':('#943F56','#FF91AA','#B6506A','#732A40'),
-        'Violet.TButton':('#6242AA','#B9A2FF','#7C58C8','#49317F'),
+        'TButton':('#293B55','#6684AA','#344C6D','#1E2E45'),
+        'Primary.TButton':('#245BC7','#79A9F5','#316DDF','#193F8F'),
+        'Success.TButton':('#176B59','#66C9AA','#21836C','#104B3F'),
+        'Danger.TButton':('#A33F52','#F28B9A','#BD4D61','#762B3B'),
+        'Violet.TButton':('#6347A8','#B6A2EA','#795AC2','#47327D'),
     }
-    for number,(name,(fill,edge,hover,pressed)) in enumerate(palettes.items()):
-        normal=image(fill,edge); active=image(hover,edge); down=image(pressed,edge,True)
-        focus=image(fill,'#FFE19C'); disabled=image('#252E3B','#465162')
-        element=f'Action{number}.surface'
-        style.element_create(element,'image',normal,('disabled',disabled),('pressed',down),
-                             ('active',active),('focus',focus),border=12,sticky='nsew')
-        style.layout(name,[(element,{'sticky':'nsew','children':[
-            ('Button.padding',{'sticky':'nsew','children':[('Button.label',{'sticky':'nsew'})]})]})])
-        style.configure(name,font=('맑은 고딕',10,'bold'),padding=(16,11),foreground='#FFFFFF',anchor='center')
-        style.map(name,foreground=[('disabled','#8D9AAD'),('!disabled','#FFFFFF')])
-    root._button_images=images
+    for name,(fill,edge,hover,pressed) in palettes.items():
+        style.configure(name,font=('맑은 고딕',10,'bold'),padding=(14,5),
+                        foreground='#FFFFFF',background=fill,bordercolor=edge,
+                        lightcolor=edge,darkcolor=pressed,anchor='center')
+        style.map(name,
+                  background=[('disabled','#343A44'),('pressed',pressed),('active',hover),('!disabled',fill)],
+                  foreground=[('disabled','#98A2B2'),('!disabled','#FFFFFF')],
+                  bordercolor=[('focus','#FFE19C'),('!focus',edge)])
+    style.configure('Compact.TButton',font=('맑은 고딕',10,'bold'),padding=(14,5),
+                    foreground='#FFFFFF',background=palettes['TButton'][0],
+                    bordercolor=palettes['TButton'][1],anchor='center')
+    style.map('Compact.TButton',
+              background=[('disabled','#343A44'),('pressed',palettes['TButton'][3]),
+                          ('active',palettes['TButton'][2]),('!disabled',palettes['TButton'][0])],
+              foreground=[('disabled','#98A2B2'),('!disabled','#FFFFFF')],
+              bordercolor=[('focus','#FFE19C'),('!focus',palettes['TButton'][1])])
     root.option_add('*TButton.cursor','hand2')

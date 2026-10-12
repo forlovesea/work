@@ -40,7 +40,16 @@ def return_series(rows, capital, period='전체', start='', end=''):
 def gui(mode='paper'):
     import tkinter as tk
     from tkinter import ttk, filedialog, messagebox
+    import sys
+    if sys.platform=='win32':
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('KoreanStockBot.Desktop.'+mode)
     root = tk.Tk()
+    asset_root=Path(getattr(sys,'_MEIPASS',Path(__file__).resolve().parent))
+    root._chart_icon=tk.PhotoImage(file=str(asset_root/'assets'/'stock_chart.png'))
+    root.iconphoto(True,root._chart_icon)
+    if sys.platform=='win32':
+        root.iconbitmap(default=str(asset_root/'assets'/'stock_chart.ico'))
     real=mode!='paper'
     mode_name={'paper':'모의매매','etf':'ETF 자동매매','stock':'단일 종목 자동매매'}[mode]
     from app_version import VERSION
@@ -78,15 +87,19 @@ def gui(mode='paper'):
     style.map('Treeview.Heading',background=[('active','#343A44')])
     style.map('Treeview',background=[('selected','#294365')],foreground=[('selected',colors['text'])])
     # Keep scrollbars outside the content so they remain reachable at small sizes.
-    root.rowconfigure(0,weight=1)
+    root.rowconfigure(1,weight=1)
     root.columnconfigure(0,weight=1)
+    exit_bar=ttk.Frame(root)
+    exit_bar.grid(row=0,column=0,columnspan=2,sticky='ew',padx=12,pady=(8,0))
+    exit_button=ttk.Button(exit_bar,text='프로그램 종료',style='Danger.TButton',cursor='hand2')
+    exit_button.pack(side='right')
     viewport=tk.Canvas(root,bg=colors['bg'],highlightthickness=0)
-    viewport.grid(row=0,column=0,sticky='nsew')
+    viewport.grid(row=1,column=0,sticky='nsew')
     vertical=ttk.Scrollbar(root,orient='vertical',command=viewport.yview)
-    vertical.grid(row=0,column=1,sticky='ns')
+    vertical.grid(row=1,column=1,sticky='ns')
     horizontal=ttk.Scrollbar(root,orient='horizontal',command=viewport.xview)
-    horizontal.grid(row=1,column=0,sticky='ew')
-    ttk.Frame(root,width=16,height=16).grid(row=1,column=1,sticky='nsew')
+    horizontal.grid(row=2,column=0,sticky='ew')
+    ttk.Frame(root,width=16,height=16).grid(row=2,column=1,sticky='nsew')
     viewport.configure(yscrollcommand=vertical.set,xscrollcommand=horizontal.set)
     content=ttk.Frame(viewport)
     content_id=viewport.create_window(0,0,window=content,anchor='nw')
@@ -295,7 +308,7 @@ def gui(mode='paper'):
             canvas.create_text(24,70,text='선택한 기간에 재생된 데이터가 없습니다.',anchor='w',fill=colors['muted'])
             return
         w,h=max(canvas.winfo_width(),350),max(canvas.winfo_height(),180)
-        left,right,top,bottom=24,w-112,54,h-38
+        left,right,top,bottom=24,w-112,54,h-64
         canvas.create_rectangle(right+8,0,w,h,fill=colors['panel'],outline='')
         lo,hi=min(values+[0]),max(values+[0])
         pad=max((hi-lo)*.15,.5)
@@ -313,10 +326,18 @@ def gui(mode='paper'):
             canvas.create_text(right+18,y,text=f'{value:+.1f}%',anchor='w',fill=colors['muted'],font=('맑은 고딕',10,'bold'))
         zero=bottom-(0-lo)/(hi-lo)*(bottom-top)
         canvas.create_line(left,zero,right,zero,fill='#8999AC',dash=(4,3))
-        for i,anchor in [(0,'w'),((len(values)-1)//2,'center'),(len(values)-1,'e')]:
+        tick_boxes=[]
+        for i,anchor in dict([(0,'w'),(len(values)-1,'e'),((len(values)-1)//2,'center')]).items():
             x,_=xy(i)
-            canvas.create_line(x,top,x,bottom,fill=colors['grid'],dash=(4,4))
-            canvas.create_text(x,bottom+18,text=dates[i],anchor=anchor,fill=colors['muted'])
+            # Keep one label per point; short histories used to draw index 0 twice.
+            tick=canvas.create_text(x,bottom+18,text='기준점' if i==0 else dates[i],anchor=anchor,fill=colors['muted'],tags='date_tick')
+            box=canvas.bbox(tick)
+            if any(box[0]<prior[2]+12 and box[2]>prior[0]-12 for prior in tick_boxes):
+                canvas.delete(tick)
+            else:
+                tick_boxes.append(box)
+                canvas.create_line(x,top,x,bottom,fill=colors['grid'],dash=(4,4))
+        canvas.create_text(left,h-14,text='수익률 기준: '+dates[0],anchor='w',fill=colors['muted'],tags='baseline_note')
         points=[xy(i) for i in range(len(values))]
         # Split at zero so red and blue denote profit/loss, not daily movement.
         for i in range(1,len(points)):
@@ -447,6 +468,15 @@ def gui(mode='paper'):
     buttons = ttk.Frame(content)
     buttons.pack(pady=14)
     paper_actions=[('CSV 불러오기',load),('백테스트',start),('모의 재생',lambda:start(True)),('재생 중지',stop),('수익률 그래프',open_graph),('결과 저장',save),('10% 복리 계산',goals)]
+    def close_paper():
+        stop()
+        if engine is not None:
+            try:engine.export(ROOT/'reports'/('paper_exit_'+datetime.now().strftime('%Y%m%d_%H%M%S_%f')))
+            except Exception:
+                messagebox.showerror('종료 보류','모의매매 결과를 저장하지 못했습니다. 저장 경로와 디스크 공간을 확인하세요.');return
+        root.destroy()
+    exit_button.configure(command=close_paper)
+    root.protocol('WM_DELETE_WINDOW',close_paper)
     if real:
         from live_gui import LivePanel
         def accept_snapshot(snapshot,config,label):
@@ -464,6 +494,7 @@ def gui(mode='paper'):
         controller=LivePanel(root,content,buttons,mode,colors,status,accept_snapshot)
         paper_actions=[('수익률 그래프',open_graph)]
         root.protocol('WM_DELETE_WINDOW',controller.close)
+        exit_button.configure(command=controller.close)
     for label,cmd in paper_actions:
         ttk.Button(buttons,text=label,command=cmd,style=button_style(label),cursor='hand2').pack(side='left',padx=4)
     chart.bind('<Configure>',lambda event:draw_return(chart))

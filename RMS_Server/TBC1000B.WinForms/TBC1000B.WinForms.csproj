@@ -5,6 +5,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <DefaultItemExcludes>$(DefaultItemExcludes);artifacts/**</DefaultItemExcludes>
     <VersionPrefix>3.2.6</VersionPrefix>
     <ApplicationIcon>..\battery#2.ico</ApplicationIcon>
     <RootNamespace>TBC1000B.WinForms</RootNamespace>

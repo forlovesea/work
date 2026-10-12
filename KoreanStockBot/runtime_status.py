@@ -5,6 +5,12 @@ from datetime import datetime, timedelta, timezone
 KST=timezone(timedelta(hours=9))
 
 
+def exit_status(code,stop_confirmed):
+    if code==0 and stop_confirmed:
+        return '중지 완료 · 미체결 정리 확인 · 보유 종목 유지 · 자동매매 감시 종료'
+    return '프로세스 종료 · 정상 중지 미확인 · 토스 앱에서 미체결·보유분 확인 필요'
+
+
 def display_time(value):
     try: return datetime.fromisoformat(value).astimezone(KST).strftime('%Y-%m-%d %H:%M')+' (한국시간)'
     except (ValueError,TypeError): return '확인되지 않음'
@@ -32,7 +38,8 @@ def describe_status(line):
         'INITIALIZING':'연결 확인 중 · 인증·계좌·기존 주문 상태 점검',
         'BROKER_CONNECTION_WAIT':'증권사 연결 확인 실패 · 재연결 대기 · 주문·체결 상태 확인 필요',
         'HOLD':'장중 감시 중 · 매수·매도 조건 확인',
-        'PENDING':'미체결 주문 확인 중', 'STOPPING':'중지 처리 중 · 미체결 취소 확인',
+        'STOP_CHECKING':'중지 요청 수신 · 기존 주문 조회 및 미체결 정리 확인 중',
+        'PENDING':'미체결 주문 확인 중', 'STOPPING':'미체결 주문 정리 중 · 취소 또는 체결 결과 확인 대기',
         'STOPPED':'중지 완료 · 보유 종목 유지', 'STOP_REQUESTED':'중지 요청 확인 중',
         'HALTED':'위험 한도 도달 · 신규 매수 중단',
         'ENTRY_PAUSED':'수익·손실 한도 또는 당일 매수 제한 · 신규 매수 대기',
@@ -45,4 +52,7 @@ def describe_status(line):
     if report.get('halted'): text+=' · 위험 한도로 신규 매수 중단'
     elif report.get('target_paused'): text+=' · 수익 목표 도달로 신규 매수 중단'
     if report.get('auto_research'): text+='\n자동 분석: '+str(report['auto_research'])
+    if 'selection_details' in report:
+        from diagnostics import selection_text
+        text+='\n'+selection_text(report['selection_details'])
     return text

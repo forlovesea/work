@@ -177,6 +177,53 @@ class EtfLiveTests(unittest.TestCase):
         self.assertEqual(self.bot.step()['status'],'NO_ELIGIBLE_AFFORDABLE_ETF')
         self.assertEqual(self.b.sent,[])
 
+    def test_user_scope_excludes_new_buy_without_erasing_state(self):
+        from etf_scope import write_scope
+        write_scope(self.bot.scope_path,self.bot.binding,10,20)
+        result=self.bot.step()
+        self.assertEqual(result['status'],'NO_ELIGIBLE_AFFORDABLE_ETF')
+        self.assertEqual(result['selection_details']['rows'][0]['state'],'OUTSIDE_RANGE')
+        self.assertFalse(self.b.sent)
+        self.assertEqual(self.bot.s['binding'],self.bot.binding)
+
+    def test_selected_symbols_restrict_new_buy(self):
+        from etf_scope import write_symbols
+        write_symbols(self.bot.scope_path,self.bot.binding,['654321'])
+        self.assertEqual(self.bot.step()['status'],'NO_ELIGIBLE_AFFORDABLE_ETF')
+        self.assertFalse(self.b.sent)
+
+    def test_preview_ignores_scope_without_orders_or_identity_changes(self):
+        from etf_scope import write_symbols
+        write_symbols(self.bot.scope_path,self.bot.binding,['654321'])
+        before=json.dumps(self.bot.s,sort_keys=True)
+        self.bot.select('2026-06-29',preview=True)
+        self.assertEqual(self.bot.selection_details['rows'][0]['state'],'ELIGIBLE')
+        self.assertEqual(json.dumps(self.bot.s,sort_keys=True),before)
+        self.assertFalse(self.b.sent)
+
+    def test_symbol_selection_preserves_existing_exit(self):
+        from etf_scope import write_symbols
+        self.bot.step();self.b.fill('1',2,6010,fee='2')
+        write_symbols(self.bot.scope_path,self.bot.binding,['654321'])
+        self.b.price=2800
+        self.assertEqual(self.bot.step()['side'],'SELL')
+
+    def test_scope_change_does_not_block_existing_exit(self):
+        from etf_scope import write_scope
+        self.bot.step();self.b.fill('1',2,6010,fee='2')
+        write_scope(self.bot.scope_path,self.bot.binding,10,20)
+        self.b.price=2800
+        self.assertEqual(self.bot.step()['side'],'SELL')
+
+    def test_range_proposal_counts_are_not_final_buy_signals(self):
+        from etf_scope import proposals,write_scope
+        write_scope(self.bot.scope_path,self.bot.binding,10,20)
+        details=self.bot.step()['selection_details']
+        options=proposals(details)
+        self.assertEqual(options[0]['affordable'],1)
+        self.assertEqual(options[2]['affordable'],0)
+        self.assertFalse(self.b.sent)
+
     def test_research_outage_does_not_disable_stop_loss(self):
         self.bot.step()
         self.b.fill('1',2,6010,fee='2')

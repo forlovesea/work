@@ -26,7 +26,15 @@ public sealed class SnmpMonitorService : IMonitorService
     public event EventHandler<IReadOnlyDictionary<string, string>>? RawTrapReceived;
     public event EventHandler<string>? TrapListenerFailed;
 
-    public SnmpMonitorService() => _trapReceiver.MessageReceived += OnTrapMessage;
+    public event EventHandler? PacketSent;
+    public event EventHandler? PacketReceived;
+
+    public SnmpMonitorService()
+    {
+        _client.PacketSent += (_, _) => PacketSent?.Invoke(this, EventArgs.Empty);
+        _client.PacketReceived += (_, _) => PacketReceived?.Invoke(this, EventArgs.Empty);
+        _trapReceiver.MessageReceived += OnTrapMessage;
+    }
 
     public async Task ConnectAsync(ConnectionOptions options, CancellationToken cancellationToken)
     {
@@ -147,6 +155,7 @@ public sealed class SnmpMonitorService : IMonitorService
 
     private void OnTrapMessage(object? sender, (SnmpMessage Message, System.Net.IPEndPoint Source) data)
     {
+        PacketReceived?.Invoke(this, EventArgs.Empty);
         var raw = data.Message.Variables.ToDictionary(v => v.Oid, v => v.DisplayValue, StringComparer.Ordinal); raw["_source_ip"] = data.Source.Address.ToString(); var entry = TrapDataParser.Parse(raw);
         lock (_snapshot) { _snapshot.Traps.Insert(0, entry); if (_snapshot.Traps.Count > 1000) _snapshot.Traps.RemoveAt(_snapshot.Traps.Count - 1); _snapshot.UpdatedAt = DateTime.Now; }
         RawTrapReceived?.Invoke(this, raw); TrapReceived?.Invoke(this, entry); RaiseSnapshot();

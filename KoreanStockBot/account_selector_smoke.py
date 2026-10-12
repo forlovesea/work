@@ -3,11 +3,15 @@ import queue
 import tkinter as tk
 from tkinter import ttk
 from unittest.mock import patch
+from button_theme import button_style, install_buttons
 from live_gui import LivePanel
 
 
 def run():
     root=tk.Tk(); root.withdraw()
+    style=ttk.Style(root); style.theme_use('clam')
+    style.configure('TEntry',padding=7)
+    install_buttons(root,style)
     panel=LivePanel.__new__(LivePanel)
     panel.root=root; panel.mode='stock'; panel.colors={'bg':'#111111'}
     panel.child=None; panel.querying=False; panel.events=queue.Queue()
@@ -20,6 +24,10 @@ def run():
     assert {'설정 템플릿 생성','템플릿 암호화 변환','설정 파일 불러오기'} <= labels
     selector=next(w for w in widgets if isinstance(w,ttk.Combobox))
     query=next(w for w in widgets if isinstance(w,ttk.Button) and w.cget('text')=='계좌 조회')
+    assert query.cget('style')==button_style('계좌 조회')
+    height_checks=[ttk.Button(root,text='height check',style=name)
+                   for name in ('TButton','Primary.TButton','Success.TButton',
+                                'Danger.TButton','Violet.TButton','Compact.TButton')]
     import tempfile
     from pathlib import Path
     import json
@@ -56,6 +64,11 @@ def run():
     selector.current(1); assert selector.get()=='202'
     entry=next(w for w in widgets if isinstance(w,ttk.Entry) and not isinstance(w,ttk.Combobox))
     eye=next(w for w in widgets if isinstance(w,ttk.Button) and w.cget('text')=='👁 보기')
+    root.update_idletasks()
+    for button in [eye,*height_checks]:
+        assert button.winfo_reqheight()==entry.winfo_reqheight(), (
+            f"{button.cget('style')} height {button.winfo_reqheight()} "
+            f"does not match entry height {entry.winfo_reqheight()}")
     assert entry.cget('show')=='●'
     eye.invoke(); assert entry.cget('show')==''
     eye.invoke(); assert entry.cget('show')=='●'

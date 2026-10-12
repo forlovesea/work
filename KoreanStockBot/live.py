@@ -476,9 +476,12 @@ def main(argv=None,broker=None):
     p.add_argument('--live',action='store_true',help='Enable real orders; local credentials required')
     p.add_argument('--etf',action='store_true',help='KOSDAQ-related ETF top-20 by net assets')
     p.add_argument('--once',action='store_true')
+    p.add_argument('--candidate-report',action='store_true',help='Read-only ETF candidate analysis, no orders')
     p.add_argument('--accounts',action='store_true',help='List accountSeq/type, never account numbers')
     p.add_argument('--recover-order',help='Bind broker-confirmed order ID after ambiguous submission; never resends')
     args=p.parse_args(argv)
+    if args.candidate_report and (args.live or not args.etf or args.recover_order):
+        p.error('Candidate report requires --etf and forbids --live/--recover-order')
     runtime=ROOT/'runtime'
     with process_lock(runtime/'bot.lock'):
         from credentials import load_environment
@@ -512,6 +515,17 @@ def main(argv=None,broker=None):
             bot=LiveBot(broker,config,store,live=args.live)
         print(json.dumps({'status':'INITIALIZING'},ensure_ascii=False),flush=True)
         bot.initialize()
+        if args.candidate_report:
+            from candidate_feedback import market_context,failure
+            cal=broker.get('market-calendar/KR',{'date':bot.clock().date().isoformat()})
+            market=market_context(cal,bot.clock())
+            try:bot.select(cal['previousBusinessDay']['date'],preview=True)
+            except Exception as exc:
+                print(json.dumps(failure(exc,market),ensure_ascii=False),flush=True)
+                return
+            bot.selection_details['market']=market
+            print(json.dumps({'status':'CANDIDATE_REPORT','selection_details':bot.selection_details},ensure_ascii=False),flush=True)
+            return
         if args.recover_order:
             bot.recover(args.recover_order)
             print('Recovery saved. Inspect state, then restart normally.')
@@ -524,7 +538,9 @@ def main(argv=None,broker=None):
         try:
             while True:
                 stopped=(ROOT/'STOP').exists()
-                if stopped and updater: updater.close()
+                if stopped:
+                    print(json.dumps({'status':'STOP_CHECKING'},ensure_ascii=False),flush=True)
+                    if updater: updater.close()
                 update_state=updater.tick_broker(broker) if updater and not stopped else None
                 try:
                     result=bot.step(stop=stopped)
@@ -537,7 +553,10 @@ def main(argv=None,broker=None):
                 print(json.dumps(result,ensure_ascii=False),flush=True)
                 if result.get('status')=='STOPPED' or args.once:
                     break
-                time.sleep(config['poll_seconds'])
+                deadline=time.monotonic()+config['poll_seconds']
+                while time.monotonic()<deadline:
+                    if not stopped and (ROOT/'STOP').exists(): break
+                    time.sleep(min(0.25,max(0,deadline-time.monotonic())))
         finally:
             if updater: updater.close()
 
@@ -548,6 +567,9 @@ if __name__=='__main__':
     except KeyboardInterrupt:
         print('Process stopped. Existing broker orders/holdings remain; check Toss.')
     except (SafetyStop,BrokerError,KeyError,ValueError,OSError,TypeError) as exc:
+        if '--candidate-report' in sys.argv:
+            from candidate_feedback import failure
+            print(json.dumps(failure(exc),ensure_ascii=False),flush=True)
         # Exceptions from API parsing may contain private values; print only known-safe messages.
         print('STOP:',str(exc) if isinstance(exc,(SafetyStop,BrokerError)) else type(exc).__name__)
         print('No automatic retry. Check runtime state and Toss orders before restarting.')

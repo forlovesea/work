@@ -101,10 +101,12 @@ class WorkerTests(unittest.TestCase):
             n = (addr - 0xA731) // 64 + 1
             return [0] * 54 if n in (2, 10) else None
         with patch.object(worker, 'read_registers', side_effect=reply) as read:
-            worker.discover_modules()
+            for _ in range(10):
+                worker.discovery_due = 0
+                worker.discover_modules()
         self.assertEqual([call.args for call in read.call_args_list],
                          [(0xA731 + i * 64, 54) for i in range(10)])
-        self.assertEqual(discovered, [[2, 10]])
+        self.assertEqual(discovered, [[2], [2, 10]])
         worker.global_alarms = (0,)
         worker.module_alarms = {2: ([], True), 10: ([], True)}
         worker.alarm_received = {2: time.monotonic(), 10: time.monotonic()}
@@ -121,11 +123,51 @@ class WorkerTests(unittest.TestCase):
         alarms = []
         worker.alarm_signal.connect(alarms.append)
         with patch.object(worker, 'read_registers', return_value=None):
-            worker.discover_modules()
+            for _ in range(10):
+                worker.discovery_due = 0
+                worker.discover_modules()
         worker.global_alarms = (0,)
         worker.publish_alarms()
         self.assertIn('No battery modules detected', alarms[-1])
         self.assertNotIn('All Modules Normal', alarms[-1])
+
+    def test_auto_retries_initial_failure_without_reconnect(self):
+        worker = monitor.PollWorker('fake', 9600, module_count=None)
+        with patch.object(worker, 'read_registers', return_value=None):
+            for _ in range(10):
+                worker.discovery_due = 0
+                worker.discover_modules()
+        self.assertEqual(worker.monitored_modules, set())
+        with patch.object(worker, 'read_registers', return_value=[0] * 54) as read:
+            worker.discover_modules()
+            read.assert_not_called()
+            worker.discovery_due = 0
+            worker.discover_modules()
+        self.assertEqual(worker.monitored_modules, {1})
+
+    def test_auto_interleaves_live_polling_and_discovery(self):
+        worker = monitor.PollWorker('fake', 9600, module_count=None)
+        reads = []
+        def reply(addr, count):
+            n = (addr - 0xA731) // 64 + 1
+            reads.append(n)
+            if n == 3:
+                worker.stop()
+            return [0] * 54 if n == 1 else None
+        def advance(_):
+            worker.discovery_due = 0
+        with patch.object(monitor, 'ModbusMaster'), \
+             patch.object(worker, 'read_registers', side_effect=reply), \
+             patch.object(worker, 'poll_time'), \
+             patch.object(worker, 'poll_module_alarm'), \
+             patch.object(worker, 'poll_barcode'), \
+             patch.object(worker, 'msleep', side_effect=advance):
+            # Keep this scheduling test focused on module reads.
+            worker.global_alarms = (0,)
+            original = worker.read_registers.side_effect
+            worker.read_registers.side_effect = lambda addr, count: (0,) if addr == 0x5022 else original(addr, count)
+            worker.run()
+        self.assertEqual(reads, [1, 1, 2, 1, 3])
 
     def test_battery_address_signed_values_and_range(self):
         regs = [0] * 54
@@ -177,6 +219,31 @@ class GuiTests(unittest.TestCase):
     def setUp(self):
         self.gui = monitor.TimeBatteryGui()
         self.gui.is_connected = True
+
+    def test_continuous_traffic_keeps_visible_off_interval(self):
+        with patch.object(monitor.time, 'monotonic') as clock:
+            clock.return_value = 100.0
+            self.gui.on_activity('TX')
+            self.assertEqual(self.gui.activity_leds['TX'].accessibleName(), 'TX: active')
+            self.assertEqual(self.gui.activity_leds['RX'].accessibleName(), 'RX: idle')
+            for stamp in (100.04, 100.08, 100.12, 100.16):
+                clock.return_value = stamp
+                self.gui.on_activity('TX')
+            self.assertEqual(self.gui.activity_leds['TX'].accessibleName(), 'TX: idle')
+            clock.return_value = 100.19
+            self.gui.refresh_activity_leds()
+            self.assertEqual(self.gui.activity_leds['TX'].accessibleName(), 'TX: active')
+            clock.return_value = 100.30
+            self.gui.refresh_activity_leds()
+            self.assertEqual(self.gui.activity_leds['TX'].accessibleName(), 'TX: idle')
+            clock.return_value = 101.0
+            self.gui.refresh_activity_leds()
+            self.assertEqual(self.gui.activity_leds['TX'].accessibleName(), 'TX: idle')
+            self.gui.on_activity('RX')
+            self.gui.on_worker_finished()
+            self.assertTrue(all(led.accessibleName().endswith('idle')
+                                for led in self.gui.activity_leds.values()))
+            self.assertFalse(self.gui.activity_pending)
 
     def tearDown(self):
         self.gui.close()

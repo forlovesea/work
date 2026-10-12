@@ -17,30 +17,43 @@ def worker(day,output):
     from research_sources import Sources
     from build_research import build
     now=now_kst()
+    from collection_log import CollectionLog,CollectionError,safe_error
+    audit=CollectionLog(ROOT/'research'/'logs')
     status=Store(ROOT/'research'/'auto_status.json')
     def report(state,**details):
-        status.data=dict(state=state,as_of=day,updated_at=now_kst().isoformat(),**details)
+        status.data=dict(state=state,as_of=day,updated_at=now_kst().isoformat(),**audit.snapshot(),**details)
         status.save()
+        audit.write('STATUS',state=state)
     try:
-        if any(not os.environ.get(k) for k in RESEARCH_KEYS): raise SafetyStop('SETUP_REQUIRED')
+        audit.write('RUN_START',as_of=day)
+        if any(not os.environ.get(k) for k in RESEARCH_KEYS): raise CollectionError('MISSING_RESEARCH_CREDENTIALS')
         if not 0<(now.date()-date.fromisoformat(day)).days<=10: raise SafetyStop('INVALID_AS_OF_DATE')
         with process_lock(ROOT/'research'/'build.lock'):
             report('COLLECTING_KRX')
             sources=Sources(ROOT/'research'/'cache',now)
+            sources.audit=audit
+            audit.observer=lambda:report('COLLECTING_DATA',sources=sources.health)
+            sources.observer=lambda health:report('COLLECTING_DATA',sources=health)
             u,h,failures=collect_inputs(day,ROOT/'research'/'automatic_inputs',sources)
-            report('ANALYZING_FINANCIALS_AND_NEWS',composition_unavailable=failures)
+            report('ANALYZING_FINANCIALS_AND_NEWS',composition_unavailable=failures,sources=sources.health)
             # Publish only after the entire collection and analysis succeeds.
             staging=ROOT/'research'/'auto_staging.json'
             book=build(u,h,day,staging,sources,now)
             book.update(source_mode='automatic',max_age_seconds=7200,
                         collection={'provider':'KRX via pykrx 1.2.9 + OpenDART + NAVER',
-                                    'composition_unavailable':failures})
+                                    'composition_unavailable':failures,'sources':sources.health})
             target=Store(output); target.data=book; target.save()
-            report('READY',candidates=len(book['universe']),eligible=sum(a['allow_buy'] for a in book['assessments'].values()))
+            audit.current='COMPLETE'
+            report('READY',sources=sources.health,candidates=len(book['universe']),
+                   eligible=sum(a['allow_buy'] for a in book['assessments'].values()),composition_unavailable=failures)
     except Exception as exc:
         # Do not propagate third-party errors: they may contain URLs, headers or passwords.
-        report('COLLECTION_FAILED',error_type=type(exc).__name__,retry='automatic')
+        audit.current=audit.failed or audit.current
+        audit.write('RUN_FAILED',**safe_error(exc))
+        report('COLLECTION_FAILED',**safe_error(exc),retry='automatic',
+               sources=sources.health if 'sources' in locals() else {})
         return 1
+    finally:audit.close()
     return 0
 
 

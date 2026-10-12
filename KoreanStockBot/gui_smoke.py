@@ -21,6 +21,8 @@ def smoke(mode):
             try:
                 widgets=list(descendants(root))
                 buttons={str(w.cget('text')):w for w in widgets if isinstance(w,ttk.Button)}
+                assert '프로그램 종료' in buttons
+                assert buttons['프로그램 종료'].master.master==root
                 buttons['Manual'].invoke()
                 manual=root._manual_window
                 assert manual.winfo_exists() and 'Manual' in manual.title()
@@ -33,6 +35,14 @@ def smoke(mode):
                     assert '실전 시작' in buttons and '읽기 전용 점검' in buttons
                     assert '모의 재생' not in buttons
                     assert any(isinstance(w,ttk.Label) and '실행 대기 · 실전 시작 후' in str(w.cget('text')) for w in widgets)
+                    log=next(w for w in widgets if isinstance(w,tk.Text))
+                    assert log.cget('yscrollcommand') and log.cget('xscrollcommand')
+                else:
+                    buttons['모의 재생'].invoke(); buttons['재생 중지'].invoke(); root.update_idletasks()
+                    plot=next(w for w in widgets if isinstance(w,tk.Canvas) and w.find_withtag('baseline_note'))
+                    boxes=[plot.bbox(tick) for tick in plot.find_withtag('date_tick')]
+                    for i,box in enumerate(boxes):
+                        for other in boxes[i+1:]:assert box[2]<other[0] or other[2]<box[0]
                 buttons['수익률 그래프'].invoke()
                 root.update_idletasks()
                 selector=next(w for w in widgets if isinstance(w,ttk.Combobox) and '직접 기간' in w.cget('values'))
@@ -53,7 +63,8 @@ def smoke(mode):
         root.after(50,check)
         original(root)
     original=tk.Tk.mainloop
-    with patch.object(tk.Tk,'mainloop',run): gui(mode)
+    from engine import demo_bars
+    with patch.object(tk.Tk,'mainloop',run), patch('app.demo_bars',return_value=demo_bars()[:21]): gui(mode)
     if failures: raise failures[0]
 
 

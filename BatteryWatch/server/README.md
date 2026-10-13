@@ -19,6 +19,10 @@ python server.py run --foreground
 
 `init`은 최초 한 번 실행합니다. 이미 있는 설정이나 토큰은 덮어쓰지 않습니다. `--foreground`는 현재 터미널에서 실행하며 Ctrl+C로 종료합니다. 실행 모드를 지정하지 않은 `run`도 기존처럼 전경 실행입니다. Windows에서는 `run.bat` 또는 `python server.py run --foreground`를 사용하세요.
 
+## Ubuntu 부팅 시 자동 실행 (systemd)
+
+Ubuntu 20.04에서 부팅 후 자동 실행하려면 [systemd 설치 및 디버그 사용 안내](SYSTEMD.md)를 따르세요. [서비스 파일](batterywatch.service)은 디버그 OFF로 시작하며, 기존 터미널에서 `python3.12 server.py debug on/off`와 로그 보기로 실행 중 디버그를 전환할 수 있습니다.
+
 ## Ubuntu/Linux 백그라운드 실행과 프로세스 관리
 
 운영 서버에서 다른 터미널을 닫아도 계속 실행하려면 백그라운드 옵션을 사용합니다. 별도 터미널에서 같은 서버 설정과 실행 계정을 사용해 정상 종료·재시작할 수 있습니다.

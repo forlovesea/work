@@ -1,0 +1,19 @@
+[Unit]
+Description=BatteryWatch relay server
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+# Replace these values with the existing server account and absolute paths.
+User=YOUR_USER
+WorkingDirectory=/ABSOLUTE/PATH/BatteryWatch/server
+ExecStart=/ABSOLUTE/PATH/python3.12 -u /ABSOLUTE/PATH/BatteryWatch/server/server.py --config /ABSOLUTE/PATH/BatteryWatch/server/server.local.json run --foreground
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

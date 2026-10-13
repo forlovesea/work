@@ -10,7 +10,7 @@ parser=argparse.ArgumentParser()
 parser.add_argument('--dist-path',default='Release/v'+VERSION)
 root=Path(__file__).resolve().parent/parser.parse_args().dist_path
 app=root/'KoreanStockBot'
-for private in ('runtime','research','inputs','reports','.env','STOP'):
+for private in ('runtime','research','inputs','reports','logs','.env','STOP'):
     if (app/private).exists():raise RuntimeError('Release contains private/runtime data; use a clean build')
 files=[p for p in app.rglob('*') if p.is_file()]
 assert len(list(app.glob('*.exe')))==5

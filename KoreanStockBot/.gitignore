@@ -1,5 +1,6 @@
 __pycache__/
 reports/
+logs/
 .env
 *.secret
 runtime/

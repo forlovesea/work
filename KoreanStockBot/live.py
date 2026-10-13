@@ -11,11 +11,12 @@ import re
 import time
 import uuid
 import sys
+import tempfile
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from broker import TossBroker, BrokerError
+from broker import TossBroker, BrokerError, StopRequested
 
 # ETF modules import shared types from live; keep one identity for script execution.
 if __name__ == '__main__':
@@ -117,12 +118,24 @@ class Store:
 
     def save(self):
         self.path.parent.mkdir(parents=True,exist_ok=True)
-        tmp=self.path.with_suffix('.tmp')
-        with tmp.open('w',encoding='utf-8') as f:
-            json.dump(self.data,f,ensure_ascii=False,indent=2)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp,self.path)
+        fd,name=tempfile.mkstemp(prefix=self.path.name+'.',suffix='.tmp',dir=self.path.parent)
+        tmp=Path(name)
+        try:
+            with os.fdopen(fd,'w',encoding='utf-8') as f:
+                json.dump(self.data,f,ensure_ascii=False,indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            # Windows readers/antivirus can briefly hold a handle that denies
+            # replacement. Preserve the old complete file until replacement wins.
+            for attempt in range(21):
+                try:
+                    os.replace(tmp,self.path)
+                    break
+                except PermissionError:
+                    if attempt==20:raise
+                    time.sleep(.05)
+        finally:
+            tmp.unlink(missing_ok=True)
 
 
 class LiveBot:
@@ -323,6 +336,7 @@ class LiveBot:
             raise SafetyStop('Stale/future market data; no order sent')
 
     def submit(self,side,quantity,price,reason):
+        if getattr(self,'stop_requested',lambda:False)():raise StopRequested()
         if side not in ('BUY','SELL') or integer(quantity)<=0 or integer(price)<=0:
             raise SafetyStop('Invalid order proposal')
         if not self.live:
@@ -478,8 +492,12 @@ def main(argv=None,broker=None):
     p.add_argument('--once',action='store_true')
     p.add_argument('--candidate-report',action='store_true',help='Read-only ETF candidate analysis, no orders')
     p.add_argument('--accounts',action='store_true',help='List accountSeq/type, never account numbers')
+    p.add_argument('--stock-candidates',action='store_true',help='Read-only financial stock screening')
+    p.add_argument('--sector-limit',type=int,choices=(0,20,50),default=20)
     p.add_argument('--recover-order',help='Bind broker-confirmed order ID after ambiguous submission; never resends')
     args=p.parse_args(argv)
+    if args.stock_candidates and (args.live or args.etf or args.recover_order or args.candidate_report or args.accounts):
+        p.error('Stock recommendations are read-only and exclusive')
     if args.candidate_report and (args.live or not args.etf or args.recover_order):
         p.error('Candidate report requires --etf and forbids --live/--recover-order')
     runtime=ROOT/'runtime'
@@ -489,10 +507,19 @@ def main(argv=None,broker=None):
         broker=broker or TossBroker(live=args.live)
         broker.live=args.live
         if args.accounts:
+            # GUI account lookup consumes one JSON document, not the trading
+            # status stream. Keep authentication/request progress out of stdout.
             print(json.dumps([{'accountSeq':a['accountSeq'],'accountType':a['accountType']} for a in broker.get('accounts')]))
             return
+        if isinstance(broker,TossBroker):
+            broker.progress=lambda:print(json.dumps({'status':broker.phase,'operation':broker.operation,'elapsed':broker.elapsed}),flush=True)
         if not broker.account.isdigit():
             raise SafetyStop('Set TOSS_ACCOUNT_SEQ locally; --accounts lists available selectors')
+        if args.stock_candidates:
+            from stock_candidates import run
+            config=json.loads(args.config.read_text(encoding='utf-8-sig'))
+            run(broker,config,args.sector_limit)
+            return
         config=load_config(ROOT/'etf_config.json' if args.etf and args.config==ROOT/'live_config.json' else args.config)
         if args.etf != (config.get('strategy')=='kosdaq_etf_top20'):
             raise SafetyStop('ETF configuration requires --etf')
@@ -513,7 +540,7 @@ def main(argv=None,broker=None):
             bot=EtfBot(broker,config,store,live=args.live)
         else:
             bot=LiveBot(broker,config,store,live=args.live)
-        print(json.dumps({'status':'INITIALIZING'},ensure_ascii=False),flush=True)
+        print(json.dumps({'status':'INITIALIZING'}),flush=True)
         bot.initialize()
         if args.candidate_report:
             from candidate_feedback import market_context,failure
@@ -521,10 +548,12 @@ def main(argv=None,broker=None):
             market=market_context(cal,bot.clock())
             try:bot.select(cal['previousBusinessDay']['date'],preview=True)
             except Exception as exc:
-                print(json.dumps(failure(exc,market),ensure_ascii=False),flush=True)
+                try:collection=Store(ROOT/'research'/'auto_status.json').data
+                except (OSError,ValueError):collection=None
+                print(json.dumps(failure(exc,market,collection)),flush=True)
                 return
             bot.selection_details['market']=market
-            print(json.dumps({'status':'CANDIDATE_REPORT','selection_details':bot.selection_details},ensure_ascii=False),flush=True)
+            print(json.dumps({'status':'CANDIDATE_REPORT','selection_details':bot.selection_details}),flush=True)
             return
         if args.recover_order:
             bot.recover(args.recover_order)
@@ -535,25 +564,40 @@ def main(argv=None,broker=None):
         if args.etf and config.get('auto_research') and not args.once:
             from auto_research import AutoResearch
             updater=AutoResearch(ROOT/config['research_file'])
+        bot.stop_requested=lambda:(ROOT/'STOP').exists()
+        stop_deadline=None
         try:
             while True:
                 stopped=(ROOT/'STOP').exists()
                 if stopped:
-                    print(json.dumps({'status':'STOP_CHECKING'},ensure_ascii=False),flush=True)
+                    if stop_deadline is None:stop_deadline=time.monotonic()+45
+                    if time.monotonic()>=stop_deadline:
+                        raise SafetyStop('Stop verification timed out; inspect Toss orders before restarting')
+                    print(json.dumps({'status':'STOP_CHECKING'}),flush=True)
                     if updater: updater.close()
-                update_state=updater.tick_broker(broker) if updater and not stopped else None
+                if isinstance(broker,TossBroker):
+                    broker.stop_requested=(lambda:False) if stopped else bot.stop_requested
+                    broker.deadline=stop_deadline
+                update_state=None
                 try:
+                    update_state=updater.tick_broker(broker) if updater and not stopped else None
                     result=bot.step(stop=stopped)
-                except BrokerError:
+                except StopRequested:
+                    continue
+                except BrokerError as exc:
                     pending=bot.active()
                     if pending and not pending.get('order_id'):
                         raise SafetyStop('UNKNOWN order outcome; automatic resubmission blocked') from None
-                    result={'status':'BROKER_CONNECTION_WAIT'}
+                    from candidate_feedback import failure
+                    result={'status':'BROKER_CONNECTION_WAIT','error_code':failure(exc)['code'],'error_type':'BrokerError',
+                            'operation':getattr(broker,'operation','OTHER')}
+                if result.get('status')=='RESEARCH_OR_CANDIDATE_DATA_UNAVAILABLE' and update_state=='UPDATING':
+                    result['status']='RESEARCH_UPDATING' if (ROOT/config['research_file']).exists() else 'RESEARCH_FIRST_COLLECTION'
                 if update_state: result['auto_research']=update_state
-                print(json.dumps(result,ensure_ascii=False),flush=True)
+                print(json.dumps(result),flush=True)
                 if result.get('status')=='STOPPED' or args.once:
                     break
-                deadline=time.monotonic()+config['poll_seconds']
+                deadline=time.monotonic()+(1 if stopped else config['poll_seconds'])
                 while time.monotonic()<deadline:
                     if not stopped and (ROOT/'STOP').exists(): break
                     time.sleep(min(0.25,max(0,deadline-time.monotonic())))
@@ -567,9 +611,12 @@ if __name__=='__main__':
     except KeyboardInterrupt:
         print('Process stopped. Existing broker orders/holdings remain; check Toss.')
     except (SafetyStop,BrokerError,KeyError,ValueError,OSError,TypeError) as exc:
+        from candidate_feedback import failure
+        if '--candidate-report' not in sys.argv:
+            print(json.dumps({'status':'WORKER_ERROR','error_code':failure(exc)['code'],'error_type':type(exc).__name__}),flush=True)
         if '--candidate-report' in sys.argv:
             from candidate_feedback import failure
-            print(json.dumps(failure(exc),ensure_ascii=False),flush=True)
+            print(json.dumps(failure(exc)),flush=True)
         # Exceptions from API parsing may contain private values; print only known-safe messages.
         print('STOP:',str(exc) if isinstance(exc,(SafetyStop,BrokerError)) else type(exc).__name__)
         print('No automatic retry. Check runtime state and Toss orders before restarting.')

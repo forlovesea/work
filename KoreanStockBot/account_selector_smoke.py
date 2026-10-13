@@ -14,11 +14,17 @@ def run():
     install_buttons(root,style)
     panel=LivePanel.__new__(LivePanel)
     panel.root=root; panel.mode='stock'; panel.colors={'bg':'#111111'}
-    panel.child=None; panel.querying=False; panel.events=queue.Queue()
+    panel.child=None; panel.querying=False; panel.closing=False; panel.events=queue.Queue()
     panel.config={'symbol':'005930'}
     with patch.object(panel,'env',return_value={'TOSS_CLIENT_ID':'test','TOSS_CLIENT_SECRET':'test'}):
         panel.settings()
     window=next(w for w in root.winfo_children() if isinstance(w,tk.Toplevel))
+    assert root.grab_current() is None
+    with patch('stock_candidate_gui.show') as recommendation:
+        next(w for w in window.winfo_children() if isinstance(w,ttk.Button) and w.cget('text')=='업종별 종목 추천').invoke()
+        callback=recommendation.call_args.kwargs['on_select']
+        callback('012345')
+        assert any(isinstance(w,ttk.Entry) and w.get()=='012345' for w in window.winfo_children())
     widgets=window.winfo_children()
     labels={w.cget('text') for w in widgets if isinstance(w,ttk.Button)}
     assert {'설정 템플릿 생성','템플릿 암호화 변환','설정 파일 불러오기'} <= labels
@@ -50,8 +56,23 @@ def run():
     from types import SimpleNamespace
     import json
     def lookup(ids):
-        proc=SimpleNamespace(returncode=0,communicate=lambda **kw:(json.dumps([
-            {'accountSeq':i,'accountType':'BROKERAGE'} for i in ids]),None))
+        # Use the real CLI + broker transport output, so extra progress lines
+        # cannot silently break account selection again. Only HTTP is simulated.
+        import io
+        import contextlib
+        from broker import TossBroker
+        from live import main
+        broker=TossBroker()
+        responses=iter([{'access_token':'synthetic','expires_in':3600},
+                        {'result':[{'accountSeq':i,'accountType':'BROKERAGE'} for i in ids]}])
+        broker.opener=SimpleNamespace(open=lambda *a,**k:io.BytesIO(json.dumps(next(responses)).encode()))
+        output=io.StringIO()
+        with tempfile.TemporaryDirectory() as folder,patch('live.ROOT',Path(folder)), \
+             patch('credentials.load_environment'),patch('broker.time.sleep'), \
+             patch.dict('os.environ',{'TOSS_CLIENT_ID':'test','TOSS_CLIENT_SECRET':'test'}), \
+             contextlib.redirect_stdout(output):
+            main(['--accounts'],broker=broker)
+        proc=SimpleNamespace(returncode=0,communicate=lambda **kw:(output.getvalue(),None))
         with patch.object(panel,'spawn',return_value=proc):
             query.invoke()
             event=panel.events.get(timeout=5)

@@ -27,11 +27,45 @@ def run():
                 def communicate(self,timeout=None):return json.dumps({'status':'CANDIDATE_REPORT','selection_details':report}),None
             panel.spawn=lambda args,env:Proc()
             with patch('candidate_gui.ROOT',base),patch.object(panel,'env',return_value={'TOSS_ACCOUNT_SEQ':'123'}):
+                # Auto-stop must finish before spawning any read-only query.
+                from gui_smoke import descendants
+                panel.child=SimpleNamespace(poll=lambda:None)
+                spawned=[]
+                panel.spawn=lambda args,env:(spawned.append(args) or Proc())
+                def stopped():
+                    panel.child=None;panel.stop_confirmed=True;panel.exit_unverified=False
+                def stop():
+                    root.after(300,stopped);return True
+                panel.stop=stop
+                panel.scope_settings()
+                waiting=next(w for w in root.winfo_children() if isinstance(w,tk.Toplevel))
+                refresh=next(w for w in descendants(waiting) if isinstance(w,ttk.Button) and w.cget('text')=='최신 계좌·시세 조회')
+                refresh.invoke();assert not spawned and panel.querying
+                notice=next(w for w in waiting.winfo_children() if isinstance(w,tk.Toplevel))
+                next(w for w in descendants(notice) if isinstance(w,ttk.Button) and w.cget('text')=='확인').invoke()
+                assert not notice.winfo_exists() and panel.querying
+                deadline=time.monotonic()+5
+                while panel.querying and time.monotonic()<deadline:root.update();time.sleep(.02)
+                assert len(spawned)==1 and not panel.querying
+                waiting.destroy()
+                # Unverified stop must never start the query worker.
+                panel.child=SimpleNamespace(poll=lambda:None)
+                def bad_stop():
+                    panel.child=None;panel.stop_confirmed=False;panel.exit_unverified=True;return True
+                panel.stop=bad_stop
+                panel.scope_settings()
+                waiting=next(w for w in root.winfo_children() if isinstance(w,tk.Toplevel))
+                next(w for w in descendants(waiting) if isinstance(w,ttk.Button) and w.cget('text')=='최신 계좌·시세 조회').invoke()
+                deadline=time.monotonic()+5
+                while panel.querying and time.monotonic()<deadline:root.update();time.sleep(.02)
+                assert len(spawned)==1 and not panel.querying
+                waiting.destroy();panel.exit_unverified=False
                 panel.scope_settings()
                 popup=next(w for w in root.winfo_children() if isinstance(w,tk.Toplevel))
                 deadline=time.monotonic()+5
                 while panel.querying and time.monotonic()<deadline:root.update();time.sleep(.02)
                 assert not panel.querying
+                assert not any(isinstance(w,tk.Toplevel) for w in popup.winfo_children())
                 from gui_smoke import descendants
                 widgets=list(descendants(popup))
                 assert not any(isinstance(w,ttk.Combobox) for w in widgets)

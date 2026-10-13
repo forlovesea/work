@@ -5,6 +5,16 @@ from etf_scope import candidate_rows,read_symbols,write_symbols
 
 
 class CandidateTests(unittest.TestCase):
+    def test_cells_distinguish_skipped_failed_and_measured(self):
+        from etf_scope import candidate_cells
+        self.assertEqual(candidate_cells({'state':'RESEARCH'})[0],'조회 생략')
+        self.assertIn('재무·뉴스',candidate_cells({'state':'RESEARCH'})[2])
+        self.assertEqual(candidate_cells({'state':'QUOTE_STALE'})[:2],('시세 시간 초과','산출 불가'))
+        self.assertEqual(candidate_cells({'state':'QUOTE_UNAVAILABLE'})[0],'유효 시세 없음')
+        self.assertIn('예산 초과',candidate_cells({'state':'BUDGET','price':'1234','required':'1256'})[2])
+        self.assertEqual(candidate_cells({'state':'ELIGIBLE','price':'1234','required':'1256','fast_ma':'11','slow_ma':'10'}),('1,234','1,256','상승'))
+        self.assertIn('일봉',candidate_cells({'state':'CANDLES'})[2])
+
     def test_dedupe_and_measured_priority(self):
         a=dict(symbol='123456',rank=1,state='BUDGET',score=.9)
         b=dict(symbol='654321',rank=2,state='ELIGIBLE',score=.7)

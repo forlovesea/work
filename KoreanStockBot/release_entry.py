@@ -30,6 +30,18 @@ def main():
         from scope_gui_smoke import run
         run()
         return
+    if '--stock-candidate-gui-smoke' in sys.argv:
+        from stock_candidate_gui_smoke import run
+        run()
+        return
+    if '--account-gui-smoke' in sys.argv:
+        from account_selector_smoke import run
+        run()
+        return
+    if '--diagnostics-gui-smoke' in sys.argv:
+        from diagnostics_gui_smoke import run
+        run()
+        return
     if '--gui-smoke' in sys.argv:
         from gui_smoke import smoke
         for mode in ('paper','etf','stock'):smoke(mode)
@@ -55,9 +67,12 @@ if __name__=='__main__':
     try:main()
     except KeyboardInterrupt:pass
     except Exception as exc:
+        from candidate_feedback import failure
+        if sys.stdout is not None and '--candidate-report' not in sys.argv:
+            print(json.dumps({'status':'WORKER_ERROR','error_code':failure(exc)['code'],'error_type':type(exc).__name__}),flush=True)
         if '--candidate-report' in sys.argv:
             from candidate_feedback import failure
-            print(json.dumps(failure(exc),ensure_ascii=False),flush=True)
+            print(json.dumps(failure(exc)),flush=True)
         from live import SafetyStop
         from broker import BrokerError
         safe=str(exc) if isinstance(exc,(SafetyStop,BrokerError)) else type(exc).__name__

@@ -4,6 +4,17 @@ from datetime import datetime
 import re
 from broker import BrokerError
 
+# Exact, application-owned messages only; never export arbitrary API text.
+SAFETY_REASONS={
+ 'STALE_MARKET_DATA':('Stale/future market data; no order sent','시세·호가의 시각이 허용 범위를 벗어나 안전 검사를 멈췄습니다.','정규장에 다시 점검하세요. 반복되면 PC 시각과 시세 응답을 진단 ZIP으로 확인하세요.'),
+ 'INVALID_ORDERBOOK':('Empty/crossed orderbook','호가가 비어 있거나 매수·매도 호가 관계를 확인하지 못했습니다.','잠시 후 다시 점검하세요. 반복되면 진단 ZIP을 저장하세요.'),
+ 'INVALID_QUOTE':('Invalid quote identity','시세 응답의 종목 정보를 확인하지 못했습니다.','진단 ZIP을 저장하고 종목·시세 응답 검증을 점검하세요.'),
+ 'INVALID_PRICE':('Invalid last price','현재가가 유효한 값이 아닙니다.','잠시 후 다시 점검하세요.'),
+ 'STATE_BINDING_CHANGED':('Account/config changed: preserve state; reconcile before changing configuration','저장된 실행 기록과 현재 계좌·설정이 다릅니다.','기존 계좌·설정 및 보유분을 확인하세요. 실행 기록을 임의 삭제하지 마세요.'),
+ 'HOLDINGS_MISMATCH':('Broker/managed holdings differ; manual activity or corporate action detected','계좌 보유 수량과 프로그램 기록이 다릅니다.','토스 앱의 보유분과 실행 기록을 확인하세요.'),
+ 'EXTERNAL_ORDER':('Unmanaged open order found; no new orders sent','프로그램이 관리하지 않는 미체결 주문이 있습니다.','토스 앱에서 기존 주문을 확인하세요.'),
+ 'COMMISSION_UNAVAILABLE':('Current commission unavailable','현재 수수료 정보를 확인하지 못했습니다.','잠시 후 다시 점검하세요. 반복되면 진단 ZIP을 저장하세요.')}
+
 
 def market_context(calendar,now):
     today=calendar.get('today',{})
@@ -18,11 +29,14 @@ def market_context(calendar,now):
     except (KeyError,ValueError,TypeError):return '시장 운영시간 확인 불가'
 
 
-def failure(exc,market=None):
+def failure(exc,market=None,collection=None):
     raw=str(exc)
     code='UNVERIFIED'
     reason='응답 형식 또는 실행 상태를 확인하지 못했습니다.'
     action='읽기 전용 점검의 상태와 수집 로그를 확인한 뒤 다시 조회하세요.'
+    for safe_code,(message,safe_reason,safe_action) in SAFETY_REASONS.items():
+        if raw==message:
+            return dict(status='CANDIDATE_ERROR',code=safe_code,reason=safe_reason,action=safe_action,market=market)
     if isinstance(exc,FileNotFoundError):
         code='MISSING_FILE';reason='필요한 분석 파일 또는 실행파일이 없습니다.'
         action='읽기 전용 점검에서 자동 수집 완료(READY)를 확인하세요. 실행파일은 배포 폴더 전체를 압축 해제하세요.'
@@ -45,6 +59,14 @@ def failure(exc,market=None):
     elif raw in ('Selected brokerage account not found','Set TOSS_ACCOUNT_SEQ locally; --accounts lists available selectors'):
         code='ACCOUNT';reason='설정한 계좌를 확인하지 못했습니다.'
         action='인증·계좌 설정에서 계좌를 다시 조회하고 선택하세요.'
+    if code in ('MISSING_FILE','RESEARCH_STALE') and isinstance(collection,dict):
+        if collection.get('state')=='COLLECTION_FAILED':
+            reason+=' 최근 자동 자료 수집도 실패했습니다.'
+            if collection.get('error_code')=='LOCAL_FILE_ACCESS' or collection.get('error_type')=='PermissionError':
+                reason+=' 수집 파일 저장·접근 오류가 기록되어 있습니다.'
+                action='실행 폴더의 쓰기 권한과 파일 잠금을 확인하세요. 읽기 전용 점검에서 자료 수집 완료 후 중지하고 다시 조회하세요.'
+            else:
+                action='하단 자동 수집 상태의 실패 단계와 research/logs/collection.log를 확인하세요. 읽기 전용 점검에서 수집을 다시 진행한 뒤 조회하세요.'
     return dict(status='CANDIDATE_ERROR',code=code,reason=reason,action=action,market=market)
 
 

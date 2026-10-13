@@ -70,10 +70,14 @@ def normalize_catalog(daily,metadata,day):
             raise SafetyStop('ETF listing date is later than snapshot')
         factor=str(m['IDX_CALC_INST_NM2']).strip()
         match=re.search(r'\((-?\d+(?:\.\d+)?)\)\s*$',factor)
-        leverage=number(match.group(1)) if match else Decimal(0)
+        leverage=number(match.group(1)) if match else {
+            '일반':Decimal(1),'2X 레버리지':Decimal(2),
+            '1X 인버스':Decimal(-1),'2X 인버스':Decimal(-2),
+        }.get(factor,Decimal(0))
         structure='unknown'
-        if m['ETF_REPLICA_METHD_TP_CD']=='실물' and m['IDX_ASST_CLSS_NM']=='주식': structure='physical'
-        if m['ETF_REPLICA_METHD_TP_CD']=='합성': structure='synthetic'
+        replication=str(m['ETF_REPLICA_METHD_TP_CD']).strip()
+        if replication in ('실물','실물(패시브)','실물(액티브)') and m['IDX_ASST_CLSS_NM']=='주식': structure='physical'
+        if replication in ('합성','합성(패시브)','합성(액티브)'): structure='synthetic'
         if '파생' in str(m['ISU_NM']): structure='derivative'
         if m['IDX_MKT_CLSS_NM']!='국내': structure='unknown'
         isin=str(m['ISU_CD'])
@@ -86,15 +90,18 @@ def normalize_catalog(daily,metadata,day):
 
 
 def normalize_composition(items,etf,day,corporations):
+    from collection_log import CompositionError
     total=Decimal(0)
     seen=set()
     rows=[]
     for item in items:
+        if 'COMPST_ISU_CD' not in item or 'COMPST_RTO' not in item:raise CompositionError('MISSING_COMPOSITION_FIELD',etf)
         raw=str(item['COMPST_ISU_CD']).strip()
-        if raw in seen: raise SafetyStop('Duplicate constituent in KRX composition')
+        if raw in seen: raise CompositionError('DUPLICATE_CONSTITUENT',etf)
         seen.add(raw)
-        weight=number(item['COMPST_RTO'])/100
-        if not 0<=weight<=1: raise SafetyStop('Invalid KRX constituent weight')
+        try:weight=number(item['COMPST_RTO'])/100
+        except SafetyStop:raise CompositionError('INVALID_CONSTITUENT_WEIGHT',etf) from None
+        if not 0<=weight<=1: raise CompositionError('INVALID_CONSTITUENT_WEIGHT',etf,observed_percent=float(weight*100),minimum_percent=0,maximum_percent=100)
         total+=weight
         symbol=code(raw)
         corp=corporations.get(symbol)
@@ -103,10 +110,10 @@ def normalize_composition(items,etf,day,corporations):
                          name=corp['name'],weight=str(weight),source_url=KRX_SOURCE))
     # Never renormalize missing cash/derivative/unknown weights to 100%.
     if total>Decimal('1.005') or total<Decimal('.5'):
-        raise SafetyStop('KRX composition weights are incomplete or exceed 100%')
+        raise CompositionError('INCOMPLETE_COMPOSITION_WEIGHT',etf,observed_percent=float(total*100),minimum_percent=50,maximum_percent=100.5)
     # Percent fields are rounded; downstream budget remains bounded to full ETF weight.
     if sum(number(r['weight']) for r in rows)>Decimal('1.001'):
-        raise SafetyStop('Rounded composition exceeds accepted weight bound')
+        raise CompositionError('MAPPED_WEIGHT_OVER_LIMIT',etf,observed_percent=float(sum(number(r['weight']) for r in rows)*100),maximum_percent=100.1)
     return rows
 
 
@@ -139,6 +146,7 @@ def collect_inputs(day,directory,sources,krx=None):
     corps=sources.corporations()
     compositions=[]
     failures=[]
+    sources.composition_failures=[]
     for etf in top:
         if not etf['tradable']: continue
         path=directory/(etf['symbol']+'-'+day+'.json')
@@ -154,9 +162,15 @@ def collect_inputs(day,directory,sources,krx=None):
                 normalized=audited(sources,'KRX_COMPOSITION_CACHE','KRX',normalize_composition,items,etf['symbol'],day,corps)
             compositions.extend(normalized)
             if hasattr(sources,'record'):sources.record('KRX','cache' if from_cache else 'network')
-        except (SafetyStop,ValueError,KeyError,TypeError):
+        except (SafetyStop,ValueError,KeyError,TypeError) as exc:
             # The ETF retains its rank; absent holdings prevents this ETF from buying.
             failures.append(etf['symbol'])
+            from collection_log import safe_error
+            detail=safe_error(exc)
+            detail['symbol']=etf['symbol']
+            if detail['error_code']=='VALIDATION_OR_LOCAL_ERROR':detail['error_code']='KRX_DATA_UNAVAILABLE'
+            sources.composition_failures.append(detail)
+            if getattr(sources,'audit',None):sources.audit.write('ETF_EXCLUDED',provider='KRX',**detail)
             if hasattr(sources,'record'):sources.record('KRX','error')
     holdings_path=directory/'holdings.csv'
     write_csv(holdings_path,compositions,['as_of','etf_symbol','stock_symbol','corp_code','name','weight','source_url'])

@@ -46,6 +46,28 @@ class LivePanel:
         self.config_path=ROOT/('etf_config.json' if mode=='etf' else 'live_config.json')
         self.config=json.loads(self.config_path.read_text(encoding='utf-8-sig'))
         self.prefix='etf_' if mode=='etf' else ''
+        self.guidance_collection=None;self.guidance_runtime='';self.guidance_started=None
+        self.guidance_failures=set();self.guidance_last=None;self.guidance_operation=''
+        self.guidance_frame=tk.Frame(root,bg=colors['bg'])
+        self.guidance_frame.grid(row=3,column=0,columnspan=2,sticky='ew',padx=12,pady=(4,8))
+        self.guidance_card=tk.Frame(self.guidance_frame,padx=14,pady=8)
+        self.guidance_card.pack(side='right',fill='x')
+        self.guidance_title=tk.Label(self.guidance_card,anchor='w',justify='left',font=('맑은 고딕',11,'bold'))
+        self.guidance_title.pack(fill='x',anchor='w')
+        self.guidance_body=tk.Label(self.guidance_card,anchor='w',justify='left',font=('맑은 고딕',10),wraplength=640)
+        self.guidance_body.pack(fill='x',anchor='w',pady=(5,0))
+        def resize_guidance(event):
+            if event.widget==root:
+                width=max(240,min(640,event.width-65))
+                self.guidance_title.configure(wraplength=width);self.guidance_body.configure(wraplength=width)
+        root.bind('<Configure>',resize_guidance,add='+')
+        self.update_guidance()
+        from support_log import SupportLog
+        self.support_log=SupportLog(ROOT)
+        try:logging_enabled=Store(ROOT/'runtime/diagnostics_settings.json').data=={'enabled':True}
+        except (OSError,ValueError):logging_enabled=False
+        self.logging_enabled=tk.BooleanVar(value=logging_enabled)
+        self.logging_note=tk.StringVar(value='진단 로그 꺼짐 · 기본 수집·주문 기록은 별도 유지')
         self.actions=[]
         for label,command in [('인증·계좌 설정',self.settings),('읽기 전용 점검',lambda:self.start(False)),
                               ('실전 시작',lambda:self.start(True)),('중지 요청',self.stop)]:
@@ -55,16 +77,30 @@ class LivePanel:
         self.actions[-1].configure(state='disabled')
         if mode=='etf':
             ttk.Button(buttons,text='ETF 후보 제안',command=self.scope_settings,style='Violet.TButton').pack(side='left',padx=4)
+        if mode=='stock':
+            ttk.Button(buttons,text='업종별 종목 추천',command=self.stock_candidates,style='Violet.TButton').pack(side='left',padx=4)
         ttk.Label(parent,text=f"운용 원금 {self.config['capital']:,}원 · 매수 상한 {self.config['max_order_won']:,}원 · 원화 현금만 사용",style='Muted.TLabel').pack(anchor='w',padx=28)
-        ttk.Label(parent,textvariable=self.runtime_text,wraplength=760,justify='left',
-                  font=('맑은 고딕',11,'bold')).pack(fill='x',padx=28,pady=(8,4))
+        runtime_frame=ttk.LabelFrame(parent,text='현재 실행 · 연결 및 점검 상태',padding=12)
+        runtime_frame.pack(fill='x',padx=28,pady=(8,4))
+        runtime_label=ttk.Label(runtime_frame,textvariable=self.runtime_text,wraplength=760,justify='left',anchor='w',font=('맑은 고딕',10))
+        runtime_label.pack(fill='x')
+        runtime_frame.bind('<Configure>',lambda e:runtime_label.configure(wraplength=max(200,e.width-30)))
         self.data_text=tk.StringVar(value='자료 수집 상태: 아직 확인하지 않았습니다.')
         if mode=='etf':
-            ttk.Label(parent,textvariable=self.data_text,wraplength=760,justify='left',style='Muted.TLabel').pack(fill='x',padx=28,pady=6)
+            data_frame=ttk.LabelFrame(parent,text='자료 수집 · 저장된 분석 결과 (현재 점검과 별도)',padding=12)
+            data_frame.pack(fill='x',padx=28,pady=6)
+            data_label=ttk.Label(data_frame,textvariable=self.data_text,wraplength=760,justify='left',anchor='w',style='Muted.TLabel')
+            data_label.pack(fill='x')
+            data_frame.bind('<Configure>',lambda e:data_label.configure(wraplength=max(200,e.width-30)))
+        log_controls=ttk.Frame(parent);log_controls.pack(fill='x',padx=28,pady=4)
+        ttk.Checkbutton(log_controls,text='진단 로그 파일 생성',variable=self.logging_enabled,command=self.toggle_logging).pack(side='left')
+        ttk.Button(log_controls,text='공유용 진단 ZIP 저장',command=self.export_diagnostics).pack(side='left',padx=8)
+        ttk.Label(parent,textvariable=self.logging_note,wraplength=760,style='Muted.TLabel').pack(fill='x',padx=28)
+        if logging_enabled:self.toggle_logging()
         log_frame=ttk.Frame(parent)
         log_frame.pack(fill='x',padx=28,pady=(6,16))
         log_frame.columnconfigure(0,weight=1)
-        self.log=tk.Text(log_frame,height=7,bg=colors['panel'],fg=colors['text'],insertbackground=colors['text'],font=('맑은 고딕',10),wrap='none',state='disabled')
+        self.log=tk.Text(log_frame,height=9,bg=colors['panel'],fg=colors['text'],insertbackground=colors['text'],font=('맑은 고딕',10),wrap='word',padx=10,pady=8,spacing1=3,spacing3=5,state='disabled')
         self.log.grid(row=0,column=0,sticky='nsew')
         log_y=ttk.Scrollbar(log_frame,orient='vertical',command=self.log.yview)
         log_y.grid(row=0,column=1,sticky='ns')
@@ -90,9 +126,65 @@ class LivePanel:
 
     def active(self): return self.child is not None and self.child.poll() is None
 
+    def update_guidance(self):
+        if not hasattr(self,'guidance_card'):return
+        from user_guidance import guidance,COLORS
+        collection=self.guidance_collection
+        if self.active() and self.guidance_started and collection and collection.get('state')!='READY':
+            try:
+                if datetime.fromisoformat(collection['updated_at'])<self.guidance_started:collection=None
+            except (KeyError,TypeError,ValueError):collection=None
+        age=time.monotonic()-self.last_received if self.last_received is not None else 0
+        result=guidance(active=self.active(),querying=self.querying,stopping=self.stop_started is not None,
+            confirmed=self.stop_confirmed,unverified=self.exit_unverified,runtime=self.guidance_runtime,
+            collection=collection,age=age,operation=self.guidance_operation)
+        if result==self.guidance_last:return
+        self.guidance_last=result
+        color,title,action=result;bg,fg=COLORS[color]
+        self.guidance_card.configure(bg=bg)
+        self.guidance_title.configure(text='● '+title,bg=bg,fg=fg)
+        self.guidance_body.configure(text=action,bg=bg,fg=fg)
+
+    def diagnostic(self,event,**data):
+        logger=getattr(self,'support_log',None)
+        if logger is None:return
+        try:logger.record(event,**data)
+        except (OSError,ValueError):
+            logger.enabled=False;self.logging_enabled.set(False)
+            self.logging_note.set('진단 로그 저장 실패 · 매매 상태와 별개입니다. 폴더 권한·디스크 공간을 확인하세요.')
+
+    def toggle_logging(self):
+        try:
+            if self.logging_enabled.get():
+                self.support_log.enable()
+                self.diagnostic('SESSION',live=self.live,**{k:self.config[k] for k in ('capital','max_order_won','poll_seconds')})
+                self.logging_note.set('기록 중: logs/'+self.support_log.path.name+' · 문제 발생 후 공유용 ZIP을 저장해 업로드하세요.')
+            else:
+                self.support_log.disable()
+                self.logging_note.set('진단 로그 꺼짐 · 기존 파일은 유지 · 기본 수집·주문 기록은 별도 유지')
+            setting=Store(ROOT/'runtime/diagnostics_settings.json');setting.data={'enabled':self.logging_enabled.get()};setting.save()
+        except (OSError,ValueError):
+            self.support_log.enabled=False;self.logging_enabled.set(False)
+            self.logging_note.set('진단 로그 설정/저장 실패 · 폴더 권한·디스크 공간을 확인하세요.')
+
+    def export_diagnostics(self):
+        if self.support_log.path is None:
+            messagebox.showinfo('진단 로그','로그 파일 생성에 체크한 뒤 문제 동작을 다시 실행하고 저장하세요.');return
+        target=filedialog.asksaveasfilename(title='업로드할 진단 ZIP 저장',defaultextension='.zip',
+            initialfile='KoreanStockBot_진단_'+datetime.now(KST).strftime('%Y%m%d_%H%M%S')+'.zip',filetypes=[('진단 ZIP','*.zip')])
+        if not target:return
+        try:
+            self.support_log.export(target)
+            self.logging_note.set('공유용 진단 ZIP 저장 완료 · 이 ZIP 파일을 대화에 첨부해 주세요.')
+        except (OSError,ValueError):messagebox.showerror('저장 실패','진단 ZIP을 저장하지 못했습니다. 대상 폴더 권한과 디스크 공간을 확인하세요.')
+
     def scope_settings(self):
         if self.closing:return
         from candidate_gui import show
+        show(self)
+
+    def stock_candidates(self):
+        from stock_candidate_gui import show
         show(self)
 
     def env(self,values=None):
@@ -107,21 +199,25 @@ class LivePanel:
         from app_paths import worker_command
         return subprocess.Popen(worker_command('live')+args,
             cwd=ROOT,env=env,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,
-            text=True,encoding='utf-8',creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
+            text=True,encoding='utf-8',errors='replace',creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
 
     def settings(self):
         if self.active() or self.querying or self.closing: return
+        prior=getattr(self,'settings_window',None)
+        if prior is not None and prior.winfo_exists():prior.lift();return
         try: values=self.env()
         except Exception:
             messagebox.showerror('인증 확인','저장된 인증정보를 읽지 못했습니다. Windows 사용자와 암호화 파일을 확인하세요.'); return
         window=tk.Toplevel(self.root); window.title('인증·계좌 설정'); window.configure(bg=self.colors['bg'])
-        window.transient(self.root); window.grab_set()
+        self.settings_window=window
+        window.transient(self.root)
+        if self.mode!='stock':window.grab_set()
         fields={}
         verified_accounts=[]
         names={'TOSS_CLIENT_ID':'토스 Client ID','TOSS_CLIENT_SECRET':'토스 Client Secret','TOSS_ACCOUNT_SEQ':'계좌 선택값 (accountSeq)',
                'KRX_ID':'KRX 아이디','KRX_PW':'KRX 비밀번호','DART_API_KEY':'DART 인증키',
                'NAVER_CLIENT_ID':'API HUB Client ID','NAVER_CLIENT_SECRET':'API HUB Client Secret'}
-        needed=KEYS if self.mode=='etf' else KEYS[:3]
+        needed=KEYS if self.mode=='etf' else KEYS[:3]+('KRX_ID','KRX_PW','DART_API_KEY')
         for row,key in enumerate(needed):
             ttk.Label(window,text=names[key]).grid(row=row,column=0,sticky='w',padx=14,pady=5)
             fields[key]=tk.StringVar(value=values.get(key,'').strip())
@@ -145,6 +241,8 @@ class LivePanel:
             ttk.Label(window,text='국내 종목코드 (6자리)').grid(row=row,column=0,padx=14,pady=5)
             ttk.Entry(window,textvariable=symbol).grid(row=row,column=1,padx=14,pady=5); row+=1
         note=tk.StringVar(value='계좌 조회 후 사용할 계좌를 목록에서 선택하세요. 계좌가 하나면 자동 선택됩니다.')
+        if self.mode=='stock':
+            note.set('계좌 조회 후 선택하세요. KRX·DART는 업종별 추천에 사용합니다. 종목코드는 비워서 저장한 뒤 추천 화면에서 선택할 수 있습니다.')
         ttk.Label(window,textvariable=note,wraplength=510).grid(row=row,column=0,columnspan=2,padx=14,pady=10)
 
         last_auth=[tuple(fields[k].get().strip() for k in ('TOSS_CLIENT_ID','TOSS_CLIENT_SECRET'))]
@@ -181,6 +279,8 @@ class LivePanel:
             account_selector.configure(values=())
             fields['TOSS_ACCOUNT_SEQ'].set('')
             self.querying=True; note.set('계좌 조회 중… 주문은 발생하지 않습니다.')
+            self.diagnostic('ACCOUNT_START')
+            query_started=time.monotonic()
             def work():
                 try:
                     proc=self.spawn(['--accounts'],self.env(submitted))
@@ -190,9 +290,11 @@ class LivePanel:
                     accounts=json.loads(out) if proc.returncode==0 else None
                     result=list(dict.fromkeys(str(a['accountSeq']) for a in accounts
                         if a['accountType']=='BROKERAGE' and str(a['accountSeq']).isdigit())) if accounts is not None else []
-                    self.events.put(('accounts',receive,result,submitted))
-                except Exception:
-                    self.events.put(('accounts',receive,[],submitted))
+                    self.events.put(('accounts',receive,result,submitted,
+                        dict(status='SUCCESS' if proc.returncode==0 else 'LOOKUP_FAILED',exit_code=proc.returncode,elapsed=round(time.monotonic()-query_started,1))))
+                except Exception as exc:
+                    self.events.put(('accounts',receive,[],submitted,
+                        dict(status='LOOKUP_FAILED',error_type=type(exc).__name__,elapsed=round(time.monotonic()-query_started,1))))
             threading.Thread(target=work,daemon=True).start()
 
         def save():
@@ -201,9 +303,9 @@ class LivePanel:
             submitted={k:v.get().strip() for k,v in fields.items()}
             if submitted['TOSS_ACCOUNT_SEQ'] not in verified_accounts:
                 note.set('계좌 조회 후 사용할 계좌를 선택하세요.'); return
-            if any(not submitted.get(k) for k in needed):
+            if any(not submitted.get(k) for k in (needed if self.mode=='etf' else KEYS[:3])):
                 note.set('모든 인증정보를 입력하세요.'); return
-            if self.mode=='stock' and not re.fullmatch('[0-9A-Z]{6}',symbol.get().strip().upper()):
+            if self.mode=='stock' and symbol.get().strip() and not re.fullmatch('[0-9A-Z]{6}',symbol.get().strip().upper()):
                 note.set('유효한 국내 종목코드 6자리를 입력하세요.'); return
             try:
                 with process_lock(ROOT/'runtime'/'bot.lock'):
@@ -219,6 +321,22 @@ class LivePanel:
                 note.set(str(exc) if isinstance(exc,SafetyStop) else '설정 저장 실패. 다른 봇 실행 여부와 파일 권한을 확인하세요.')
         ttk.Button(window,text='계좌 조회',command=query,style=button_style('계좌 조회')).grid(row=row+1,column=0,padx=14,pady=12)
         ttk.Button(window,text='암호화 저장',command=save,style='Success.TButton').grid(row=row+1,column=1,padx=14,pady=12)
+        if self.mode=='stock':
+            def recommendation_env():
+                if not window.winfo_exists():raise SafetyStop('인증·계좌 설정창이 닫혔습니다. 추천창을 닫고 다시 열어 주세요.')
+                submitted={k:v.get().strip() for k,v in fields.items()}
+                if submitted['TOSS_ACCOUNT_SEQ'] not in verified_accounts:
+                    raise SafetyStop('인증·계좌 설정창에서 계좌 조회 후 사용할 계좌를 선택하세요.')
+                return self.env(submitted)
+            def receive_symbol(value):
+                if not window.winfo_exists():raise SafetyStop('인증·계좌 설정창을 다시 열어 주세요.')
+                symbol.set(value)
+                note.set(value+' 종목코드를 입력했습니다. 암호화 저장을 눌러 설정을 확정하세요.')
+                window.lift()
+            def recommend():
+                from stock_candidate_gui import show
+                show(self,env_provider=recommendation_env,on_select=receive_symbol)
+            ttk.Button(window,text='업종별 종목 추천',command=recommend,style='Violet.TButton').grid(row=row+1,column=2,padx=14,pady=12)
 
         def template():
             from settings_file import create_template
@@ -285,6 +403,10 @@ class LivePanel:
                     if not messagebox.askyesno('중지 상태 해제','토스의 기존 주문·보유분을 확인했나요?\nSTOP 파일만 제거하고 같은 계좌·설정으로 시작합니다.'):return
                     (ROOT/'STOP').unlink()
             self.live=live
+            self.guidance_started=datetime.now(KST);self.guidance_runtime='INITIALIZING';self.guidance_failures=set()
+            self.guidance_operation='';self.guidance_last=None
+            self.last_details=None;self.scope_details=None;self.last_delay_minute=None
+            self.diagnostic('START',live=live)
             self.last_received=time.monotonic()
             self.received_status=False
             self.stop_started=None
@@ -294,6 +416,7 @@ class LivePanel:
             self.runtime_text.set(self.runtime_base)
             args=(['--etf'] if self.mode=='etf' else [])+(['--live'] if live else [])
             self.child=self.spawn(args,env)
+            self.update_guidance()
             for b in self.actions[:-1]:b.configure(state='disabled')
             self.actions[-1].configure(state='normal')
             self.status.set('실전 연결 중' if live else '읽기 전용 연결 중 · 주문 없음')
@@ -315,6 +438,7 @@ class LivePanel:
             except OSError:
                 messagebox.showerror('중지 요청 실패','STOP 파일을 생성하지 못했습니다. 토스 앱에서 주문을 확인하세요.');return False
             if self.stop_started is None:self.stop_started=time.monotonic()
+            self.diagnostic('STOP')
             self.status.set('중지 요청 접수 · 진행 중인 작업 응답 후 주문 정리 확인 · 보유분 유지')
             self.runtime_base=self.status.get()
             self.runtime_text.set(self.runtime_base)
@@ -347,6 +471,7 @@ class LivePanel:
                 self.reader_done=True
             elif event[0]=='accounts':
                 self.querying=False
+                self.diagnostic('ACCOUNTS',count=len(event[2]),**(event[4] if len(event)>4 else {}))
                 event[1](event[2],event[3])
             elif event[0]=='log':
                 self.last_received=time.monotonic()
@@ -354,8 +479,14 @@ class LivePanel:
                 readable=describe_status(event[1])
                 try:
                     report=json.loads(event[1]); details=report.get('selection_details')
+                    if report.get('status'):
+                        self.guidance_runtime=report['status']
+                        self.guidance_operation=report.get('operation','')
+                    self.diagnostic('RUNTIME',status=report.get('status'),error_code=report.get('error_code'),error_type=report.get('error_type'),live=self.live,operation=report.get('operation'),elapsed=report.get('elapsed'))
+                    if report.get('mode') in ('LIVE','DRY_RUN') and report.get('side') in ('BUY','SELL'):
+                        self.diagnostic('ORDER',mode=report['mode'],side=report['side'],quantity=report.get('quantity'),price=float(report.get('price',0)))
                     if report.get('status')=='STOPPED':self.stop_confirmed=True
-                    if details:
+                    if details and report.get('status') not in ('RESEARCH_FIRST_COLLECTION','RESEARCH_UPDATING'):
                         self.scope_details=details
                         from diagnostics import selection_text
                         detail_text=selection_text(details,limit=20)
@@ -369,6 +500,8 @@ class LivePanel:
                 self.status.set(readable.split('\n')[0])
         if self.active() and self.last_received is not None:
             age=int(time.monotonic()-self.last_received)
+            if age>=90 and age//60!=getattr(self,'last_delay_minute',None):
+                self.last_delay_minute=age//60;self.diagnostic('DELAY',elapsed=age)
             warning='\n응답 지연 · 현재 연결·주문 상태 확인 필요' if age>max(90,self.config['poll_seconds']*3) else ''
             elapsed=(f'마지막 상태 수신 후 경과: {age}초 (새 상태를 받으면 0초로 갱신)'
                      if self.received_status else f'첫 상태 수신 대기: {age}초 경과')
@@ -393,6 +526,7 @@ class LivePanel:
                 self.status.set('상태 파일 확인 중 · 최신 값 표시 보류')
             if self.child.poll() is not None and getattr(self,'reader_done',False):
                 code=self.child.returncode
+                self.diagnostic('EXIT',exit_code=code,confirmed=code==0 and self.stop_confirmed)
                 self.log_line(f'프로세스 종료 ({code}). 토스 앱에서 미체결·보유분을 확인하세요.')
                 final_status=exit_status(code,self.stop_confirmed)
                 self.status.set(final_status)
@@ -402,16 +536,24 @@ class LivePanel:
                 for b in self.actions[:-1]:b.configure(state='normal')
                 self.actions[-1].configure(state='disabled')
                 self.finish_exit(code)
-        if self.mode=='etf' and self.active():
+        if self.mode=='etf':
             try:
                 state=Store(ROOT/'research'/'auto_status.json').data
+                self.guidance_collection=state
                 if state and state.get('updated_at')!=getattr(self,'last_research',None):
                     from diagnostics import source_text
                     self.last_research=state.get('updated_at')
+                    self.diagnostic('COLLECTION',**state,**state.get('progress',{}))
+                    for provider,health in state.get('sources',{}).items():self.diagnostic('COLLECTION',provider=provider,**health)
+                    for detail in state.get('composition_failures',[]):
+                        identity=(detail.get('symbol'),detail.get('error_code'),detail.get('observed_percent'))
+                        if identity not in self.guidance_failures:
+                            self.guidance_failures.add(identity);self.diagnostic('COLLECTION',provider='KRX',**detail)
                     description=source_text(state)
                     self.data_text.set(description)
                     self.log_line(description)
             except (OSError,ValueError,KeyError):pass
+        self.update_guidance()
         if self.closing and self.child is None and not self.querying:
             self.root.destroy();return
         self.root.after(1000,self.poll)

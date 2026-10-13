@@ -18,21 +18,33 @@ def build(catalog,composition,as_of,output,sources=None,now=None):
     sources=sources or Sources(ROOT/'research'/'cache',now)
     financials={}
     assessments={}
+    progress=dict(etf_total=len(top),etf_done=0,financial_total=len({r['corp_code'] for e in top if e['tradable'] for r in components.get(e['symbol'],[])}),
+                  financial_done=0,news_total=sum(1+min(3,len(components.get(e['symbol'],[]))) for e in top if e['tradable']),news_done=0)
+    def notify():
+        callback=getattr(sources,'analysis_progress',None)
+        if callback:callback(dict(progress))
+    notify()
     for etf in top:
+        progress['current_rank']=etf['rank'];notify()
         rows=components.get(etf['symbol'],[])
         print(f"분석 {etf['rank']}/{len(top)}: {etf['symbol']} {etf['name']}",flush=True)
         if etf['tradable']:
             for row in rows:
                 corp=row['corp_code']
-                if corp not in financials: financials[corp]=audited(sources,'DART_FINANCIAL_ANALYSIS','DART',sources.financial,corp)
+                if corp not in financials:
+                    financials[corp]=audited(sources,'DART_FINANCIAL_ANALYSIS','DART',sources.financial,corp)
+                    progress['financial_done']=len(financials);notify()
             # ETF-specific news plus the three largest constituent names; never execute news text.
             names=[etf['name']]+[r['name'] for r in sorted(rows,key=lambda r:-float(r['weight']))[:3]]
             items=[]
-            for name in names: items.extend(audited(sources,'NAVER_NEWS_ANALYSIS','NAVER',sources.news,name))
+            for name in names:
+                items.extend(audited(sources,'NAVER_NEWS_ANALYSIS','NAVER',sources.news,name))
+                progress['news_done']+=1;notify()
             news=news_summary(items,names,now)
         else:
             news={'count':0,'risk':False,'positive_count':0,'articles':[]}
         assessments[etf['symbol']]=assess(etf,rows,financials,news,now)
+        progress['etf_done']+=1;notify()
     book=dict(schema=1,ranking='net_assets_won',as_of=as_of,generated_at=now.isoformat(),
               scope='Name or benchmark explicitly contains KOSDAQ; supplied complete universe',
               universe=top,assessments=assessments,composition=components)

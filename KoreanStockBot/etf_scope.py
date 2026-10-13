@@ -35,6 +35,23 @@ def candidate_rows(details):
     return sorted(rows.values(),key=lambda r:(r.get('state') not in ('ELIGIBLE','SELECTED'),-float(r.get('score',0)),r.get('rank',99)))
 
 
+def candidate_cells(row):
+    """Distinguish deliberately skipped checks from unavailable market data."""
+    state=row.get('state','NOT_CHECKED')
+    skipped={'STRUCTURE':'생략: 지원 구조 아님','RESEARCH':'생략: 재무·뉴스 미통과',
+             'BUDGET':'생략: 예산 초과','OUTSIDE_RANGE':'생략: 선택 범위 밖'}
+    missing={'STRUCTURE':'조회 생략','RESEARCH':'조회 생략','QUOTE_STALE':'시세 시간 초과',
+             'QUOTE_UNAVAILABLE':'유효 시세 없음'}.get(state,'조회 미완료')
+    price=f"{float(row['price']):,.0f}" if 'price' in row else missing
+    required=f"{float(row['required']):,.0f}" if 'required' in row else ('산출 불가' if state in ('QUOTE_STALE','QUOTE_UNAVAILABLE') else missing)
+    if 'fast_ma' in row and 'slow_ma' in row:
+        trend='상승' if float(row['fast_ma'])>float(row['slow_ma']) else '상승 조건 미충족'
+    else:
+        trend=skipped.get(state,{'QUOTE_STALE':'생략: 시세 시간 초과','QUOTE_UNAVAILABLE':'생략: 시세 미확보',
+                               'CANDLES':'판정 불가: 일봉 확인 필요'}.get(state,'검사 미완료'))
+    return price,required,trend
+
+
 def read_scope(path,binding):
     path=Path(path)
     if not path.exists():return (1,20)

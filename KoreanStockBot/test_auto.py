@@ -9,7 +9,7 @@ from datetime import timedelta
 from pathlib import Path
 from unittest.mock import patch
 from auto_data import normalize_catalog,normalize_composition,collect_inputs
-from auto_research import AutoResearch,RESEARCH_KEYS
+from auto_research import AutoResearch,RESEARCH_KEYS,RESEARCH_REVISION
 from credentials import save_credentials,load_credentials
 from research_sources import parse_corporations
 from live import SafetyStop,Store
@@ -36,6 +36,16 @@ COMPOSITION=[{'COMPST_ISU_CD':'KR7654321001','COMPST_RTO':'65.0'},
 
 
 class AutoDataTests(unittest.TestCase):
+    def test_observed_krx_labels(self):
+        for replication in ('실물(패시브)','실물(액티브)'):
+            meta=krx_meta();meta.update(IDX_CALC_INST_NM2='일반',ETF_REPLICA_METHD_TP_CD=replication)
+            row=normalize_catalog([krx_row()],[meta],'2026-06-29')[0]
+            self.assertEqual(row['leverage'],'1')
+            self.assertEqual(row['structure'],'physical')
+        for label,expected in [('2X 레버리지','2'),('1X 인버스','-1'),('2X 인버스','-2'),('미확인','0')]:
+            meta=krx_meta();meta['IDX_CALC_INST_NM2']=label
+            self.assertEqual(normalize_catalog([krx_row()],[meta],'2026-06-29')[0]['leverage'],expected)
+
     def test_net_assets_not_nav_or_marketcap(self):
         row=normalize_catalog([krx_row()],[krx_meta()],'2026-06-29')[0]
         self.assertEqual(row['net_assets_won'],'1000000000')
@@ -82,7 +92,8 @@ class AutoDataTests(unittest.TestCase):
         class FakeKrx:
             calls=0
             def daily(self,day): self.calls+=1; return [krx_row()]
-            def metadata(self): return [krx_meta()]
+            def metadata(self):
+                return [dict(krx_meta(),IDX_CALC_INST_NM2='일반',ETF_REPLICA_METHD_TP_CD='실물(패시브)')]
             def composition(self,day,isin): return COMPOSITION
         class FakeSources:
             def corporations(self): return CORPS
@@ -90,10 +101,14 @@ class AutoDataTests(unittest.TestCase):
             def news(self,query): return [news_item()]
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp); krx=FakeKrx(); sources=FakeSources()
+            progress=[];sources.analysis_progress=progress.append
             u,h,failures=collect_inputs('2026-06-29',root/'inputs',sources,krx)
             self.assertEqual(failures,[])
             book=build(u,h,'2026-06-29',root/'latest.json',sources,NOW)
             self.assertTrue(book['assessments']['123456']['allow_buy'])
+            self.assertEqual(progress[-1]['financial_done'],progress[-1]['financial_total'])
+            self.assertEqual(progress[-1]['news_done'],progress[-1]['news_total'])
+            self.assertEqual(progress[-1]['etf_done'],1)
             collect_inputs('2026-06-29',root/'inputs',sources,krx)
             self.assertEqual(krx.calls,1)
 
@@ -142,6 +157,14 @@ class SchedulerTests(unittest.TestCase):
         self.t=299; self.auto.tick('2026-06-29'); self.assertEqual(len(self.calls),1)
         self.t=301; self.auto.tick('2026-06-29'); self.assertEqual(len(self.calls),2)
 
+    def test_stop_records_interruption_not_failure(self):
+        self.auto.tick('2026-06-29');self.auto.close()
+        self.assertEqual(Store(self.root/'research/auto_status.json').data['state'],'COLLECTION_STOPPED')
+
+    def test_completed_worker_is_not_reclassified_as_timeout(self):
+        self.auto.tick('2026-06-29');self.auto.child.result=0;self.t=1801
+        self.assertEqual(self.auto.tick('2026-06-29'),'READY')
+
     def test_worker_timeout_and_date_change_terminate(self):
         self.auto.tick('2026-06-29'); child=self.auto.child
         self.t=1801; self.auto.tick('2026-06-29')
@@ -151,9 +174,21 @@ class SchedulerTests(unittest.TestCase):
 
     def test_fresh_snapshot_not_recollected(self):
         store=Store(self.auto.output)
-        store.data={'source_mode':'automatic','as_of':'2026-06-29','generated_at':NOW.isoformat()}; store.save()
+        store.data={'source_mode':'automatic','research_revision':RESEARCH_REVISION,'as_of':'2026-06-29','generated_at':NOW.isoformat()}; store.save()
         self.assertEqual(self.auto.tick('2026-06-29'),'READY')
         self.assertEqual(self.calls,[])
+
+    def test_old_normalization_snapshot_is_rebuilt(self):
+        store=Store(self.auto.output)
+        store.data={'source_mode':'automatic','as_of':'2026-06-29','generated_at':NOW.isoformat()};store.save()
+        self.assertEqual(self.auto.tick('2026-06-29'),'UPDATING')
+
+    def test_stalled_worker_reports_timeout(self):
+        self.auto.tick('2026-06-29');child=self.auto.child
+        self.t=121
+        self.assertEqual(self.auto.tick('2026-06-29'),'WORKER_TIMEOUT_OR_DATE_CHANGED')
+        self.assertTrue(child.terminated)
+        self.assertEqual(Store(self.root/'research'/'auto_status.json').data['error_code'],'WORKER_TIMEOUT_OR_DATE_CHANGED')
 
     def test_missing_credentials_no_child(self):
         with patch.dict(os.environ,{},clear=True):

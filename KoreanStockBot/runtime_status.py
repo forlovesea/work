@@ -27,6 +27,14 @@ def describe_status(line):
         prefix='주문 제출 · 체결 확인 필요' if report['mode']=='LIVE' else '읽기 전용 신호 · 주문하지 않음'
         return f"{prefix} · {action} {report.get('quantity')}주 / {report.get('price')}원"
     code=report.get('status','')
+    if code=='WORKER_ERROR':
+        from candidate_feedback import SAFETY_REASONS
+        detail=SAFETY_REASONS.get(report.get('error_code'))
+        if detail:return '안전 검사로 작업 종료\n사유: '+detail[1]+'\n다음 행동: '+detail[2]
+    if code in ('BROKER_REQUEST','BROKER_RESPONSE'):
+        from support_log import MEANINGS
+        phase=MEANINGS.get(report.get('operation'),'계좌·시세')
+        return '현재 단계: '+phase+'\n'+('응답 대기 · 요청별 최대 20초' if code=='BROKER_REQUEST' else '응답 수신 · 다음 검사 진행 중')
     if code=='OUTSIDE_REGULAR_SESSION':
         state=report.get('market_state')
         title={'HOLIDAY':'휴장 대기','BEFORE_OPEN':'매매 시작 대기',
@@ -35,6 +43,11 @@ def describe_status(line):
         if report.get('bot_start'): text+=' · 봇 매매 시작: '+display_time(report['bot_start'])
         return text+'\n프로그램을 켜 두면 운영시간과 매매 조건을 다시 확인합니다.'
     messages={
+        'RESEARCH_FIRST_COLLECTION':'첫 수집 진행 중—분석 완료 대기 · 진행 숫자가 증가하면 기다려 주세요',
+        'RESEARCH_UPDATING':'자료 갱신 진행 중—새 분석 완료 대기 · 기존 자료의 유효성 확인 전',
+        'WORKER_ERROR':'작업 오류로 종료 · 진단 로그의 오류 코드와 직전 단계를 확인하세요',
+        'BROKER_RESPONSE':'증권사 통신 응답 수신 · 데이터 유효성과 매매 조건은 별도 검사',
+        'BROKER_REQUEST':'증권사 API 응답 대기 · 요청별 최대 20초 · 주문 체결 확인 전',
         'INITIALIZING':'연결 확인 중 · 인증·계좌·기존 주문 상태 점검',
         'BROKER_CONNECTION_WAIT':'증권사 연결 확인 실패 · 재연결 대기 · 주문·체결 상태 확인 필요',
         'HOLD':'장중 감시 중 · 매수·매도 조건 확인',
@@ -52,7 +65,7 @@ def describe_status(line):
     if report.get('halted'): text+=' · 위험 한도로 신규 매수 중단'
     elif report.get('target_paused'): text+=' · 수익 목표 도달로 신규 매수 중단'
     if report.get('auto_research'): text+='\n자동 분석: '+str(report['auto_research'])
-    if 'selection_details' in report:
+    if 'selection_details' in report and code not in ('RESEARCH_FIRST_COLLECTION','RESEARCH_UPDATING'):
         from diagnostics import selection_text
         text+='\n'+selection_text(report['selection_details'])
     return text

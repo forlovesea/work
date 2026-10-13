@@ -1,10 +1,12 @@
 import io
 import json
 import unittest
+import threading
+import time
 from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.parse import parse_qs
-from broker import TossBroker, BrokerError
+from broker import TossBroker, BrokerError, StopRequested
 
 
 class Transport:
@@ -20,6 +22,37 @@ class Transport:
 
 
 class BrokerTests(unittest.TestCase):
+    def test_stop_interrupts_blocked_read(self):
+        started=threading.Event();release=threading.Event();stop=threading.Event()
+        class Blocked:
+            def open(self,request,timeout):
+                started.set();release.wait(2)
+                return io.BytesIO(b'{"result":{}}')
+        broker=TossBroker(account='7');broker.token='fake';broker.expires=float('inf')
+        broker.opener=Blocked();broker.stop_requested=stop.is_set
+        def request_stop():
+            started.wait(1);stop.set()
+        helper=threading.Thread(target=request_stop);helper.start()
+        before=time.monotonic()
+        try:
+            with self.assertRaises(StopRequested):broker.get('prices')
+            self.assertLess(time.monotonic()-before,1)
+        finally:release.set();helper.join()
+
+    def test_total_deadline_does_not_retry_mutation(self):
+        release=threading.Event();calls=[]
+        class Blocked:
+            def open(self,request,timeout):
+                calls.append(request);release.wait(2)
+                return io.BytesIO(b'{"result":{}}')
+        broker=TossBroker(account='7',live=True);broker.token='fake';broker.expires=float('inf')
+        broker.opener=Blocked();broker.deadline=time.monotonic()+.15
+        broker.stop_requested=lambda:True
+        try:
+            with self.assertRaises(BrokerError):broker.place({'clientOrderId':'once'})
+            self.assertEqual(len(calls),1)
+        finally:release.set()
+
     @patch.dict('os.environ',{'TOSS_CLIENT_ID':'fake-client','TOSS_CLIENT_SECRET':'fake-secret'})
     @patch('broker.time.sleep')
     def test_oauth_envelope_account_header_and_cancel_contract(self,sleep):

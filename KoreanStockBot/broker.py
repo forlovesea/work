@@ -2,6 +2,8 @@
 import json
 import os
 import time
+import threading
+import queue
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, build_opener, HTTPRedirectHandler
@@ -10,6 +12,11 @@ BASE = 'https://openapi.tossinvest.com'
 
 
 class BrokerError(RuntimeError):
+    pass
+
+
+class StopRequested(Exception):
+    """A read-only operation was interrupted; no mutation was interrupted."""
     pass
 
 
@@ -24,13 +31,56 @@ class TossBroker:
         self.live = live
         self.token, self.expires, self.last_call = '', 0, 0
         self.opener = build_opener(NoRedirect())
+        self.stop_requested = lambda: False
+        self.progress = None
+        self.deadline = None
+        self.operation='OTHER';self.phase='BROKER_REQUEST';self.elapsed=0
+
+    def checkpoint(self):
+        if self.stop_requested():
+            raise StopRequested()
 
     def _send(self, request):
+        # The socket timeout alone does not bound DNS, TLS or a trickling body.
+        # Never retry a mutation after a deadline: its outcome is ambiguous.
+        interruptible=request.get_method()=='GET'
+        if interruptible:self.checkpoint()
         time.sleep(max(0, 1.1-(time.monotonic()-self.last_call)))
+        if interruptible:self.checkpoint()
         self.last_call = time.monotonic()
+        deadline=self.last_call+20
+        if self.deadline is not None:deadline=min(deadline,self.deadline)
+        if time.monotonic()>=deadline:raise BrokerError('Toss request deadline exceeded; request not retried')
+        path=request.full_url.split('?',1)[0].removeprefix(BASE)
+        endpoint=path.removeprefix('/api/v1/').split('/')[0]
+        self.operation={'accounts':'ACCOUNTS','holdings':'HOLDINGS','buying-power':'BUYING_POWER',
+            'market-calendar':'CALENDAR','stocks':'STOCKS','candles':'CANDLES','prices':'PRICES',
+            'orderbook':'ORDERBOOK','orders':'ORDERS','conditional-orders':'CONDITIONS',
+            'commissions':'COMMISSIONS','sellable-quantity':'SELLABLE_QUANTITY'}.get(endpoint,'OTHER')
+        if path=='/oauth2/token':self.operation='AUTH'
+        if path.endswith('/cancel'):self.operation='ORDER_CANCEL'
+        if path.endswith('/warnings'):self.operation='WARNINGS'
+        self.phase='BROKER_REQUEST';self.elapsed=0
+        if self.progress:self.progress()
+        results=queue.Queue(maxsize=1)
+        def receive():
+            try:
+                with self.opener.open(request, timeout=15) as response:
+                    result=json.load(response)
+                results.put((True,result))
+            except Exception as exc:results.put((False,exc))
+        threading.Thread(target=receive,daemon=True).start()
         try:
-            with self.opener.open(request, timeout=15) as response:
-                return json.load(response)
+            while True:
+                if interruptible:self.checkpoint()
+                remaining=deadline-time.monotonic()
+                if remaining<=0:raise TimeoutError()
+                try:ok,result=results.get(timeout=min(.1,remaining))
+                except queue.Empty:continue
+                if not ok:raise result
+                self.phase='BROKER_RESPONSE';self.elapsed=round(time.monotonic()-self.last_call,2)
+                if self.progress:self.progress()
+                return result
         except HTTPError as exc:
             # Never include response bodies, request headers, tokens or account numbers.
             raise BrokerError(f'Toss HTTP {exc.code}; request not retried') from None

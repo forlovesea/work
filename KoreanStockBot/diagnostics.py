@@ -40,20 +40,47 @@ def selection_text(details,limit=3):
 
 def source_text(state):
     if not state:return '자료 수집 이력 없음 · 인증값 입력만으로 API 연결 성공을 의미하지 않습니다.'
-    text=[f"자동 분석 {state.get('state','미확인')} · 기준일 {state.get('as_of','미확인')} · 기록 시각 {state.get('updated_at','미확인')}"]
-    if state.get('stage'):text.append('수집 단계: '+state['stage']+' · 로그: '+state.get('log_file','research/logs/collection.log'))
+    from runtime_status import display_time
+    labels={'READY':'완료 (저장된 분석 자료)','COLLECTING_KRX':'KRX 수집 중','COLLECTING_DATA':'자료 수집 중',
+            'ANALYZING_FINANCIALS_AND_NEWS':'재무·뉴스 분석 중','COLLECTION_FAILED':'수집 실패',
+            'COLLECTION_STOPPED':'수집 중단','NO_SUPPORTED_ETF':'분석 대상 없음'}
+    text=[f"수집 상태: {labels.get(state.get('state'),state.get('state','미확인'))}",
+          f"자료 기준일: {str(state.get('as_of','미확인'))[:10]}  |  최종 갱신: {display_time(state.get('updated_at'))}"]
+    if state.get('state')=='COLLECTION_STOPPED':text.append('수집 중단 · 프로그램의 중지/종료 요청으로 수집도 멈췄습니다. API 수집 실패와는 구분됩니다. 다음 점검은 저장 캐시를 재사용합니다.')
+    progress=state.get('progress',{})
+    if progress:
+        text.append(f"진행: ETF {progress.get('etf_done',0)}/{progress.get('etf_total',0)}개 · 기업 재무 {progress.get('financial_done',0)}/{progress.get('financial_total',0)}개 · 뉴스 검색 {progress.get('news_done',0)}/{progress.get('news_total',0)}건 · 경과 {state.get('elapsed_seconds',0)}초")
+        if not progress.get('news_done') and progress.get('financial_done',0)<progress.get('financial_total',0):
+            text.append('재무 조회가 먼저 진행됩니다. 뉴스 요청 전이라는 표시만으로 수집 실패를 뜻하지 않습니다.')
+    if state.get('stage'):
+        from support_log import MEANINGS
+        text.append('수집 단계: '+MEANINGS.get(state['stage'],state['stage']))
     if state.get('error_code'):
         text.append('오류 분류: '+state['error_code']+' · HTTP '+str(state.get('http_status','해당 없음'))+' · 공급자 코드 '+str(state.get('provider_code','해당 없음')))
+        if state['error_code']=='LOCAL_FILE_ACCESS' or state.get('error_type')=='PermissionError':
+            text.append('로컬 파일 접근 실패 · 실행 폴더 쓰기 권한 또는 파일 잠금을 확인하세요. 일시적 충돌 재시도 후에도 실패한 상태입니다.')
     for key,label in [('KRX','KRX ETF·구성정보'),('DART','DART 재무·기업정보'),('NAVER','NAVER 뉴스')]:
         row=state.get('sources',{}).get(key)
         progress=state.get('provider_stages',{}).get(key)
         if not row:
-            status={'NOT_REQUESTED':'아직 요청 전 (앞 단계 중단 또는 해당 자료 불필요)',
+            status={'NOT_REQUESTED':'요청 대기 또는 해당 자료 불필요',
                     'IN_PROGRESS':'첫 요청/분석 진행 중 · 아직 응답 확인 전','FAILED':'요청/분석 실패 · 로그 확인'}.get(progress,'상세 수집 이력 없음 / 이번 연결 성공 여부 미확인')
             if progress=='NOT_REQUESTED' and state.get('state')=='COLLECTION_FAILED':status='요청하지 못함 · 앞 단계 실패로 중단'
             text.append(label+': '+status);continue
         status={'network':'API 응답 수신','cache':'저장된 자료 사용','error':'조회 오류'}.get(row['state'],'미확인')
-        text.append(f"{label}: {status} · API 성공 {row['network']}회 / 캐시 {row['cache']}회 / 오류 {row['errors']}회 · {row['checked_at']}")
+        text.append(f"{label}: {status}\n  API 성공 {row['network']}회  |  캐시 {row['cache']}회  |  오류 {row['errors']}회  |  확인 {display_time(row['checked_at'])}")
     if 'candidates' in state:text.append(f"분석한 ETF {state['candidates']}개 / 재무·뉴스 통과 {state.get('eligible',0)}개 · 구성정보 누락 {len(state.get('composition_unavailable',[]))}개")
+    if state.get('composition_unavailable') and state.get('state')!='COLLECTION_FAILED':
+        text.append(f"구성정보 검증 미통과 ETF {len(state['composition_unavailable'])}개는 매수 보류합니다. 일부 종목 제외와 전체 수집 실패는 다릅니다.")
+    from collection_log import COMPOSITION_REASONS
+    for detail in state.get('composition_failures',[]):
+        line='제외 ETF '+str(detail.get('symbol','미확인'))+': '+COMPOSITION_REASONS.get(detail.get('error_code'),'조회 응답 확인 필요')
+        if 'observed_percent' in detail:line+=' · 관측 '+str(detail['observed_percent'])+'%'
+        if 'minimum_percent' in detail:line+=' · 허용 최소 '+str(detail['minimum_percent'])+'%'
+        if 'maximum_percent' in detail:line+=' · 허용 최대 '+str(detail['maximum_percent'])+'%'
+        text.append(line)
+    if 'supported' in state:
+        text.append(f"구조 검사 통과 {state['supported']}개 / 제외 {state.get('structure_excluded',0)}개")
+        if not state['supported']:text.append('지원 구조의 ETF가 없어 구성종목·재무·뉴스 분석을 생략했습니다. KRX 분류값을 확인하세요.')
     text.append('캐시 사용은 현재 키의 인증 성공을 검증한 것이 아닙니다. READY는 분석 파일 완성 상태이며 모든 ETF 조건 통과를 뜻하지 않습니다.')
     return '\n'.join(text)

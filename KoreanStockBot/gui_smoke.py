@@ -47,7 +47,7 @@ def smoke(mode):
                 root.update_idletasks()
                 selector=next(w for w in widgets if isinstance(w,ttk.Combobox) and '직접 기간' in w.cget('values'))
                 selector.set('직접 기간'); selector.event_generate('<<ComboboxSelected>>')
-                checkbutton=next(w for w in widgets if isinstance(w,ttk.Checkbutton))
+                checkbutton=next(w for w in widgets if isinstance(w,ttk.Checkbutton) and w.cget('text')=='캘린더로 선택')
                 checkbutton.invoke()
                 calendar_button=next(w for w in widgets if isinstance(w,ttk.Button) and w.cget('text')=='달력')
                 calendar_button.invoke()

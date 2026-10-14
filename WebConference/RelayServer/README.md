@@ -1,10 +1,9 @@
 # 모아 · Python 화상회의 중계서버
-
 일반 참여자·방장·서버 관리자의 세부 절차는 **[통합 상세 매뉴얼](../화상회의_상세매뉴얼.html)** 또는 [역할별 원문](../매뉴얼/00_매뉴얼_안내.md)을 참고하세요. Ubuntu 20.04의 현재 지원 조건과 부팅 자동 시작 등록은 상세 매뉴얼에 설명되어 있습니다.
 
 Python 중계 서버와 브라우저 클라이언트로 구성한 첫 실행 버전입니다. 서버는 FastAPI + aiortc, 음성 인식은 Vosk 한국어 모델, 기록 저장은 SQLite를 사용합니다. 클라이언트는 설치 없이 Chrome/Edge에서 접속하며 브라우저의 카메라·화면 공유 API를 사용하는 부분은 JavaScript입니다.
 
-이 디렉토리(`화상회의/RelayServer`)가 서버의 독립 실행·배포 단위입니다. 영상·음성은 이 Python 서버를 경유하며, HTTPS(Caddy)와 NAT 중계(coturn)는 `deploy/` 및 Compose로 함께 구성합니다. 방 생성·입장 API, WebRTC 연결 협상, 발표권 제어, 화이트보드 동기화, 음성 인식 및 회의록 저장을 포함합니다.
+이 디렉토리(`화상회의/RelayServer`)가 서버의 독립 실행·배포 단위입니다. 영상·음성은 이 Python 서버를 경유하며, HTTPS는 Nginx, NAT 중계는 coturn을 사용합니다. `deploy/native/`의 설치 스크립트와 systemd 서비스로 운영합니다. 방 생성·입장 API, WebRTC 연결 협상, 발표권 제어, 화이트보드 동기화, 음성 인식 및 회의록 저장을 포함합니다.
 
 ## 구현 범위
 
@@ -57,7 +56,7 @@ python -m venv .venv
 
 ## Ubuntu 20.04 직접 설치
 
-운영 배포는 Docker 없이 **Python 3.12 + systemd + Nginx**를 사용합니다. [설치·HTTPS·TURN·업데이트·백업 안내](../UBUNTU_DEPLOY.md)를 따르세요.
+운영 배포는 **Python 3.12 + systemd + Nginx**를 사용합니다. [설치·HTTPS·TURN·업데이트·백업 안내](../UBUNTU_DEPLOY.md)를 따르세요.
 
 ```bash
 sudo bash deploy/native/build-python.sh
@@ -66,7 +65,6 @@ sudo bash deploy/native/install.sh
 
 설정은 `/etc/moa/moa.env`, 회의록은 `/var/lib/moa/meetings.db`, 모델은 `/var/lib/moa/models`에 저장됩니다. 상태는 `sudo systemctl status moa`, 로그는 `sudo journalctl -u moa -f`로 확인합니다. 단일 worker를 유지하세요. `deploy/native/`에 설치 스크립트, systemd 서비스, Nginx 및 환경 파일 예제가 있습니다.
 
-기존 Docker 파일은 이전 배포 호환용입니다. 새 Ubuntu 설치에는 사용하지 않습니다.
 
 ## 회의록과 데이터
 
@@ -96,8 +94,6 @@ static/               한국어 브라우저 UI (HTML/CSS/JavaScript)
 scripts/              한국어 모델 설치, 기록 내보내기, 브라우저 검증
 tests/                권한·방·기록·실제 WebRTC 미디어 테스트
 deploy/native/        Ubuntu 직접 설치, systemd, Nginx 예제
-Dockerfile            Python 서버 이미지
-compose.yaml          이전 Docker 배포 호환용 구성
 ```
 
 각 클라이언트는 서버로 오디오 1개와 영상 1개를 전송하고, 다른 참석자별 수신 연결을 만듭니다. 화면 공유는 카메라 영상 트랙을 교체합니다. Python 서버가 미디어를 실제 중계하므로 클라이언트 간 직접 연결에 의존하지 않습니다. aiortc는 수신 영상을 다시 인코딩하므로 인원이 증가하면 CPU·네트워크 비용이 빠르게 늘어납니다. 대규모 사용은 SFU 전환을 검토해야 합니다.

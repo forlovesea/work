@@ -19,8 +19,6 @@ GitHub에서 내려받아 서버를 실행하려면 **[Ubuntu 배포 안내](UBU
 │  ├─ models/             한국어 음성 인식 모델
 │  ├─ data/               기존 회의록 SQLite 데이터
 │  ├─ deploy/             HTTPS·TURN 설정
-│  ├─ Dockerfile
-│  ├─ compose.yaml        이전 Docker 배포 호환용 구성
 │  ├─ run.ps1             Windows 실행
 │  ├─ run.cmd             Windows 실행 (PowerShell 정책 변경 불필요)
 │  └─ run.sh              Linux 실행
@@ -54,12 +52,12 @@ GitHub에서 내려받아 서버를 실행하려면 **[Ubuntu 배포 안내](UBU
 powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1
 ```
 
-한국어 음성 인식 모델과 기존 `RelayServer/data`의 회의록은 보존했습니다. 로컬 실행은 기본 설정을 사용하므로 Docker용 `.env.example`을 `.env`로 복사할 필요가 없습니다.
+한국어 음성 인식 모델과 기존 `RelayServer/data`의 회의록은 보존했습니다. 로컬 실행은 기본 설정을 사용합니다. Ubuntu 운영 설정 예제는 `RelayServer/deploy/native/moa.env.example`에 있습니다.
 
 PowerShell 스크립트 실행이 허용된 환경에서는 기존처럼 `.\run.ps1`도 사용할 수 있습니다. 현재 PC에서는 실행 정책 때문에 `.ps1`이 차단되므로 위 Python 명령 또는 `RelayServer/run.cmd`를 사용하세요.
 
 ## Ubuntu로 옮길 때
 
-`RelayServer` 폴더를 서버에 복사한 뒤 그 폴더의 [배포 설명서](RelayServer/README.md)를 따르세요. 기존 Windows `.venv`는 복사하지 않습니다. Ubuntu에서는 [직접 설치 안내](UBUNTU_DEPLOY.md)에 따라 별도 Python 3.12와 systemd 서비스를 설치합니다. Docker는 필요하지 않습니다.
+`RelayServer` 폴더를 서버에 복사한 뒤 그 폴더의 [배포 설명서](RelayServer/README.md)를 따르세요. 기존 Windows `.venv`는 복사하지 않습니다. Ubuntu에서는 [직접 설치 안내](UBUNTU_DEPLOY.md)에 따라 별도 Python 3.12와 systemd 서비스를 설치합니다.
 
 서버 주소와 접속 ID 설정, 기본 마이크·스피커 꺼짐, 두 가지 회의 모드, 발표권 제어, 다중 화면·발표자·화이트보드·화면 공유 기능은 서버가 제공하는 브라우저 화면에서 사용할 수 있습니다.

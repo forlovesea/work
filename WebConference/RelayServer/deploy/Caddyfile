@@ -1,0 +1,10 @@
+{$DOMAIN} {
+    encode gzip
+    header {
+        X-Content-Type-Options nosniff
+        Referrer-Policy no-referrer
+        Permissions-Policy "camera=(self), microphone=(self), display-capture=(self)"
+        Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self' https: wss:; frame-ancestors 'none'; base-uri 'self'"
+    }
+    reverse_proxy 127.0.0.1:8000
+}

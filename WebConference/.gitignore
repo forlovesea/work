@@ -1,0 +1,22 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+.env
+data/
+models/*
+!models/.gitkeep
+test-results/
+.runtime/
+.presentation-build/node_modules/
+.presentation-build/pdf-check/
+.presentation-build/pdf-pages/
+.presentation-build/previews/
+.presentation-build/candidate.pptx*
+.presentation-build/validation.json
+
+# Local verification artifacts and presentation build workspace
+/model-check.zip
+/.model-runtime/
+/host-check.db*
+/.presentation-build/

@@ -1,0 +1,6 @@
+fastapi==0.115.12
+uvicorn[standard]==0.34.2
+aiortc==1.14.0
+av==16.0.1
+vosk==0.3.45
+numpy==2.2.6

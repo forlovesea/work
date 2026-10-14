@@ -20,7 +20,7 @@ GitHub에서 내려받아 서버를 실행하려면 **[Ubuntu 배포 안내](UBU
 │  ├─ data/               기존 회의록 SQLite 데이터
 │  ├─ deploy/             HTTPS·TURN 설정
 │  ├─ Dockerfile
-│  ├─ compose.yaml        Ubuntu 20.04 호스트용 Docker 구성
+│  ├─ compose.yaml        이전 Docker 배포 호환용 구성
 │  ├─ run.ps1             Windows 실행
 │  ├─ run.cmd             Windows 실행 (PowerShell 정책 변경 불필요)
 │  └─ run.sh              Linux 실행
@@ -60,6 +60,6 @@ PowerShell 스크립트 실행이 허용된 환경에서는 기존처럼 `.\run.
 
 ## Ubuntu로 옮길 때
 
-`RelayServer` 폴더를 서버에 복사한 뒤 그 폴더의 [배포 설명서](RelayServer/README.md)를 따르세요. 기존 Windows `.venv`는 복사하지 않습니다. Docker 이미지가 Python과 필요한 패키지를 설치합니다.
+`RelayServer` 폴더를 서버에 복사한 뒤 그 폴더의 [배포 설명서](RelayServer/README.md)를 따르세요. 기존 Windows `.venv`는 복사하지 않습니다. Ubuntu에서는 [직접 설치 안내](UBUNTU_DEPLOY.md)에 따라 별도 Python 3.12와 systemd 서비스를 설치합니다. Docker는 필요하지 않습니다.
 
 서버 주소와 접속 ID 설정, 기본 마이크·스피커 꺼짐, 두 가지 회의 모드, 발표권 제어, 다중 화면·발표자·화이트보드·화면 공유 기능은 서버가 제공하는 브라우저 화면에서 사용할 수 있습니다.

@@ -1,62 +1,135 @@
-# Ubuntu 서버에서 내려받아 실행
+# Ubuntu 20.04 직접 설치·운영 (Docker 불필요)
 
-저장소: https://github.com/forlovesea/work
+구성: **Nginx(HTTPS/WebSocket) → Python 3.12 + aiortc(systemd)**. 외부망 NAT 중계가 필요하면 Ubuntu 패키지 coturn을 추가합니다. 설치 대상은 Ubuntu 20.04 x86_64입니다.
 
-프로젝트 경로: `WebConference/RelayServer` (이전 한글 서버 폴더 이름 대신 사용).
+Ubuntu 기본 Python 3.8은 OS용으로 유지합니다. 공식 CPython 3.12.15 소스를 SHA-256 검증 후 `/opt/moa/python/3.12.15`에 별도 설치합니다. [Python 릴리스](https://www.python.org/downloads/release/python-31215/). Ubuntu 20.04는 표준 지원이 종료되었으므로 OS 보안 업데이트는 Ubuntu Pro/ESM 등으로 관리해야 합니다. [Ubuntu 지원 안내](https://ubuntu.com/blog/ubuntu-20-04-lts-end-of-life-standard-support-is-coming-to-an-end-heres-how-to-prepare).
 
-## 준비
-
-64비트 Linux, Git, Python 3(모델 다운로드용), Docker Engine 및 Compose 플러그인이 필요합니다. 앱은 컨테이너의 Python 3.12를 사용하므로 Ubuntu 20.04 기본 Python에 requirements를 설치하지 마세요.
-
-Ubuntu 20.04에서 이미 동작하는 Docker와 Compose를 사용하는 배포 구성입니다. 2026-10-15 확인 기준 [Docker의 현재 Ubuntu 지원 목록](https://docs.docker.com/engine/install/ubuntu/)에는 20.04가 없습니다. 새 설치라면 지원되는 Ubuntu LTS를 권장하며, 20.04 유지 시 해당 OS와 호환되는 Docker 설치를 먼저 준비해야 합니다. 이 프로젝트의 실제 Ubuntu 20.04 실행은 아직 검증하지 않았습니다.
+## 1. 다운로드 및 최초 설치
 
 ```bash
 sudo apt update
-sudo apt install -y git python3 ca-certificates
-sudo docker version
-sudo docker compose version
-```
-
-## 다운로드와 설정
-
-```bash
+sudo apt install -y git ca-certificates
 git clone https://github.com/forlovesea/work.git
 cd work/WebConference/RelayServer
-cp .env.example .env
-nano .env
+sudo bash deploy/native/build-python.sh
+sudo bash deploy/native/install.sh
 ```
 
-`.env`의 `DOMAIN=meet.example.com`을 실제 도메인으로 바꾸세요. 해당 도메인의 DNS가 서버를 가리켜야 합니다. DB_PATH와 VOSK_MODEL_PATH는 컨테이너 경로인 기본값을 유지합니다. 비공개 저장소인 경우 clone 시 GitHub 인증이 필요합니다.
+빌드는 기본 2개 작업으로 실행합니다. 메모리가 부족하면 `sudo env JOBS=1 bash deploy/native/build-python.sh`를 사용하세요. 기존 별도 Python 3.12가 있다면 빌드를 생략하고 `sudo bash deploy/native/install.sh /절대경로/python3.12`로 설치할 수 있습니다. 서비스는 홈 디렉터리에 접근하지 못하므로 Python을 `/home` 아래에 설치하지 마세요.
+
+설치기는 전용 `moa` 계정, 릴리스별 가상환경, 한국어 모델, 설정 파일, systemd 서비스를 구성합니다. 설정은 최초 한 번만 생성하며 업데이트 때 보존합니다. 서버는 `127.0.0.1:8000`에서만 HTTP 요청을 받습니다. 설치 직후 외부 HTTPS는 아직 구성되지 않은 상태입니다.
+
+| 위치 | 용도 |
+| --- | --- |
+| `/opt/moa/releases/release-*` | 버전별 코드와 가상환경 |
+| `/opt/moa/current` | 현재 버전 심볼릭 링크 |
+| `/etc/moa/moa.env` | 환경 설정, root:moa 0640 |
+| `/var/lib/moa/meetings.db` | 회의록 DB |
+| `/var/lib/moa/models` | 한국어 모델 |
+| `/etc/systemd/system/moa.service` | 전용 계정 서비스 |
 
 ```bash
-python3 scripts/download_model.py
-sudo docker compose config --quiet
-sudo docker compose up -d --build
-sudo docker compose ps
-sudo docker compose logs --tail=100 meeting https
+sudo systemctl status moa --no-pager
+sudo journalctl -u moa -n 100 --no-pager
 curl -fsS http://127.0.0.1:8000/api/health
 curl -fsS http://127.0.0.1:8000/api/config
 ```
 
-`ok: true` 및 `speech_available: true`를 확인하고 `https://설정한도메인`에 접속하세요. 자동 회의록이 필요 없다면 모델 다운로드를 생략할 수 있습니다.
+`ok: true`, `speech_available: true`를 확인하세요. 기본 `MAX_PARTICIPANTS=8`은 접속 제한이며 동시 성능 보장값이 아닙니다. 실제 참석 인원으로 CPU·메모리·네트워크 부하를 시험하세요.
 
-## 네트워크
+## 2. HTTPS 설정
 
-- HTTPS 발급/접속용 TCP 80, 443이 서버에 도달해야 합니다.
-- WebRTC는 HTTPS와 별도 UDP 연결이 필요합니다. `cat /proc/sys/net/ipv4/ip_local_port_range`로 서버 범위를 확인하고 방화벽 및 공유기 설정에 반영하세요.
-- 외부망/NAT 환경은 [RelayServer README](RelayServer/README.md)의 TURN 설정을 적용하세요. `deploy/turnserver.conf`의 도메인·비밀번호·공인 IP와 `.env`의 `ICE_SERVERS_JSON`을 일치시키고 TCP/UDP 3478, UDP 49160–49260 접근을 구성한 다음 `sudo docker compose --profile turn up -d --build`로 시작합니다.
-- 다른 PC의 카메라·마이크 사용에는 HTTPS가 필요합니다. `localhost` 주소는 해당 PC 자체를 가리킵니다.
-
-## 업데이트와 종료
+DNS가 실제 서버를 가리키고 TCP 80/443이 도달 가능해야 합니다. 기존 프록시가 있다면 포트를 중복 점유하지 않도록 기존 설정에 사이트를 추가하세요.
 
 ```bash
-# RelayServer 디렉터리에서 실행
-git pull --ff-only
-sudo docker compose up -d --build
-# 종료 (회의록 볼륨 보존)
-sudo docker compose down
+sudo apt install -y nginx certbot python3-certbot-nginx
+sudo cp deploy/native/nginx.conf /etc/nginx/sites-available/moa
+sudo nano /etc/nginx/sites-available/moa
+# server_name을 실제 도메인으로 변경
+sudo ln -s /etc/nginx/sites-available/moa /etc/nginx/sites-enabled/moa
+sudo nginx -t
+sudo systemctl enable --now nginx
+sudo systemctl reload nginx
+# 아래 도메인도 실제 값으로 변경
+sudo certbot --nginx -d meet.example.com --redirect
+sudo systemctl enable --now certbot.timer
+sudo certbot renew --dry-run
 ```
 
-회의록은 `meeting-data` Docker 볼륨에 저장됩니다. `down -v`는 데이터를 삭제하므로 사용하지 마세요. 업데이트 전에 진행 중인 회의를 종료하고 운영 DB를 백업하세요. 재부팅 시 Docker 서비스가 시작되면 `restart: unless-stopped` 설정으로 컨테이너가 다시 시작됩니다.
+`https://실제도메인`으로 접속하세요. Nginx는 WebSocket Upgrade 전달과 긴 연결을 지원하도록 구성했습니다. [공식 설명](https://nginx.org/en/docs/http/websocket.html). 폐쇄망은 조직 CA 인증서를 Nginx에 설정하고 클라이언트가 해당 CA를 신뢰하도록 구성하세요. 다른 PC의 카메라·마이크·화면 공유에는 신뢰되는 HTTPS가 필요합니다.
 
-Windows의 `.venv`, 기존 회의록 DB, 모델 파일, `.env`는 GitHub 업로드에서 제외되어 있습니다. 기존 회의록 이전은 별도 백업/복원이 필요합니다.
+## 3. 미디어 및 TURN
+
+WebRTC 미디어는 HTTPS와 별도 UDP 연결입니다. `cat /proc/sys/net/ipv4/ip_local_port_range`로 서버 범위를 확인하고 방화벽·보안그룹·NAT에 반영하세요. NAT 환경은 TURN을 구성하고 서로 다른 외부 네트워크에서 시험해야 합니다. HTTP 8000은 외부에 열지 않습니다.
+
+```bash
+sudo apt install -y coturn
+# 기존 coturn 운영 중이면 덮어쓰지 말고 기존 설정에 통합
+sudo cp deploy/turnserver.conf /etc/turnserver.conf
+sudo nano /etc/turnserver.conf
+```
+
+`realm`, `user=meeting:강한임의비밀번호`, 필요 시 `external-ip=공인IP/사설IP`를 설정합니다. TCP/UDP 3478과 UDP 49160–49260을 허용합니다. `/etc/default/coturn`을 사용하는 패키지는 `TURNSERVER_ENABLED=1`도 설정합니다.
+
+```bash
+sudo systemctl enable --now coturn
+sudo systemctl restart coturn
+sudo journalctl -u coturn -n 50 --no-pager
+sudo nano /etc/moa/moa.env
+```
+
+systemd 환경 파일에서는 JSON 전체를 작은따옴표로 감쌉니다.
+
+```text
+ICE_SERVERS_JSON='[{"urls":"turn:meet.example.com:3478?transport=udp","username":"meeting","credential":"실제비밀번호"}]'
+```
+
+`sudo systemctl restart moa`로 적용합니다. 재시작은 진행 중인 회의를 종료합니다. worker 수를 늘리면 방과 WebRTC 상태를 공유하지 못하므로 단일 프로세스를 유지하세요.
+
+## 4. 업데이트와 롤백
+
+회의를 종료하고 백업한 뒤 Git 체크아웃의 `RelayServer`에서:
+
+```bash
+git pull --ff-only
+sudo bash deploy/native/install.sh
+```
+
+새 릴리스에서 의존성과 모델을 확인한 뒤 `current` 링크를 전환하고 서비스를 재시작합니다. 기존 가상환경·DB·설정은 덮어쓰지 않습니다. 이전 릴리스 경로를 출력하며 자동 삭제하지 않습니다. 시작 후 상태 검사가 실패하면 종료 코드 1로 중단합니다. 필요하면 수동 롤백하세요.
+
+```bash
+sudo systemctl stop moa
+# 실제 이전 릴리스 경로로 변경
+sudo ln -sfn /opt/moa/releases/release-PREVIOUS /opt/moa/current
+sudo systemctl start moa
+```
+
+롤백은 코드·가상환경만 바꾸며 DB 및 설정은 되돌리지 않습니다. 향후 DB 형식 변경은 해당 버전 복원 지침도 확인해야 합니다. Python 보안 패치는 별도 설치 후 새 인터프리터를 `install.sh` 인자로 전달하여 가상환경을 다시 만드세요.
+
+## 5. 자동 시작, 로그, 백업
+
+```bash
+sudo systemctl is-enabled moa
+sudo systemctl restart moa
+sudo systemctl stop moa              # 이번 실행만 중지
+sudo systemctl disable --now moa     # 부팅 자동 시작 해제
+sudo systemctl enable --now moa      # 재개
+sudo journalctl -u moa -f
+```
+
+설치기가 부팅 자동 시작을 등록합니다. 재부팅 후 서비스가 살아나도 진행 중이던 방은 복구되지 않으므로 새 방을 만드세요.
+
+회의 종료 후 서비스를 멈추고 DB와 WAL/SHM을 포함한 상태 디렉터리 및 설정을 함께 백업합니다. 백업에는 회의록과 TURN 암호가 포함됩니다.
+
+```bash
+sudo systemctl stop moa
+sudo install -d -m 0700 /var/backups/moa
+sudo sh -c 'umask 077; tar -czf /var/backups/moa/backup-$(date +%Y%m%d-%H%M%S).tar.gz /var/lib/moa /etc/moa'
+sudo systemctl start moa
+```
+
+복원은 서비스를 멈춘 상태에서 수행하고 `/var/lib/moa` 소유자를 `moa:moa`로 유지하세요. Windows/Docker DB 이전도 양쪽 서비스를 중지하고 남아 있는 WAL/SHM까지 함께 옮깁니다. 새 DB와 기존 DB를 각각 백업한 뒤 이전하세요.
+
+## 검증 범위
+
+Windows에서 앱 회귀 테스트와 설치 셸 구문 검사를 수행합니다. Ubuntu의 apt 설치·소스 컴파일·systemd/Nginx/coturn 실행과 외부망 연결은 대상 서버에서 최종 검증해야 합니다. 기존 Docker 파일은 이전 배포 호환용이며 이 절차에서는 사용하지 않습니다.

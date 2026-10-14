@@ -1,0 +1,30 @@
+[Unit]
+Description=Moa WebRTC conference relay
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=moa
+Group=moa
+WorkingDirectory=/opt/moa/current
+EnvironmentFile=/etc/moa/moa.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/moa/current/.venv/bin/python /opt/moa/current/server.py --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=45
+KillSignal=SIGINT
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/moa
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

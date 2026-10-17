@@ -7,6 +7,7 @@ const state = {
   silentTrack: null, blankTrack: null, canvasTimer: null,
   peers: new Map(), streams: new Map(), pending: new Map(), requestId: 0,
   entries: [], strokes: [], view: "grid", busy: false, leaving: false, speechPending: 0,
+  approval: null, approvalSending: false, approvalTimer: null,
 };
 let toastTimer;
 function toast(message) {
@@ -20,10 +21,10 @@ function serverURL() {
   if (location.protocol === "https:" && url.protocol !== "https:") throw new Error("HTTPS 화면에서는 HTTPS 서버 주소를 사용하세요.");
   return url.origin;
 }
-async function api(path, data, token) {
+async function api(path, data, token, timeout = 15000) {
   const headers = {}; if (data) headers["Content-Type"] = "application/json";
   if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(serverURL() + path, { method: data ? "POST" : "GET", headers, body: data ? JSON.stringify(data) : undefined, signal: AbortSignal.timeout(15000) });
+  const res = await fetch(serverURL() + path, { method: data ? "POST" : "GET", headers, body: data ? JSON.stringify(data) : undefined, signal: AbortSignal.timeout(timeout) });
   if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(typeof err.detail === "string" ? err.detail : `요청 실패 (${res.status})`); }
   return res;
 }
@@ -33,9 +34,9 @@ async function checkServer() {
     state.config = await (await api("/api/config")).json();
     $("server-state").textContent = `연결됨 · 한 방 최대 ${state.config.max_participants}명`;
     $("speech-hint").textContent = state.config.speech_available ? (state.config.speech_engine === "faster-whisper" ? "한국어 정밀 전사 준비 완료 · 발화 후 순서대로 기록되며 표시가 늦을 수 있습니다." : "한국어 음성 인식 준비 완료 · 모든 참석자에게 기록 상태가 표시됩니다.") : state.config.speech_message;
-    updateMinutesOption();
+    updateMinutesOption(); updateApprovalControls();
   } catch (e) {
-    state.config = null; updateMinutesOption();
+    state.config = null; updateMinutesOption(); updateApprovalControls();
     $("server-state").textContent = "연결 실패 · 주소, HTTPS, 서버의 접속 허용 설정을 확인하세요.";
     throw e;
   }
@@ -50,6 +51,59 @@ function setCreate(value) {
   $("create-tab").setAttribute("aria-selected", String(value)); $("join-tab").setAttribute("aria-selected", String(!value));
   $("enter").firstChild.textContent = value ? "새 회의 시작하기 " : "회의 참여하기 ";
   $("code").required = !value; $("title").required = value;
+  updateApprovalControls();
+}
+function approvalMatches() {
+  const a = state.approval;
+  return a && a.server === $("server").value.trim().replace(/\/$/, "") && a.name === $("name").value.trim() && a.contact === $("contact").value.trim();
+}
+function approvalValid() {
+  return approvalMatches() && state.approval.status === "approved" && state.approval.expires_at * 1000 > Date.now();
+}
+function updateApprovalControls() {
+  const required = state.config?.master_approval_required !== false;
+  $("request-approval").hidden = !state.create || !required;
+  $("approval-fields").hidden = !required;
+  $("contact").required = state.create && required;
+  const status = approvalMatches() ? state.approval.status : null;
+  $("request-approval").disabled = state.approvalSending || !state.config?.master_email_ready || ["pending", "approved"].includes(status);
+  $("request-approval").textContent = state.approvalSending ? "전송 중…" : status === "pending" ? "승인 대기 중" : status === "approved" ? "인증완료" : "이메일 인증";
+  const messages = {pending: "Master에게 인증 요청을 보냈습니다. 승인을 기다려 주세요. 승인 여부를 자동으로 확인합니다.", approved: "Master 인증이 완료되었습니다. 새 회의 시작하기를 눌러 주세요.", rejected: "Master가 요청을 거절했습니다. 정보를 확인한 후 다시 요청하세요.", expired: "인증 유효 시간이 지났습니다. 다시 인증을 요청하세요.", used: "사용된 승인입니다. 새 회의를 만들려면 다시 인증을 요청하세요."};
+  $("approval-status").textContent = !state.config ? "서버 연결 후 인증을 요청할 수 있습니다." : !state.config.master_email_ready && required ? "Master 이메일 발송 설정이 필요합니다. 서버 관리자에게 문의하세요." : messages[status] || "이름과 연락처를 입력한 뒤 이메일 인증을 눌러 주세요.";
+  $("enter").disabled = state.busy || (state.create && (!state.config || (required && !approvalValid())));
+}
+function saveApproval() {
+  try { if (state.approval) sessionStorage.setItem("moa-host-approval", JSON.stringify(state.approval)); else sessionStorage.removeItem("moa-host-approval"); } catch (_) { /* Private mode */ }
+}
+function resetApproval() {
+  clearTimeout(state.approvalTimer); state.approval = null; saveApproval(); updateApprovalControls();
+}
+async function pollApproval() {
+  const a = state.approval;
+  if (!a || !approvalMatches()) return;
+  try {
+    const result = await (await api(`/api/host-approvals/${encodeURIComponent(a.request_id)}`, null, a.client_token)).json();
+    if (state.approval !== a) return;
+    Object.assign(a, result); saveApproval(); updateApprovalControls();
+  } catch (e) {
+    if (state.approval !== a) return;
+    if (a.expires_at * 1000 <= Date.now()) a.status = "expired";
+    updateApprovalControls();
+    $("approval-status").textContent = "승인 상태 확인 실패: " + e.message;
+  }
+  if (state.approval === a && ["pending", "approved"].includes(a.status)) state.approvalTimer = setTimeout(pollApproval, 4000);
+}
+async function requestApproval() {
+  if (state.approvalSending) return;
+  if (!$("name").reportValidity() || !$("contact").reportValidity()) return;
+  const name = $("name").value.trim(), contact = $("contact").value.trim(), server = serverURL();
+  state.approvalSending = true; updateApprovalControls();
+  try {
+    const result = await (await api("/api/host-approvals", {name, contact}, null, 60000)).json();
+    if (name !== $("name").value.trim() || contact !== $("contact").value.trim() || server !== serverURL()) return;
+    state.approval = {...result, name, contact, server}; saveApproval();
+    clearTimeout(state.approvalTimer); pollApproval();
+  } finally { state.approvalSending = false; updateApprovalControls(); }
 }
 function invitationURL() {
   const url = new URL("/", serverURL());
@@ -191,21 +245,24 @@ async function enter(event) {
   state.busy = true; state.leaving = false; $("enter").disabled = true;
   try {
     await checkServer();
+    if (state.create && state.config.master_approval_required && !approvalValid()) throw new Error("새 회의를 만들려면 먼저 Master 이메일 인증을 완료하세요.");
     state.mic = $("pref-mic").checked; state.speaker = $("pref-speaker").checked; state.camera = $("pref-camera").checked;
     // Only name and address persist. Device use always starts with an explicit choice.
     try { localStorage.setItem("moa-settings", JSON.stringify({ server: serverURL(), name: $("name").value.trim() })); } catch (_) { /* Private mode */ }
     await prepareMedia();
     state.session = await (await api(state.create ? "/api/rooms" : "/api/join", state.create ? {
       title: $("title").value.trim(), name: $("name").value.trim(), mode: $("mode").value, minutes_enabled: $("pref-minutes").checked,
+      contact: $("contact").value.trim(), approval_id: state.approval?.request_id || "", approval_token: state.approval?.client_token || "",
     } : { code: $("code").value.trim(), name: $("name").value.trim() })).json();
     $("code").value = state.session.code;
+    if (state.create) resetApproval();
     await connectSocket();
     $("lobby").hidden = true; $("conference").hidden = false; $("footer").hidden = true;
     await rpc("devices", { mic: state.mic, camera: state.camera });
     await publish(); renderTiles();
     toast("입장했습니다. 마이크와 스피커 상태를 확인해 주세요.");
   } catch (e) { await leave(); toast(e.message || "회의에 입장하지 못했습니다."); }
-  finally { state.busy = false; $("enter").disabled = false; }
+  finally { state.busy = false; updateApprovalControls(); }
 }
 function me() { return state.room?.participants.find(p => p.id === state.session?.participant_id); }
 function isHost() { return state.room?.host_id === state.session?.participant_id; }
@@ -385,8 +442,16 @@ $("board").onpointerdown = (event) => {
 $("board").onpointermove = (event) => { if (!drawing) return; if (!isPresenter()) return flushStroke(true); const next = point(event); drawStroke({ ...drawing, points: [drawing.points.at(-1), next] }); drawing.points.push(next); if (drawing.points.length >= 100) flushStroke(); };
 $("board").onpointerup = () => flushStroke(true); $("board").onpointercancel = () => flushStroke(true);
 async function downloadMinutes() {
-  const blob = await (await api(`/api/rooms/${state.session.room_id}/minutes`, null, state.session.token)).blob();
-  const url = URL.createObjectURL(blob), a = document.createElement("a"); a.href = url; a.download = `회의록-${state.session.code}.md`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 5000);
+  const format = $("minutes-format").value, summary = $("minutes-summary").checked;
+  const session = state.session;
+  const button = $("download"); button.disabled = true; button.textContent = "파일 생성 중…";
+  try {
+    const query = new URLSearchParams({ format, summary: String(summary) });
+    const blob = await (await api(`/api/rooms/${session.room_id}/minutes?${query}`, null, session.token, 120000)).blob();
+    const url = URL.createObjectURL(blob), a = document.createElement("a"); a.href = url;
+    a.download = `회의록-${session.code}${summary ? "-요약포함" : ""}.${format}`;
+    document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000);
+  } finally { button.disabled = false; button.textContent = "↓ 회의록 저장"; }
 }
 async function leave() {
   state.leaving = true; drawing = null; clearInterval(drawingTimer);
@@ -404,6 +469,9 @@ async function leave() {
   state.mic = state.speaker = state.camera = false;
 }
 $("join-form").onsubmit = enter;
+$("request-approval").onclick = safeAction(requestApproval);
+for (const id of ["name", "contact"]) $(id).addEventListener("input", resetApproval);
+$("server").addEventListener("input", () => { state.config = null; resetApproval(); });
 $("check-server").onclick = safeAction(checkServer);
 $("server").onchange = safeAction(checkServer);
 $("join-tab").onclick = () => setCreate(false); $("create-tab").onclick = () => setCreate(true);
@@ -436,4 +504,10 @@ window.addEventListener("hashchange", () => {
 });
 let saved = {}; try { saved = JSON.parse(localStorage.getItem("moa-settings") || "{}"); } catch (_) { /* No saved settings */ }
 $("server").value = saved.server || location.origin; $("name").value = saved.name || "";
+try {
+  const a = JSON.parse(sessionStorage.getItem("moa-host-approval") || "null");
+  if (a && a.server === $("server").value.replace(/\/$/, "") && a.expires_at * 1000 > Date.now()) {
+    state.approval = a; $("name").value = a.name; $("contact").value = a.contact; pollApproval();
+  }
+} catch (_) { /* No pending approval */ }
 setCreate(false); loadInvitation(); safeAction(checkServer)();

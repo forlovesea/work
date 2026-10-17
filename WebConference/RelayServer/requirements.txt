@@ -4,3 +4,5 @@ aiortc==1.14.0
 av==16.0.1
 vosk==0.3.45
 numpy==2.2.6
+python-docx==1.2.0
+reportlab==4.4.3

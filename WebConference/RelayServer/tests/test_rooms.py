@@ -9,7 +9,7 @@ from app.media import SpeechService
 
 @pytest.fixture
 def client(tmp_path):
-    with TestClient(create_app(str(tmp_path / "test.db"), SpeechService(""))) as client:
+    with TestClient(create_app(str(tmp_path / "test.db"), SpeechService(""), approval_required=False)) as client:
         yield client
 
 

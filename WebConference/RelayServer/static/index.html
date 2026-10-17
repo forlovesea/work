@@ -40,9 +40,10 @@
         <label class="switch-row device-camera"><span><b>카메라</b><small>입장할 때 내 영상 전송</small></span><input id="pref-camera" type="checkbox"><span class="switch"></span></label>
       </div>
       <div class="privacy-note">마이크와 스피커는 기본 꺼짐입니다. 입장 후에도 변경할 수 있어요.</div>
-      <div class="segmented" role="tablist" aria-label="입장 방식"><button type="button" id="join-tab" class="active" role="tab" aria-selected="true">회의 참여</button><button type="button" id="create-tab" role="tab" aria-selected="false">새 회의 만들기</button></div>
+      <div class="entry-tabs"><div class="segmented" role="tablist" aria-label="입장 방식"><button type="button" id="join-tab" class="active" role="tab" aria-selected="true">회의 참여</button><button type="button" id="create-tab" role="tab" aria-selected="false">새 회의 만들기</button></div><button id="request-approval" type="button" class="subtle" hidden>이메일 인증</button></div>
       <div id="join-fields"><label for="code">방 접속 ID</label><input id="code" maxlength="32" placeholder="방장이 공유한 접속 ID" autocomplete="off"></div>
       <div id="create-fields" hidden>
+        <div id="approval-fields"><label for="contact">방장 연락처</label><input id="contact" type="text" maxlength="120" placeholder="이메일 주소 또는 전화번호" autocomplete="off"><p class="help">이메일 인증을 누르면 내 이름과 연락처가 Master(forlovesea@gmail.com)에게 전송됩니다.</p><p id="approval-status" class="approval-status" role="status"></p></div>
         <label for="title">회의 이름</label><input id="title" maxlength="80" placeholder="예: 제품팀 아이디어 회의">
         <label for="mode">회의 방식</label><select id="mode"><option value="meeting">회의 모드 · 한 사람씩 발표</option><option value="free">FREE Talk · 자유롭게 대화</option></select>
         <label class="checkbox-row"><input type="checkbox" id="pref-minutes">음성 인식으로 자동 회의록 작성</label>
@@ -53,7 +54,7 @@
   </section>
 </main>
 <main id="conference" class="conference" hidden>
-  <section class="room-header"><div><div class="room-meta"><span id="mode-badge" class="badge"></span><span id="elapsed">00:00</span></div><h1 id="room-title"></h1></div><div class="room-actions"><button id="copy-code" class="subtle">접속 ID 복사</button><button id="download" class="subtle">↓ 회의록 저장</button></div></section>
+  <section class="room-header"><div><div class="room-meta"><span id="mode-badge" class="badge"></span><span id="elapsed">00:00</span></div><h1 id="room-title"></h1></div><div class="room-actions"><button id="copy-code" class="subtle">접속 ID 복사</button><div class="minutes-export"><label for="minutes-format" class="format-label">저장 형식</label><select id="minutes-format"><option value="docx">Word (.docx)</option><option value="pdf">PDF (.pdf)</option><option value="txt">텍스트 (.txt)</option></select><button id="download" class="subtle">↓ 회의록 저장</button><label class="summary-option"><input id="minutes-summary" type="checkbox">회의록 요약 추가</label><small>전체 대화 저장 · 체크하면 요약도 함께 저장</small></div></div></section>
   <div class="meeting-layout">
     <section class="meeting-main">
       <div class="view-bar"><div class="segmented compact" role="tablist" aria-label="화면 배치"><button data-view="grid" class="active" role="tab">▦ 다중 화면</button><button data-view="focus" role="tab">▣ 발표자</button><button data-view="board" role="tab">▧ 화이트보드</button></div><button id="fullscreen" class="icon-button" title="회의 화면 전체 보기">⛶</button></div>

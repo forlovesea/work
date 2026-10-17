@@ -108,7 +108,7 @@ def test_export_waits_for_pending_transcription(tmp_path):
     from fastapi.testclient import TestClient
     from app.main import create_app
     speech = WhisperSpeechService("", model=object())
-    with TestClient(create_app(str(tmp_path / "minutes.db"), speech)) as client:
+    with TestClient(create_app(str(tmp_path / "minutes.db"), speech, approval_required=False)) as client:
         credentials = client.post("/api/rooms", json={"title": "Meeting", "name": "Host"}).json()
         rid = credentials["room_id"]
         headers = {"Authorization": "Bearer " + credentials["token"]}

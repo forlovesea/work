@@ -1,5 +1,7 @@
 # Ubuntu 20.04 직접 설치·운영
 
+새 회의 생성은 Master 승인 후 가능합니다. 설치·업데이트 전에 [Master 이메일 인증 및 SMTP 설정](MASTER_APPROVAL.md)을 확인하세요.
+
 한국어 회의록의 정확도를 우선하고 지연을 허용하려면 [Whisper 전환 안내](WHISPER_DEPLOY.md)를 참고하세요. 기존 설치의 음성 인식 엔진만 교체하는 절차를 제공합니다.
 
 구성: **Nginx(HTTPS/WebSocket) → Python 3.12 + aiortc(systemd)**. 외부망 NAT 중계가 필요하면 Ubuntu 패키지 coturn을 추가합니다. 설치 대상은 Ubuntu 20.04 x86_64입니다.

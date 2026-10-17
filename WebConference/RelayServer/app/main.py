@@ -10,18 +10,21 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
+from typing import Literal
 
 from aiortc import RTCConfiguration, RTCIceServer, RTCPeerConnection, RTCSessionDescription
 from aiortc.contrib.media import MediaRelay
 from aiortc.mediastreams import MediaStreamError
-from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .domain import Participant, Room, RuleError, Store, minutes_markdown
+from .domain import Participant, Room, RuleError, Store
 from .media import AudioGate, SpeechService
+from .minutes_export import export_minutes
+from .approvals import ApprovalService, MASTER_EMAIL
 
 log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parent.parent
@@ -32,6 +35,18 @@ class CreateRoom(BaseModel):
     name: str = Field(min_length=1, max_length=40)
     mode: str = "meeting"
     minutes_enabled: bool = False
+    contact: str = Field(default="", max_length=120)
+    approval_id: str = Field(default="", max_length=100)
+    approval_token: str = Field(default="", max_length=200)
+
+
+class ApprovalRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
+    contact: str = Field(min_length=1, max_length=120)
+
+
+class ApprovalDecision(BaseModel):
+    decision: Literal["approve", "reject"]
 
 
 class JoinRoom(BaseModel):
@@ -278,7 +293,7 @@ class Hub:
         return {}
 
 
-def create_app(db_path=None, speech=None):
+def create_app(db_path=None, speech=None, *, approval_required=True, approval_sender=None):
     @asynccontextmanager
     async def lifespan(app):
         store = Store(db_path or os.getenv("DB_PATH", str(ROOT / "data" / "meetings.db")))
@@ -293,6 +308,8 @@ def create_app(db_path=None, speech=None):
         if hasattr(recognizer, "on_status"):
             recognizer.on_status = hub.speech_status
         app.state.hub = hub
+        app.state.export_slots = asyncio.Semaphore(2)
+        app.state.approvals = ApprovalService(store.db, required=approval_required, sender=approval_sender)
         reaper = asyncio.create_task(hub.reap())
         yield
         reaper.cancel()
@@ -313,11 +330,39 @@ def create_app(db_path=None, speech=None):
         h = app.state.hub
         return {"speech_available": h.speech.available, "speech_message": h.speech.error,
                 "speech_engine": h.speech.engine,
+                "master_approval_required": app.state.approvals.required,
+                "master_email_ready": app.state.approvals.ready, "master_email": MASTER_EMAIL,
                 "max_participants": h.max_people, "version": "0.1.0"}
 
     @app.get("/api/health")
     async def health():
         return {"ok": True}
+
+    @app.post("/api/host-approvals", status_code=202)
+    async def request_approval(data: ApprovalRequest, request: Request, response: Response):
+        response.headers["Cache-Control"] = "no-store"
+        return await app.state.approvals.request(data.name, data.contact, request.client.host if request.client else "unknown")
+
+    @app.get("/api/host-approvals/{rid}")
+    async def approval_status(rid: str, response: Response, authorization: str = Header(default="")):
+        response.headers["Cache-Control"] = "no-store"
+        return app.state.approvals.status(rid, authorization.removeprefix("Bearer "))
+
+    @app.get("/api/master-approvals/{rid}")
+    async def master_details(rid: str, response: Response, authorization: str = Header(default="")):
+        response.headers["Cache-Control"] = "no-store"
+        return app.state.approvals.status(rid, authorization.removeprefix("Bearer "), master=True)
+
+    @app.post("/api/master-approvals/{rid}/decision")
+    async def master_decision(rid: str, data: ApprovalDecision, response: Response, authorization: str = Header(default="")):
+        response.headers["Cache-Control"] = "no-store"
+        return app.state.approvals.decide(rid, authorization.removeprefix("Bearer "), data.decision)
+
+    @app.get("/master-approval")
+    async def master_page():
+        return FileResponse(ROOT / "static" / "master-approval.html", headers={
+            "Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
+            "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'"})
 
     @app.post("/api/rooms", status_code=201)
     async def create(data: CreateRoom):
@@ -332,10 +377,16 @@ def create_app(db_path=None, speech=None):
         while any(r.code == code for r in h.rooms.values()):
             code = secrets.token_hex(6).upper()
         room = Room(secrets.token_hex(16), code, data.title.strip(), data.mode, "", data.minutes_enabled)
+        app.state.approvals.consume(data.approval_id, data.approval_token, data.name, data.contact)
         p = h.add_person(room, data.name)
         room.host_id = room.presenter_id = p.id
+        try:
+            h.store.add_room(room)
+        except Exception:
+            h.store.db.rollback()
+            h.tokens.pop(p.token, None)
+            raise
         h.rooms[room.id] = room
-        h.store.add_room(room)
         return h.credentials(room, p)
 
     @app.post("/api/join")
@@ -351,7 +402,8 @@ def create_app(db_path=None, speech=None):
             raise HTTPException(409, str(e)) from e
 
     @app.get("/api/rooms/{rid}/minutes")
-    async def download(rid: str, authorization: str = Header(default="")):
+    async def download(rid: str, authorization: str = Header(default=""),
+                       format: Literal["docx", "pdf", "txt"] = "txt", summary: bool = False):
         h = app.state.hub
         try:
             room, _ = h.session(authorization.removeprefix("Bearer "))
@@ -361,8 +413,12 @@ def create_app(db_path=None, speech=None):
                 raise HTTPException(409, "음성 인식이 아직 처리 중입니다. 자동 기록을 끄고 대기가 0건이 된 뒤 저장하세요.")
         except RuleError as e:
             raise HTTPException(403, str(e)) from e
-        return Response(minutes_markdown(room, h.store.entries(rid)), media_type="text/markdown; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="meeting-minutes.md"'})
+        async with app.state.export_slots:
+            entries = h.store.entries(rid)
+            content, media_type = await asyncio.to_thread(export_minutes, room.title, room.created_at, entries, format, summary)
+        return Response(content, media_type=media_type,
+                        headers={"Content-Disposition": f'attachment; filename="meeting-minutes.{format}"',
+                                 "Cache-Control": "no-store"})
 
     @app.websocket("/ws")
     async def websocket(ws: WebSocket):

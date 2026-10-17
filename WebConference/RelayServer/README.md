@@ -11,12 +11,12 @@ Python 중계 서버와 브라우저 클라이언트로 구성한 첫 실행 버
 | --- | --- |
 | 접속 설정 | 중계 서버 주소, 내 이름, 방 접속 ID, 마이크·스피커·카메라 설정 |
 | 장치 기본값 | **마이크·스피커 꺼짐**. 카메라도 꺼짐. 이전 사용 여부를 저장하지 않음 |
-| 방 생성 | 방장, 방 이름, FREE Talk/회의 모드 선택, 무작위 접속 ID 자동 생성 |
+| 방 생성 | 방장 이름·연락처로 Master 이메일 승인 후 회의 생성. 방 이름, FREE Talk/회의 모드 선택, 무작위 접속 ID 자동 생성 |
 | 초대 | 방장 화면에서 초대 링크 복사. 링크를 열면 서버 주소·접속 ID 자동 입력 후 이름을 확인하고 입장. 기존 주소·ID 복사도 지원 |
 | FREE Talk | 모든 참석자가 동시에 말할 수 있고 수신 브라우저가 여러 음성을 동시에 재생 |
 | 회의 모드 | 방장이 발표자 지정. 손들기 지원. 서버에서 발표자 외 음성 차단 |
 | 자동 회의록 | 회의 모드에서 선택. 서버의 한국어 음성 인식 → 발언자·시간별 전사 → SQLite 저장 |
-| 정리된 회의록 | 발언자별 논의, 방장 확정 결정, 실행 항목, 추가 메모, 자동 추출 후보, 시간순 원문을 Markdown으로 저장 |
+| 회의록 저장 | Word·PDF·텍스트 중 선택해 전체 대화 저장. ‘회의록 요약 추가’ 체크 시 주제별 대표 발언, 확정 결정, 실행 항목, 메모를 함께 저장 |
 | 다중 화면 | 모든 참석자의 영상 타일. 음성은 화면 배치에 관계없이 재생 |
 | 발표자 화면 | 발표자 영상 또는 공유 화면을 크게 표시. 전체 화면 버튼 지원 |
 | 화이트보드 | 현재 발표자가 그리기·색·두께·지우기 제어. 늦게 들어와도 기존 그림 동기화 |
@@ -103,7 +103,10 @@ deploy/native/        Ubuntu 직접 설치, systemd, Nginx 예제
 ```bash
 python -m pip install -r requirements-dev.txt
 python -m pytest -q
-# 서버를 실행한 상태에서, 시스템 Chrome이 설치된 PC:
+# 실제 메일 없이 승인 과정을 검증 (시스템 Chrome 필요):
+python scripts/browser_approval_smoke.py
+# 아래 명령은 개발용 승인 생략 서버에서만 실행:
+# python -c "import uvicorn; from app.main import create_app; uvicorn.run(create_app(db_path='test-results/browser.db', approval_required=False), host='127.0.0.1', port=8000)"
 python scripts/browser_smoke.py
 ```
 

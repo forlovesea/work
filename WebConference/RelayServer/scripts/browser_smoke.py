@@ -107,10 +107,26 @@ def main():
         host.locator("#note-text").fill("다음 주 수요일에 시제품을 함께 검토한다.")
         host.locator('#note-form button').click()
         guest.wait_for_function("state.entries.some(e => e.kind === 'decision')")
-        with host.expect_download() as download:
-            host.locator("#download").click()
-        download.value.save_as(str(OUTPUT / "meeting-minutes.md"))
-        assert "시제품" in (OUTPUT / "meeting-minutes.md").read_text(encoding="utf-8")
+        assert not host.locator("#minutes-summary").is_checked()
+        assert host.locator("#minutes-format").input_value() == "docx"
+        from docx import Document
+        from pypdf import PdfReader
+        for fmt in ("docx", "pdf", "txt"):
+            host.locator("#minutes-format").select_option(fmt)
+            host.locator("#minutes-summary").set_checked(fmt == "pdf")
+            with host.expect_download() as download:
+                host.locator("#download").click()
+            assert download.value.suggested_filename.endswith("." + fmt)
+            path = OUTPUT / ("meeting-minutes." + fmt)
+            download.value.save_as(str(path))
+            if fmt == "docx":
+                text = "\n".join(p.text for p in Document(path).paragraphs)
+            elif fmt == "pdf":
+                text = "\n".join(p.extract_text() for p in PdfReader(path).pages)
+            else:
+                text = path.read_text(encoding="utf-8-sig")
+            assert "시제품" in text and "전체 대화 및 기록" in text
+            assert ("회의록 요약" in text) == (fmt == "pdf")
         host.locator('[data-view="focus"]').click()
         host.wait_for_function("document.querySelector('#focus-video').readyState >= 2 && document.querySelector('#focus-video').videoWidth > 0")
         host.screenshot(path=str(OUTPUT / "04-minutes.png"), full_page=True)

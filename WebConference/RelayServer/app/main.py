@@ -87,11 +87,14 @@ class Hub:
     async def state(self, room):
         await self.broadcast(room, {"type": "state", "room": room.snapshot()})
 
-    async def transcript(self, room, p, text, error=None):
+    async def speech_status(self, room, pending):
+        await self.broadcast(room, {"type": "speech_status", "pending": pending})
+
+    async def transcript(self, room, p, text, error=None, at=None):
         if error:
             await self.broadcast(room, {"type": "notice", "message": error})
         elif text:
-            entry = self.store.add_entry(room, p.id, p.name, text)
+            entry = self.store.add_entry(room, p.id, p.name, text, at=at)
             await self.broadcast(room, {"type": "entry", "entry": entry})
 
     async def drain(self, track):
@@ -279,8 +282,16 @@ def create_app(db_path=None, speech=None):
     @asynccontextmanager
     async def lifespan(app):
         store = Store(db_path or os.getenv("DB_PATH", str(ROOT / "data" / "meetings.db")))
-        recognizer = speech or await asyncio.to_thread(SpeechService, os.getenv("VOSK_MODEL_PATH", str(ROOT / "models" / "vosk-model-small-ko-0.22")))
+        if speech is not None:
+            recognizer = speech
+        elif os.getenv("SPEECH_ENGINE", "vosk") == "whisper":
+            from .whisper_speech import WhisperSpeechService
+            recognizer = await asyncio.to_thread(WhisperSpeechService, os.getenv("WHISPER_MODEL_PATH", str(ROOT / "models" / "faster-whisper-small")))
+        else:
+            recognizer = await asyncio.to_thread(SpeechService, os.getenv("VOSK_MODEL_PATH", str(ROOT / "models" / "vosk-model-small-ko-0.22")))
         hub = Hub(store, recognizer)
+        if hasattr(recognizer, "on_status"):
+            recognizer.on_status = hub.speech_status
         app.state.hub = hub
         reaper = asyncio.create_task(hub.reap())
         yield
@@ -289,6 +300,8 @@ def create_app(db_path=None, speech=None):
         for room in list(hub.rooms.values()):
             for p in list(room.participants.values()):
                 await hub.remove(room, p)
+        if hasattr(recognizer, "close"):
+            await recognizer.close()
         store.db.close()
 
     app = FastAPI(title="모아 화상회의", lifespan=lifespan)
@@ -299,6 +312,7 @@ def create_app(db_path=None, speech=None):
     async def config():
         h = app.state.hub
         return {"speech_available": h.speech.available, "speech_message": h.speech.error,
+                "speech_engine": h.speech.engine,
                 "max_participants": h.max_people, "version": "0.1.0"}
 
     @app.get("/api/health")
@@ -343,6 +357,8 @@ def create_app(db_path=None, speech=None):
             room, _ = h.session(authorization.removeprefix("Bearer "))
             if room.id != rid:
                 raise RuleError("다른 방의 회의록에는 접근할 수 없습니다.")
+            if hasattr(h.speech, "outstanding") and h.speech.outstanding(room):
+                raise HTTPException(409, "음성 인식이 아직 처리 중입니다. 자동 기록을 끄고 대기가 0건이 된 뒤 저장하세요.")
         except RuleError as e:
             raise HTTPException(403, str(e)) from e
         return Response(minutes_markdown(room, h.store.entries(rid)), media_type="text/markdown; charset=utf-8",
@@ -365,7 +381,8 @@ def create_app(db_path=None, speech=None):
                 raise RuleError("이미 사용 중인 접속 정보입니다.")
             p.connected, p.ws, owned = True, ws, True
             await h.send(p, {"type": "welcome", "you": p.id, "room": room.snapshot(),
-                             "strokes": room.strokes, "entries": room.entries})
+                             "strokes": room.strokes, "entries": room.entries,
+                             "speech_pending": h.speech.outstanding(room) if hasattr(h.speech, "outstanding") else 0})
             await h.state(room)
             # Per-socket sliding window; board updates are batched by the client.
             window, count = time.monotonic(), 0

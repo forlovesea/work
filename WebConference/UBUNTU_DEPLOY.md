@@ -1,5 +1,7 @@
 # Ubuntu 20.04 직접 설치·운영
 
+한국어 회의록의 정확도를 우선하고 지연을 허용하려면 [Whisper 전환 안내](WHISPER_DEPLOY.md)를 참고하세요. 기존 설치의 음성 인식 엔진만 교체하는 절차를 제공합니다.
+
 구성: **Nginx(HTTPS/WebSocket) → Python 3.12 + aiortc(systemd)**. 외부망 NAT 중계가 필요하면 Ubuntu 패키지 coturn을 추가합니다. 설치 대상은 Ubuntu 20.04 x86_64입니다.
 
 Ubuntu 기본 Python 3.8은 OS용으로 유지합니다. 공식 CPython 3.12.15 소스를 SHA-256 검증 후 `/opt/moa/python/3.12.15`에 별도 설치합니다. [Python 릴리스](https://www.python.org/downloads/release/python-31215/). Ubuntu 20.04는 표준 지원이 종료되었으므로 OS 보안 업데이트는 Ubuntu Pro/ESM 등으로 관리해야 합니다. [Ubuntu 지원 안내](https://ubuntu.com/blog/ubuntu-20-04-lts-end-of-life-standard-support-is-coming-to-an-end-heres-how-to-prepare).

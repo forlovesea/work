@@ -1,0 +1,8 @@
+-r requirements.txt
+faster-whisper==1.2.1
+ctranslate2==4.6.0
+onnxruntime==1.22.1
+# CTranslate2 4.6 imports pkg_resources; faster-whisper 1.2 uses Hub 0.x args.
+setuptools==80.9.0
+huggingface-hub==0.36.0
+tokenizers==0.22.1

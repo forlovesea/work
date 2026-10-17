@@ -58,6 +58,7 @@ class AudioGate(MediaStreamTrack):
 
 
 class SpeechService:
+    engine = "vosk"
     def __init__(self, model_path: str):
         self.model = None
         self.error = "한국어 음성 인식 모델이 설치되지 않았습니다. 서버 관리자에게 문의하세요."

@@ -2,6 +2,8 @@
 
 GitHub에서 내려받아 서버를 실행하려면 **[Ubuntu 배포 안내](UBUNTU_DEPLOY.md)**를 먼저 읽으세요. 현재 서버 폴더 이름은 `RelayServer`입니다.
 
+회의록은 [한국어 Whisper 정확도 우선 모드](WHISPER_DEPLOY.md)로 전환할 수 있습니다. 지연을 허용하고 문맥을 모아 처리하며, 기존 Vosk 모드도 유지합니다.
+
 실제 서버 구현과 실행·배포 파일은 **[중계서버](RelayServer/README.md)** 디렉토리에 있습니다.
 
 ## 상세 사용 매뉴얼

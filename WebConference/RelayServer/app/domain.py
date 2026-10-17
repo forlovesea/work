@@ -130,9 +130,9 @@ class Store:
         self.db.execute("UPDATE rooms SET closed_at=? WHERE id=?", (now(), rid))
         self.db.commit()
 
-    def add_entry(self, room: Room, pid: str, speaker: str, text: str, kind="speech") -> dict:
+    def add_entry(self, room: Room, pid: str, speaker: str, text: str, kind="speech", at=None) -> dict:
         entry = {"room_id": room.id, "speaker_id": pid, "speaker": speaker,
-                 "text": text, "kind": kind, "at": now()}
+                 "text": text, "kind": kind, "at": at or now()}
         cur = self.db.execute(
             "INSERT INTO entries(room_id,speaker_id,speaker,text,kind,at) VALUES (?,?,?,?,?,?)",
             tuple(entry.values()))
@@ -143,7 +143,7 @@ class Store:
         return entry
 
     def entries(self, rid: str) -> list[dict]:
-        return [dict(r) for r in self.db.execute("SELECT * FROM entries WHERE room_id=? ORDER BY id", (rid,))]
+        return [dict(r) for r in self.db.execute("SELECT * FROM entries WHERE room_id=? ORDER BY at, id", (rid,))]
 
 
 def minutes_markdown(room: Room, entries: list[dict]) -> str:

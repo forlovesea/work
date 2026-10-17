@@ -4,6 +4,7 @@ set -euo pipefail
 if [[ ${1:-} == --help ]]; then
     echo 'sudo bash install.sh [/absolute/path/to/python3.12]'
     echo 'Installs and restarts moa.service; existing meetings will end.'
+    echo 'Set INSTALL_WHISPER=1 to also install Korean Whisper transcription.'
     exit 0
 fi
 [[ ${EUID} -eq 0 ]] || { echo 'Run with sudo.' >&2; exit 1; }
@@ -28,12 +29,17 @@ fi
 RELEASE=$(mktemp -d /opt/moa/releases/release-XXXXXXXX)
 chmod 0755 "$RELEASE"
 cp -R "$SOURCE/app" "$SOURCE/static" "$SOURCE/scripts" "$RELEASE/"
-cp "$SOURCE/server.py" "$SOURCE/requirements.txt" "$RELEASE/"
+cp "$SOURCE/server.py" "$SOURCE/requirements.txt" "$SOURCE/requirements-whisper.txt" "$RELEASE/"
 "$PYTHON" -m venv "$RELEASE/.venv"
 "$RELEASE/.venv/bin/python" -m pip install --upgrade pip
 # Native media packages must have compatible Linux wheels; avoid surprise source builds.
 "$RELEASE/.venv/bin/python" -m pip install --only-binary=av,aiortc,numpy,cryptography,cffi \
     -r "$RELEASE/requirements.txt"
+if [[ ${INSTALL_WHISPER:-0} == 1 ]] || grep -q '^SPEECH_ENGINE=whisper$' /etc/moa/moa.env; then
+    "$RELEASE/.venv/bin/python" -m pip install -r "$RELEASE/requirements-whisper.txt"
+    runuser -u moa -- "$RELEASE/.venv/bin/python" "$RELEASE/scripts/download_whisper.py" \
+        --output /var/lib/moa/models/faster-whisper-small
+fi
 "$RELEASE/.venv/bin/python" -m pip check
 runuser -u moa -- "$RELEASE/.venv/bin/python" "$RELEASE/scripts/download_model.py" \
     --models-dir /var/lib/moa/models

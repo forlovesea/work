@@ -6,7 +6,7 @@ const state = {
   audioContext: null, micTrack: null, cameraTrack: null, shareTrack: null,
   silentTrack: null, blankTrack: null, canvasTimer: null,
   peers: new Map(), streams: new Map(), pending: new Map(), requestId: 0,
-  entries: [], strokes: [], view: "grid", busy: false, leaving: false,
+  entries: [], strokes: [], view: "grid", busy: false, leaving: false, speechPending: 0,
 };
 let toastTimer;
 function toast(message) {
@@ -32,7 +32,7 @@ async function checkServer() {
   try {
     state.config = await (await api("/api/config")).json();
     $("server-state").textContent = `연결됨 · 한 방 최대 ${state.config.max_participants}명`;
-    $("speech-hint").textContent = state.config.speech_available ? "한국어 음성 인식 준비 완료 · 모든 참석자에게 기록 상태가 표시됩니다." : state.config.speech_message;
+    $("speech-hint").textContent = state.config.speech_available ? (state.config.speech_engine === "faster-whisper" ? "한국어 정밀 전사 준비 완료 · 발화 후 순서대로 기록되며 표시가 늦을 수 있습니다." : "한국어 음성 인식 준비 완료 · 모든 참석자에게 기록 상태가 표시됩니다.") : state.config.speech_message;
     updateMinutesOption();
   } catch (e) {
     state.config = null; updateMinutesOption();
@@ -115,11 +115,13 @@ async function connectSocket() {
         if (request) { clearTimeout(request.timer); state.pending.delete(data.id); data.ok ? request.resolve(data.result) : request.reject(new Error(data.error)); }
       } else if (data.type === "welcome") {
         clearTimeout(timer); state.entries = data.entries; state.strokes = data.strokes;
+        updateSpeechStatus(data.speech_pending || 0);
         updateRoom(data.room); renderEntries(); redrawBoard(); resolve();
       } else if (data.type === "state") updateRoom(data.room);
       else if (data.type === "entry") { state.entries.push(data.entry); state.entries = state.entries.slice(-200); renderEntries(); }
       else if (data.type === "stroke") { state.strokes.push(data.stroke); if (data.author !== state.session?.participant_id) drawStroke(data.stroke); }
       else if (data.type === "board") { state.strokes = data.strokes; redrawBoard(); }
+      else if (data.type === "speech_status") updateSpeechStatus(data.pending);
       else if (data.type === "notice") toast(data.message);
     };
     ws.onclose = () => {
@@ -340,11 +342,16 @@ async function stopShare(notify = true) {
   if (notify && state.ws?.readyState === WebSocket.OPEN) await rpc("sharing", { enabled: false });
   renderTiles(); renderFocus(); updateControls();
 }
+function updateSpeechStatus(pending) {
+  state.speechPending = pending;
+  $("speech-pending").textContent = state.config?.speech_engine === "faster-whisper"
+    ? `음성 수집·인식 대기 ${pending}건 · 저장 전 자동 기록을 끄고 0건이 될 때까지 기다려 주세요.` : "";
+}
 function renderEntries() {
   const list = $("entries"); list.replaceChildren();
   if (!state.entries.length) { const p = document.createElement("p"); p.className = "empty-note"; p.textContent = "아직 기록된 내용이 없습니다."; list.append(p); }
   const kinds = { speech: "음성 전사", note: "추가 메모", decision: "확정 결정", action: "실행 항목" };
-  for (const entry of state.entries) {
+  for (const entry of [...state.entries].sort((a, b) => a.at.localeCompare(b.at) || a.id - b.id)) {
     const item = document.createElement("article"); item.className = "entry";
     const header = document.createElement("header"), who = document.createElement("b"), time = document.createElement("time");
     who.textContent = entry.speaker; time.textContent = new Date(entry.at).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });

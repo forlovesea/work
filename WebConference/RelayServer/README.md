@@ -12,6 +12,7 @@ Python 중계 서버와 브라우저 클라이언트로 구성한 첫 실행 버
 | 접속 설정 | 중계 서버 주소, 내 이름, 방 접속 ID, 마이크·스피커·카메라 설정 |
 | 장치 기본값 | **마이크·스피커 꺼짐**. 카메라도 꺼짐. 이전 사용 여부를 저장하지 않음 |
 | 방 생성 | 방장 이름·연락처로 Master 이메일 승인 후 회의 생성. 방 이름, FREE Talk/회의 모드 선택, 무작위 접속 ID 자동 생성 |
+| Master 관리 | 비밀번호 인증 후 이메일 승인 없이 생성, 전체 방 조회·입장, 강제 퇴장, 방 삭제. [키 등록·재설정](../MASTER_ADMIN.md) |
 | 초대 | 방장 화면에서 초대 링크 복사. 링크를 열면 서버 주소·접속 ID 자동 입력 후 이름을 확인하고 입장. 기존 주소·ID 복사도 지원 |
 | FREE Talk | 모든 참석자가 동시에 말할 수 있고 수신 브라우저가 여러 음성을 동시에 재생 |
 | 회의 모드 | 방장이 발표자 지정. 손들기 지원. 서버에서 발표자 외 음성 차단 |
@@ -105,6 +106,7 @@ python -m pip install -r requirements-dev.txt
 python -m pytest -q
 # 실제 메일 없이 승인 과정을 검증 (시스템 Chrome 필요):
 python scripts/browser_approval_smoke.py
+python scripts/browser_master_smoke.py
 # 아래 명령은 개발용 승인 생략 서버에서만 실행:
 # python -c "import uvicorn; from app.main import create_app; uvicorn.run(create_app(db_path='test-results/browser.db', approval_required=False), host='127.0.0.1', port=8000)"
 python scripts/browser_smoke.py

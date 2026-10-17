@@ -34,6 +34,9 @@ class Participant:
     subscriptions: dict = field(default_factory=dict)
     tracks: dict = field(default_factory=dict)
     tasks: list = field(default_factory=list)
+    is_master: bool = False
+    revoked: bool = False
+    command_task: Any = None
 
 
 @dataclass
@@ -94,7 +97,7 @@ class Room:
             "created_at": self.created_at, "hands": self.hands,
             "participants": [{"id": p.id, "name": p.name, "mic": p.mic,
                               "camera": p.camera, "sharing": p.sharing,
-                              "ready": p.ready, "can_speak": self.can_speak(p.id)}
+                              "ready": p.ready, "can_speak": self.can_speak(p.id), "is_master": p.is_master}
                              for p in self.participants.values() if p.connected],
         }
 

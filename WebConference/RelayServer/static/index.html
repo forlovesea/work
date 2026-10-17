@@ -10,8 +10,9 @@
 <body>
 <header class="topbar">
   <a class="brand" href="/" aria-label="모아 홈"><span class="brand-icon">m</span>모아<span class="brand-sub">MEET TOGETHER</span></a>
-  <div class="top-status"><span class="status-dot"></span><span id="connection-label">나의 회의 공간</span></div>
+  <div class="top-status"><span class="status-dot"></span><span id="connection-label">나의 회의 공간</span><button id="master-open" class="subtle" type="button">Master 인증</button></div>
 </header>
+<dialog id="master-dialog" class="master-dialog"><div class="master-dialog-header"><h2>Master 관리</h2><button id="master-close" type="button" class="subtle">닫기</button></div><p id="master-status" role="status"></p><form id="master-login-form"><label for="master-key">Master 키</label><input id="master-key" type="password" required maxlength="256" autocomplete="current-password" placeholder="Master 비밀번호"><button id="master-login" type="submit" class="primary">Master 인증</button><p class="help">키를 잊었다면 서버 관리자가 키 재설정 명령으로 변경할 수 있습니다.</p></form><section id="master-management" hidden><div class="master-tools"><button id="master-create" type="button" class="primary">새 회의 만들기</button><button id="master-refresh" type="button" class="subtle">방 목록 새로고침</button><button id="master-logout" type="button" class="subtle">Master 로그아웃</button></div><p class="help">입장하여 회의를 확인하거나 참석자를 강제 퇴장시킬 수 있습니다. 방 삭제 시 모든 참석자의 연결이 종료됩니다.</p><div id="master-rooms"></div></section></dialog>
 <main id="lobby" class="lobby">
   <section class="intro">
     <span class="eyebrow">A SPACE FOR EVERY VOICE</span>

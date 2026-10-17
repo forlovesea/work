@@ -25,6 +25,7 @@ from .domain import Participant, Room, RuleError, Store
 from .media import AudioGate, SpeechService
 from .minutes_export import export_minutes
 from .approvals import ApprovalService, MASTER_EMAIL
+from .master_auth import MasterAuth
 
 log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parent.parent
@@ -47,6 +48,10 @@ class ApprovalRequest(BaseModel):
 
 class ApprovalDecision(BaseModel):
     decision: Literal["approve", "reject"]
+
+
+class MasterLogin(BaseModel):
+    key: str = Field(min_length=1, max_length=256)
 
 
 class JoinRoom(BaseModel):
@@ -73,12 +78,13 @@ class Hub:
             raise RuleError("접속 정보가 만료되었습니다. 다시 입장하세요.")
         return found
 
-    def add_person(self, room, name):
-        if len(room.participants) >= self.max_people:
+    def add_person(self, room, name, *, master=False):
+        if len(room.participants) >= self.max_people + (1 if master else 0):
             raise RuleError("방의 최대 인원에 도달했습니다.")
         if not name.strip():
             raise RuleError("이름을 입력하세요.")
         p = Participant(secrets.token_hex(8), name.strip())
+        p.is_master = master
         p.send_lock = asyncio.Lock()
         room.participants[p.id] = p
         self.tokens[p.token] = (room, p)
@@ -186,6 +192,11 @@ class Hub:
         room.epoch += 1
         self.tokens.pop(p.token, None)
         room.participants.pop(p.id, None)
+        # Remove empty rooms before asynchronous media cleanup; they cannot be rejoined.
+        if not room.participants:
+            room.active = False
+            self.rooms.pop(room.id, None)
+            self.store.close_room(room.id)
         room.hands = [pid for pid in room.hands if pid != p.id]
         connected = [x.id for x in room.participants.values() if x.connected]
         if room.host_id == p.id:
@@ -205,11 +216,7 @@ class Hub:
         await asyncio.gather(*(pc.close() for pc in pcs), return_exceptions=True)
         for track in p.tracks.values():
             track.stop()
-        if not room.participants:
-            room.active = False
-            self.rooms.pop(room.id, None)
-            self.store.close_room(room.id)
-        else:
+        if room.active and room.participants:
             await self.state(room)
 
     async def reap(self):
@@ -221,6 +228,8 @@ class Hub:
                         await self.remove(room, p)
 
     async def command(self, room, p, data):
+        if not room.active or p.revoked or p.id not in room.participants:
+            raise RuleError("종료되었거나 강제 퇴장된 회의입니다.")
         action = data.get("action")
         if action in ("publish", "subscribe"):
             sdp = data.get("sdp")
@@ -293,7 +302,7 @@ class Hub:
         return {}
 
 
-def create_app(db_path=None, speech=None, *, approval_required=True, approval_sender=None):
+def create_app(db_path=None, speech=None, *, approval_required=True, approval_sender=None, master_key_path=None):
     @asynccontextmanager
     async def lifespan(app):
         store = Store(db_path or os.getenv("DB_PATH", str(ROOT / "data" / "meetings.db")))
@@ -310,6 +319,7 @@ def create_app(db_path=None, speech=None, *, approval_required=True, approval_se
         app.state.hub = hub
         app.state.export_slots = asyncio.Semaphore(2)
         app.state.approvals = ApprovalService(store.db, required=approval_required, sender=approval_sender)
+        app.state.master = MasterAuth(store.db, master_key_path)
         reaper = asyncio.create_task(hub.reap())
         yield
         reaper.cancel()
@@ -332,10 +342,94 @@ def create_app(db_path=None, speech=None, *, approval_required=True, approval_se
                 "speech_engine": h.speech.engine,
                 "master_approval_required": app.state.approvals.required,
                 "master_email_ready": app.state.approvals.ready, "master_email": MASTER_EMAIL,
+                "master_password_ready": app.state.master.available,
                 "max_participants": h.max_people, "version": "0.1.0"}
 
     @app.get("/api/health")
     async def health():
+        return {"ok": True}
+
+    @app.post("/api/master/login")
+    async def master_login(data: MasterLogin, request: Request, response: Response):
+        response.headers["Cache-Control"] = "no-store"
+        return await app.state.master.login(data.key, request.client.host if request.client else "unknown")
+
+    @app.get("/api/master/me")
+    async def master_me(response: Response, authorization: str = Header(default="")):
+        response.headers["Cache-Control"] = "no-store"
+        return app.state.master.require(authorization)
+
+    @app.post("/api/master/logout")
+    async def master_logout(authorization: str = Header(default="")):
+        app.state.master.logout(authorization)
+        return {"ok": True}
+
+    @app.get("/api/master/rooms")
+    async def master_rooms(response: Response, authorization: str = Header(default="")):
+        app.state.master.require(authorization)
+        response.headers["Cache-Control"] = "no-store"
+        return {"rooms": [{"id": r.id, "title": r.title, "code": r.code, "mode": r.mode,
+                           "participants": [{"id": p.id, "name": p.name, "connected": p.connected,
+                                             "is_master": p.is_master} for p in r.participants.values()]}
+                          for r in app.state.hub.rooms.values() if r.active]}
+
+    async def force_leave(h, room, person, message):
+        person.revoked = True
+        person.connected = person.mic = False
+        h.tokens.pop(person.token, None)
+        ws = person.ws
+        if person.command_task:
+            person.command_task.cancel()
+        if ws:
+            try:
+                async with person.send_lock:
+                    await asyncio.wait_for(ws.send_json({"type": "removed", "message": message}), 3)
+                await asyncio.wait_for(ws.close(code=4003, reason=message), 3)
+            except (RuntimeError, OSError, WebSocketDisconnect, asyncio.TimeoutError):
+                pass
+        await h.remove(room, person)
+
+    @app.post("/api/master/rooms/{rid}/participants/{pid}/kick")
+    async def master_kick(rid: str, pid: str, authorization: str = Header(default="")):
+        app.state.master.require(authorization)
+        h = app.state.hub
+        room = h.rooms.get(rid)
+        person = room.participants.get(pid) if room else None
+        if not room or not room.active or not person:
+            raise HTTPException(404, "회의 또는 참석자가 이미 종료되었습니다.")
+        # Replace the invitation before yielding so the removed user cannot reuse it.
+        code = secrets.token_hex(6).upper()
+        while any(r.code == code for r in h.rooms.values()):
+            code = secrets.token_hex(6).upper()
+        room.code = code
+        h.store.db.execute("UPDATE rooms SET code=? WHERE id=?", (code, rid))
+        app.state.master.audit("kick", rid, pid)
+        await force_leave(h, room, person, "Master에 의해 강제 퇴장되었습니다.")
+        if room.active:
+            await h.broadcast(room, {"type": "notice", "message": "Master가 참석자를 퇴장시켰습니다. 접속 ID와 초대 링크가 변경되었습니다."})
+        return {"ok": True}
+
+    @app.post("/api/master/rooms/{rid}/delete")
+    async def master_delete(rid: str, authorization: str = Header(default="")):
+        app.state.master.require(authorization)
+        h = app.state.hub
+        room = h.rooms.get(rid)
+        if not room or not room.active:
+            raise HTTPException(404, "회의가 이미 종료되었습니다.")
+        room.active = False
+        room.minutes_enabled = False
+        room.epoch += 1
+        h.rooms.pop(rid, None)
+        people = list(room.participants.values())
+        for p in people:
+            p.revoked = True
+            p.connected = p.mic = False
+            h.tokens.pop(p.token, None)
+            if p.command_task:
+                p.command_task.cancel()
+        h.store.close_room(rid)
+        app.state.master.audit("delete_room", rid)
+        await asyncio.gather(*(force_leave(h, room, p, "Master가 회의방을 삭제하여 회의가 종료되었습니다.") for p in people))
         return {"ok": True}
 
     @app.post("/api/host-approvals", status_code=202)
@@ -365,8 +459,11 @@ def create_app(db_path=None, speech=None, *, approval_required=True, approval_se
             "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'"})
 
     @app.post("/api/rooms", status_code=201)
-    async def create(data: CreateRoom):
+    async def create(data: CreateRoom, authorization: str = Header(default="")):
         h = app.state.hub
+        is_master = bool(authorization)
+        if is_master:
+            app.state.master.require(authorization)
         if len(h.rooms) >= h.max_rooms:
             raise HTTPException(503, "현재 생성 가능한 방 수를 초과했습니다.")
         if data.mode not in ("free", "meeting") or not data.title.strip() or not data.name.strip():
@@ -377,8 +474,9 @@ def create_app(db_path=None, speech=None, *, approval_required=True, approval_se
         while any(r.code == code for r in h.rooms.values()):
             code = secrets.token_hex(6).upper()
         room = Room(secrets.token_hex(16), code, data.title.strip(), data.mode, "", data.minutes_enabled)
-        app.state.approvals.consume(data.approval_id, data.approval_token, data.name, data.contact)
-        p = h.add_person(room, data.name)
+        if not is_master:
+            app.state.approvals.consume(data.approval_id, data.approval_token, data.name, data.contact)
+        p = h.add_person(room, data.name, master=is_master)
         room.host_id = room.presenter_id = p.id
         try:
             h.store.add_room(room)
@@ -387,17 +485,25 @@ def create_app(db_path=None, speech=None, *, approval_required=True, approval_se
             h.tokens.pop(p.token, None)
             raise
         h.rooms[room.id] = room
+        if is_master:
+            app.state.master.audit("create_room", room.id, p.id)
         return h.credentials(room, p)
 
     @app.post("/api/join")
-    async def join(data: JoinRoom):
+    async def join(data: JoinRoom, authorization: str = Header(default="")):
         h = app.state.hub
+        is_master = bool(authorization)
+        if is_master:
+            app.state.master.require(authorization)
         code = re.sub(r"[\s-]", "", data.code).upper()
         room = next((r for r in h.rooms.values() if r.code == code and r.active), None)
         if room is None:
             raise HTTPException(404, "접속 ID를 확인하세요. 종료된 방에는 입장할 수 없습니다.")
         try:
-            return h.credentials(room, h.add_person(room, data.name))
+            person = h.add_person(room, data.name, master=is_master)
+            if is_master:
+                app.state.master.audit("join_room", room.id, person.id)
+            return h.credentials(room, person)
         except RuleError as e:
             raise HTTPException(409, str(e)) from e
 
@@ -444,6 +550,8 @@ def create_app(db_path=None, speech=None, *, approval_required=True, approval_se
             window, count = time.monotonic(), 0
             while True:
                 raw = await ws.receive_text()
+                if p.revoked or not room.active or p.id not in room.participants:
+                    raise RuleError("회의가 종료되었거나 강제 퇴장되었습니다.")
                 if len(raw) > 100000:
                     raise RuleError("요청이 너무 큽니다.")
                 if time.monotonic() - window >= 1:
@@ -457,7 +565,11 @@ def create_app(db_path=None, speech=None, *, approval_required=True, approval_se
                     if not isinstance(data, dict):
                         raise RuleError("올바르지 않은 요청입니다.")
                     request_id = data.get("id")
-                    result = await asyncio.wait_for(h.command(room, p, data), timeout=45)
+                    p.command_task = asyncio.create_task(h.command(room, p, data))
+                    try:
+                        result = await asyncio.wait_for(p.command_task, timeout=45)
+                    finally:
+                        p.command_task = None
                     await h.send(p, {"type": "reply", "id": request_id, "ok": True, "result": result})
                 except (RuleError, ValueError, TypeError, KeyError) as e:
                     await h.send(p, {"type": "reply", "id": request_id, "ok": False, "error": str(e)})
@@ -465,7 +577,7 @@ def create_app(db_path=None, speech=None, *, approval_required=True, approval_se
                     log.exception("Command failed")
                     await h.send(p, {"type": "reply", "id": request_id, "ok": False,
                                      "error": "서버에서 요청을 처리하지 못했습니다. 연결 설정을 확인하고 다시 입장하세요."})
-        except (WebSocketDisconnect, asyncio.TimeoutError):
+        except (WebSocketDisconnect, asyncio.TimeoutError, asyncio.CancelledError):
             pass
         except (RuleError, ValueError, TypeError, AttributeError):
             await ws.close(code=1008)

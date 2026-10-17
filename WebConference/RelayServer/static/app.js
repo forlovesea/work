@@ -8,6 +8,7 @@ const state = {
   peers: new Map(), streams: new Map(), pending: new Map(), requestId: 0,
   entries: [], strokes: [], view: "grid", busy: false, leaving: false, speechPending: 0,
   approval: null, approvalSending: false, approvalTimer: null,
+  master: null, masterTimer: null, masterListVersion: 0,
 };
 let toastTimer;
 function toast(message) {
@@ -25,7 +26,7 @@ async function api(path, data, token, timeout = 15000) {
   const headers = {}; if (data) headers["Content-Type"] = "application/json";
   if (token) headers.Authorization = `Bearer ${token}`;
   const res = await fetch(serverURL() + path, { method: data ? "POST" : "GET", headers, body: data ? JSON.stringify(data) : undefined, signal: AbortSignal.timeout(timeout) });
-  if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(typeof err.detail === "string" ? err.detail : `요청 실패 (${res.status})`); }
+  if (!res.ok) { const err = await res.json().catch(() => ({})); const error = new Error(typeof err.detail === "string" ? err.detail : `요청 실패 (${res.status})`); error.status = res.status; throw error; }
   return res;
 }
 async function checkServer() {
@@ -61,7 +62,7 @@ function approvalValid() {
   return approvalMatches() && state.approval.status === "approved" && state.approval.expires_at * 1000 > Date.now();
 }
 function updateApprovalControls() {
-  const required = state.config?.master_approval_required !== false;
+  const required = state.config?.master_approval_required !== false && !masterValid();
   $("request-approval").hidden = !state.create || !required;
   $("approval-fields").hidden = !required;
   $("contact").required = state.create && required;
@@ -105,6 +106,105 @@ async function requestApproval() {
     clearTimeout(state.approvalTimer); pollApproval();
   } finally { state.approvalSending = false; updateApprovalControls(); }
 }
+function masterValid() {
+  try { return !!state.master && state.master.server === serverURL() && state.master.expires_at * 1000 > Date.now(); }
+  catch (_) { return false; }
+}
+function renderMaster() {
+  const valid = masterValid();
+  $("master-open").textContent = valid ? "Master 관리" : "Master 인증";
+  $("master-login-form").hidden = valid;
+  $("master-management").hidden = !valid;
+  $("master-status").textContent = valid ? `Master 인증 완료 · ${new Date(state.master.expires_at * 1000).toLocaleTimeString("ko-KR")}까지 유효` : "Master 키로 인증하면 회의 생성과 전체 방 관리가 가능합니다.";
+  updateApprovalControls();
+  if (state.room) renderPeople();
+}
+function clearMaster() {
+  clearTimeout(state.masterTimer); state.master = null; $("master-key").value = "";
+  $("master-rooms").replaceChildren(); renderMaster();
+}
+async function masterApi(path, data) {
+  if (!masterValid()) { clearMaster(); throw new Error("Master 인증이 필요합니다."); }
+  try { return await (await api(path, data, state.master.token)).json(); }
+  catch (e) { if (e.status === 401) clearMaster(); throw e; }
+}
+async function pollMaster() {
+  if (!state.master) return;
+  try { await masterApi("/api/master/me"); }
+  catch (e) { if (!state.master) { toast(e.message); return; } }
+  state.masterTimer = setTimeout(pollMaster, 15000);
+}
+async function listMasterRooms() {
+  const session = state.master, version = ++state.masterListVersion;
+  const list = $("master-rooms"); list.replaceChildren();
+  const loading = document.createElement("p"); loading.textContent = "방 목록을 불러오는 중입니다."; list.append(loading);
+  const data = await masterApi("/api/master/rooms");
+  if (state.master !== session || version !== state.masterListVersion) return;
+  list.replaceChildren();
+  if (!data.rooms.length) { const text = document.createElement("p"); text.textContent = "진행 중인 회의방이 없습니다."; list.append(text); }
+  for (const room of data.rooms) {
+    const card = document.createElement("article"); card.className = "master-room";
+    const title = document.createElement("h3"); title.textContent = room.title;
+    const info = document.createElement("p"); info.textContent = `접속 ID ${room.code} · ${room.participants.length}명`;
+    const actions = document.createElement("div"); actions.className = "master-tools";
+    const join = document.createElement("button"); join.className = "primary"; join.textContent = "방에 입장";
+    join.onclick = safeAction(async () => {
+      if (state.session?.room_id === room.id) { $("master-dialog").close(); return; }
+      if (state.session && !confirm("현재 회의에서 나가 이 방에 입장하시겠습니까?")) return;
+      if (state.session) await leave();
+      if (!$("name").value.trim()) $("name").value = "Master";
+      setCreate(false); $("code").value = room.code; $("master-dialog").close();
+      await enter({preventDefault() {}});
+    });
+    const remove = document.createElement("button"); remove.className = "master-danger"; remove.textContent = "방 삭제";
+    remove.onclick = safeAction(async () => {
+      if (!confirm(`“${room.title}” 방을 삭제하시겠습니까? 모든 참석자의 연결이 종료됩니다. 저장된 회의록은 보존됩니다.`)) return;
+      remove.disabled = true;
+      try { await masterApi(`/api/master/rooms/${encodeURIComponent(room.id)}/delete`, {}); await listMasterRooms(); toast("회의방을 삭제했습니다."); }
+      finally { remove.disabled = false; }
+    });
+    actions.append(join, remove); card.append(title, info, actions);
+    for (const person of room.participants) {
+      const row = document.createElement("div"); row.className = "master-person";
+      const name = document.createElement("span"); name.textContent = `${person.name}${person.is_master ? " · Master" : ""}${person.connected ? "" : " · 연결 대기"}`;
+      row.append(name);
+      if (person.id !== state.session?.participant_id) {
+        const kick = document.createElement("button"); kick.className = "master-danger"; kick.textContent = "강제 퇴장";
+        kick.onclick = safeAction(() => kickPerson(room.id, person)); row.append(kick);
+      }
+      card.append(row);
+    }
+    list.append(card);
+  }
+}
+async function kickPerson(roomId, person) {
+  if (!confirm(`“${person.name}” 님을 강제 퇴장시키시겠습니까? 이 방의 접속 ID와 초대 링크도 새로 발급됩니다.`)) return;
+  await masterApi(`/api/master/rooms/${encodeURIComponent(roomId)}/participants/${encodeURIComponent(person.id)}/kick`, {});
+  if ($("master-dialog").open) await listMasterRooms();
+  toast("사용자를 강제 퇴장시켰습니다.");
+}
+$("master-open").onclick = safeAction(async () => { renderMaster(); $("master-dialog").showModal(); if (masterValid()) await listMasterRooms(); else $("master-key").focus(); });
+$("master-close").onclick = () => { $("master-key").value = ""; $("master-dialog").close(); };
+$("master-dialog").addEventListener("close", () => { $("master-key").value = ""; });
+$("master-login-form").onsubmit = async event => {
+  event.preventDefault(); $("master-login").disabled = true;
+  try {
+    const server = serverURL();
+    const result = await (await api("/api/master/login", {key: $("master-key").value}, null, 30000)).json();
+    if (server !== serverURL()) return;
+    state.master = {...result, server}; clearTimeout(state.masterTimer); renderMaster();
+    pollMaster(); await listMasterRooms();
+  } catch (e) { $("master-status").textContent = e.message; }
+  finally { $("master-key").value = ""; $("master-login").disabled = false; }
+};
+$("master-refresh").onclick = safeAction(listMasterRooms);
+$("master-logout").onclick = safeAction(async () => { try { await masterApi("/api/master/logout", {}); } finally { clearMaster(); } });
+$("master-create").onclick = safeAction(async () => {
+  if (state.session && !confirm("현재 회의에서 나가 새 회의를 만드시겠습니까?")) return;
+  if (state.session) await leave();
+  if (!$("name").value.trim()) $("name").value = "Master";
+  setCreate(true); $("master-dialog").close(); $("title").focus();
+});
 function invitationURL() {
   const url = new URL("/", serverURL());
   // Share only the room's invitation code, never the participant/host token.
@@ -177,6 +277,7 @@ async function connectSocket() {
       else if (data.type === "board") { state.strokes = data.strokes; redrawBoard(); }
       else if (data.type === "speech_status") updateSpeechStatus(data.pending);
       else if (data.type === "notice") toast(data.message);
+      else if (data.type === "removed") { leave().then(() => toast(data.message)); }
     };
     ws.onclose = () => {
       clearTimeout(timer); reject(new Error("서버 연결이 종료되었습니다."));
@@ -245,7 +346,7 @@ async function enter(event) {
   state.busy = true; state.leaving = false; $("enter").disabled = true;
   try {
     await checkServer();
-    if (state.create && state.config.master_approval_required && !approvalValid()) throw new Error("새 회의를 만들려면 먼저 Master 이메일 인증을 완료하세요.");
+    if (state.create && state.config.master_approval_required && !masterValid() && !approvalValid()) throw new Error("새 회의를 만들려면 먼저 Master 이메일 인증을 완료하세요.");
     state.mic = $("pref-mic").checked; state.speaker = $("pref-speaker").checked; state.camera = $("pref-camera").checked;
     // Only name and address persist. Device use always starts with an explicit choice.
     try { localStorage.setItem("moa-settings", JSON.stringify({ server: serverURL(), name: $("name").value.trim() })); } catch (_) { /* Private mode */ }
@@ -253,7 +354,7 @@ async function enter(event) {
     state.session = await (await api(state.create ? "/api/rooms" : "/api/join", state.create ? {
       title: $("title").value.trim(), name: $("name").value.trim(), mode: $("mode").value, minutes_enabled: $("pref-minutes").checked,
       contact: $("contact").value.trim(), approval_id: state.approval?.request_id || "", approval_token: state.approval?.client_token || "",
-    } : { code: $("code").value.trim(), name: $("name").value.trim() })).json();
+    } : { code: $("code").value.trim(), name: $("name").value.trim() }, masterValid() ? state.master.token : null)).json();
     $("code").value = state.session.code;
     if (state.create) resetApproval();
     await connectSocket();
@@ -299,9 +400,10 @@ function renderPeople() {
     const info = document.createElement("div"); info.className = "person-info";
     const name = document.createElement("b"); name.textContent = person.name + (person.id === state.session.participant_id ? " (나)" : "");
     const detail = document.createElement("small");
-    detail.textContent = [person.id === state.room.host_id ? "방장" : "참석자", person.id === state.room.presenter_id ? "발표자" : "", state.room.hands.includes(person.id) ? "✋ 발언 요청" : "", person.can_speak ? "마이크 켜짐" : "음성 꺼짐"].filter(Boolean).join(" · ");
+    detail.textContent = [person.is_master ? "Master" : "", person.id === state.room.host_id ? "방장" : "참석자", person.id === state.room.presenter_id ? "발표자" : "", state.room.hands.includes(person.id) ? "✋ 발언 요청" : "", person.can_speak ? "마이크 켜짐" : "음성 꺼짐"].filter(Boolean).join(" · ");
     info.append(name, detail); row.append(avatar, info);
     if (isHost() && person.id !== state.room.presenter_id) { const button = document.createElement("button"); button.textContent = "발표 지정"; button.onclick = safeAction(() => rpc("presenter", { target: person.id })); row.append(button); }
+    if (masterValid() && person.id !== state.session.participant_id) { const button = document.createElement("button"); button.textContent = "강제 퇴장"; button.onclick = safeAction(() => kickPerson(state.room.id, person)); row.append(button); }
     $("people").append(row);
   }
 }
@@ -471,7 +573,7 @@ async function leave() {
 $("join-form").onsubmit = enter;
 $("request-approval").onclick = safeAction(requestApproval);
 for (const id of ["name", "contact"]) $(id).addEventListener("input", resetApproval);
-$("server").addEventListener("input", () => { state.config = null; resetApproval(); });
+$("server").addEventListener("input", () => { state.config = null; clearMaster(); resetApproval(); });
 $("check-server").onclick = safeAction(checkServer);
 $("server").onchange = safeAction(checkServer);
 $("join-tab").onclick = () => setCreate(false); $("create-tab").onclick = () => setCreate(true);

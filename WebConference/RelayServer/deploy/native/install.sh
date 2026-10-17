@@ -64,6 +64,7 @@ for attempt in $(seq 1 60); do
         echo
         echo "Installed: $RELEASE; previous: ${PREVIOUS:-none}"
         echo 'Configure Nginx and HTTPS using UBUNTU_DEPLOY.md.'
+        echo 'Set/reset Master key: sudo /opt/moa/current/.venv/bin/python /opt/moa/current/scripts/set_master_key.py'
         exit 0
     fi
     sleep 2

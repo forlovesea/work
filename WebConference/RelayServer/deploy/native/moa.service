@@ -13,6 +13,7 @@ WorkingDirectory=/opt/moa/current
 EnvironmentFile=/etc/moa/moa.env
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStartPre=/opt/moa/current/.venv/bin/python -c "import ifaddr; print('ICE interface check:', len(ifaddr.get_adapters()), 'adapters')"
 ExecStart=/opt/moa/current/.venv/bin/python /opt/moa/current/server.py --host 127.0.0.1 --port 8000
 Restart=on-failure
 RestartSec=5
@@ -24,7 +25,8 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/var/lib/moa
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# Linux getifaddrs() uses netlink to enumerate ICE candidate interfaces.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 
 [Install]
 WantedBy=multi-user.target

@@ -11,6 +11,79 @@ const state = {
   master: null, masterTimer: null, masterListVersion: 0,
 };
 let toastTimer;
+let qualityTimer = null, qualityGeneration = 0, qualityBusy = false;
+let qualitySampler = new MoaQuality.Sampler(), autoProfile = new MoaQuality.AutoProfile();
+let qualityMode = "auto", qualityJob = Promise.resolve(), qualityApplied = "", qualityError = "";
+function cameraProfile() { return qualityMode === "auto" ? autoProfile.current : qualityMode; }
+function renderCameraQuality() {
+  const settings = state.cameraTrack?.getSettings() || {};
+  const label = qualityMode === "auto" ? `자동 목표 ${MoaQuality.profiles[cameraProfile()].label}` : MoaQuality.profiles[qualityMode].label;
+  $("camera-quality-info").textContent = `${label} · ${state.cameraTrack ? `${settings.width || "?"}×${settings.height || "?"}` : "카메라 꺼짐"}${state.shareTrack ? " · 화면 공유 중" : ""}${qualityError ? " · 일부 설정 미지원" : ""}`;
+  $("camera-quality-info").title = qualityError || "선택한 화질은 목표값입니다. 실제 해상도는 카메라와 브라우저 지원 범위에 따라 달라집니다.";
+}
+function applyCameraQuality() {
+  const generation = qualityGeneration;
+  qualityJob = qualityJob.catch(() => {}).then(async () => {
+    if (generation !== qualityGeneration) return;
+    const track = state.cameraTrack, profile = cameraProfile(), p = MoaQuality.profiles[profile];
+    qualityError = "";
+    if (track?.readyState === "live") {
+      try { await track.applyConstraints(MoaQuality.constraints(profile)); }
+      catch (error) { qualityError = "카메라가 선택한 해상도 또는 프레임 설정을 지원하지 않습니다."; }
+    }
+    if (generation !== qualityGeneration || track !== state.cameraTrack) return;
+    const sender = state.publisher?.getSenders().find(s => s.track?.kind === "video");
+    if (sender) {
+      try {
+        const params = sender.getParameters();
+        if (params.encodings?.length) {
+          for (const encoding of params.encodings) {
+            if (state.shareTrack || !track) { delete encoding.maxBitrate; delete encoding.maxFramerate; }
+            else { encoding.maxBitrate = p.bitrate; encoding.maxFramerate = p.fps; }
+          }
+          await sender.setParameters(params);
+        }
+      } catch (error) { qualityError = "이 브라우저에서 송신 비트레이트 제한을 적용하지 못했습니다. 브라우저 기본 제어를 사용합니다."; }
+    }
+    if (generation !== qualityGeneration) return;
+    qualityApplied = profile; renderCameraQuality();
+  });
+  return qualityJob;
+}
+function resetQualityMonitor() {
+  clearInterval(qualityTimer); qualityTimer = null; qualityGeneration++; qualityBusy = false;
+  qualitySampler = new MoaQuality.Sampler(); autoProfile = new MoaQuality.AutoProfile();
+  qualityApplied = ""; qualityError = "";
+  $("network-quality").dataset.level = "0";
+  $("network-label").textContent = "통신 측정 중";
+  $("network-metrics").textContent = "미디어 연결 후 약 3초마다 측정합니다.";
+}
+async function sampleQuality() {
+  if (qualityBusy || !state.publisher || state.leaving) return;
+  qualityBusy = true;
+  const generation = qualityGeneration, publisher = state.publisher;
+  const connections = [publisher, ...state.peers.values()];
+  try {
+    const samples = await Promise.all(connections.map(pc => qualitySampler.read(pc).catch(() => ({ level: 0 }))));
+    if (generation !== qualityGeneration || publisher !== state.publisher) return;
+    const known = samples.filter(s => s.level > 0);
+    const level = known.length ? Math.min(...known.map(s => s.level)) : 0;
+    $("network-quality").dataset.level = String(level);
+    $("network-label").textContent = level ? `${MoaQuality.labels[level]} ${level}/5` : "통신 측정 중";
+    const max = key => { const a = samples.map(s => s[key]).filter(v => typeof v === "number" && Number.isFinite(v)); return a.length ? Math.max(...a) : null; };
+    const format = (value, unit) => value === null ? "측정값 없음" : `${value.toFixed(unit === "%" ? 1 : 0)}${unit}`;
+    $("network-metrics").textContent = `왕복 지연 ${format(max("rtt"), "ms")} · 손실 ${format(max("loss"), "%")} · 지터 ${format(max("jitter"), "ms")}${samples.some(s => s.disconnected) ? " · 미디어 연결 끊김" : ""}${known.length < samples.length ? " · 일부 경로 측정 중" : ""}`;
+    if (qualityMode === "auto") {
+      autoProfile.update(samples[0]);
+      if (qualityApplied !== cameraProfile()) await applyCameraQuality();
+    }
+  } finally { if (generation === qualityGeneration) qualityBusy = false; }
+}
+function startQualityMonitor() {
+  resetQualityMonitor();
+  qualityTimer = setInterval(() => { sampleQuality().catch(() => {}); }, 3000);
+  sampleQuality().catch(() => {});
+}
 function toast(message) {
   $("toast").textContent = message; $("toast").hidden = false;
   clearTimeout(toastTimer); toastTimer = setTimeout(() => $("toast").hidden = true, 6500);
@@ -299,7 +372,7 @@ async function prepareMedia() {
   const draw = () => { const ctx = canvas.getContext("2d"); ctx.fillStyle = "#e2e8ef"; ctx.fillRect(0, 0, 640, 360); };
   draw(); state.canvasTimer = setInterval(draw, 200); state.blankTrack = canvas.captureStream(5).getVideoTracks()[0];
   if (state.mic) state.micTrack = (await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } })).getAudioTracks()[0];
-  if (state.camera) state.cameraTrack = (await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 960 }, height: { ideal: 540 }, frameRate: { ideal: 20, max: 24 } } })).getVideoTracks()[0];
+  if (state.camera) state.cameraTrack = (await navigator.mediaDevices.getUserMedia({ video: MoaQuality.constraints(cameraProfile()) })).getVideoTracks()[0];
   state.local = new MediaStream([state.micTrack || state.silentTrack, state.cameraTrack || state.blankTrack]);
 }
 async function iceComplete(pc) {
@@ -320,6 +393,8 @@ async function publish() {
   for (const track of state.local.getTracks()) pc.addTrack(track, state.local);
   pc.onconnectionstatechange = () => { if (pc.connectionState === "failed") toast("미디어 연결 실패 · 서버의 UDP 방화벽과 TURN 설정을 확인한 후 다시 입장하세요."); };
   await negotiate(pc, "publish");
+  startQualityMonitor();
+  await applyCameraQuality();
 }
 async function subscribe(person) {
   if (state.peers.has(person.id) || person.id === state.session?.participant_id || !person.ready) return;
@@ -472,10 +547,11 @@ async function toggleMic() {
 }
 async function toggleCamera() {
   const enabled = !state.camera;
-  if (enabled) state.cameraTrack = (await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 960 }, height: { ideal: 540 }, frameRate: { ideal: 20, max: 24 } } })).getVideoTracks()[0];
+  if (enabled) state.cameraTrack = (await navigator.mediaDevices.getUserMedia({ video: MoaQuality.constraints(cameraProfile()) })).getVideoTracks()[0];
   if (!state.shareTrack) await replaceTrack("video", enabled ? state.cameraTrack : state.blankTrack);
   if (!enabled) { state.cameraTrack?.stop(); state.cameraTrack = null; }
   state.camera = enabled; await rpc("devices", { camera: enabled }); renderTiles(); renderFocus(); updateControls();
+  await applyCameraQuality();
 }
 async function toggleSpeaker() {
   state.speaker = !state.speaker;
@@ -492,6 +568,7 @@ async function share() {
   try {
     await rpc("sharing", { enabled: true }); state.shareTrack = track;
     await replaceTrack("video", track); track.onended = safeAction(() => stopShare());
+    await applyCameraQuality();
     setView("focus"); renderTiles(); renderFocus(); updateControls();
   } catch (e) { track.stop(); throw e; }
 }
@@ -500,6 +577,7 @@ async function stopShare(notify = true) {
   if (track) { track.onended = null; track.stop(); }
   if (state.local && state.blankTrack) await replaceTrack("video", state.cameraTrack || state.blankTrack);
   if (notify && state.ws?.readyState === WebSocket.OPEN) await rpc("sharing", { enabled: false });
+  await applyCameraQuality();
   renderTiles(); renderFocus(); updateControls();
 }
 function updateSpeechStatus(pending) {
@@ -584,6 +662,7 @@ async function downloadMinutes() {
 }
 async function leave() {
   state.leaving = true; drawing = null; clearInterval(drawingTimer);
+  resetQualityMonitor(); qualityMode = "auto"; $("camera-quality").value = "auto";
   state.ws?.close(); state.ws = null;
   state.publisher?.close(); state.publisher = null;
   for (const pc of state.peers.values()) pc.close(); state.peers.clear(); state.streams.clear();
@@ -596,7 +675,16 @@ async function leave() {
   // Every new entry begins with privacy-preserving device defaults.
   for (const key of ["pref-mic", "pref-speaker", "pref-camera"]) $(key).checked = false;
   state.mic = state.speaker = state.camera = false;
+  renderCameraQuality();
 }
+$("camera-quality").onchange = safeAction(async () => {
+  const value = $("camera-quality").value;
+  if (value !== "auto" && !MoaQuality.profiles[value]) return;
+  qualityMode = value; autoProfile.candidate = null; autoProfile.hits = 0;
+  $("camera-quality").disabled = true;
+  try { await applyCameraQuality(); }
+  finally { $("camera-quality").disabled = false; }
+});
 $("join-form").onsubmit = enter;
 $("request-approval").onclick = safeAction(requestApproval);
 for (const id of ["name", "contact"]) $(id).addEventListener("input", resetApproval);

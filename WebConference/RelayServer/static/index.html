@@ -5,6 +5,7 @@
   <meta name="theme-color" content="#f5f7fb">
   <title>모아 · 함께 이야기하는 공간</title>
   <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/media-quality.js" defer></script>
   <script src="/static/app.js" defer></script>
 </head>
 <body>
@@ -59,7 +60,7 @@
   <div id="export-speech-status" class="speech-status speech-status-export" role="status" aria-live="polite" aria-atomic="true" hidden></div>
   <div class="meeting-layout">
     <section class="meeting-main">
-      <div class="view-bar"><div class="segmented compact" role="tablist" aria-label="화면 배치"><button data-view="grid" class="active" role="tab">▦ 다중 화면</button><button data-view="focus" role="tab">▣ 발표자</button><button data-view="board" role="tab">▧ 화이트보드</button></div><button id="fullscreen" class="icon-button" title="회의 화면 전체 보기">⛶</button></div>
+      <div class="view-bar"><div class="segmented compact" role="tablist" aria-label="화면 배치"><button data-view="grid" class="active" role="tab">▦ 다중 화면</button><button data-view="focus" role="tab">▣ 발표자</button><button data-view="board" role="tab">▧ 화이트보드</button></div><div class="media-tools"><div class="camera-quality-control"><label for="camera-quality">웹캠 화질</label><select id="camera-quality"><option value="auto" selected>자동</option><option value="low">낮음 · 360p</option><option value="medium">표준 · 540p</option><option value="high">높음 · 720p</option><option value="full">최고 · 1080p</option></select><span id="camera-quality-info">자동 · 카메라 꺼짐</span></div><button id="fullscreen" class="icon-button" title="회의 화면 전체 보기">⛶</button><details class="network-quality" id="network-quality" data-level="0"><summary><span class="network-bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><span id="network-label">통신 측정 중</span></summary><div class="network-detail"><strong>내 기기 ↔ 중계서버</strong><p id="network-metrics">미디어 연결 후 약 3초마다 측정합니다.</p><small>5 매우 좋음 · 4 좋음 · 3 보통 · 2 불안정 · 1 매우 불안정. 연결별 측정값 중 가장 낮은 단계를 표시합니다. 웹캠 자동 화질은 내 송신 경로를 기준으로 조절합니다.</small></div></details></div></div>
       <div id="workspace" class="workspace">
         <div id="grid" class="video-grid"></div>
         <div id="focus" class="focus-view" hidden><video id="focus-video" autoplay muted playsinline></video><div id="focus-placeholder" class="stage-empty">발표자를 기다리고 있습니다.</div><div id="focus-name" class="focus-caption"></div></div>

@@ -117,17 +117,9 @@ CSS = """
 
 
 def main():
-    nav, articles = [], []
-    for filename, anchor, label in DOCS:
-        nav.append(f'<a href="#{anchor}">{label}</a>')
-        body = render((ROOT / filename).read_text(encoding="utf-8"), anchor)
-        articles.append(f'<article id="{anchor}">{body}<div class="back-top"><a href="#top">맨 위로 ↑</a></div></article>')
-    page = '<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>화상회의 상세 매뉴얼</title><style>' + CSS + '</style></head><body id="top">'
-    page += '<header class="cover"><div class="label">MOA · OPERATION MANUAL</div><h1>화상회의 상세 매뉴얼</h1><p>일반 참여자와 방장의 회의 사용법부터 중계서버 설치, 부팅 자동 시작, 장애 대응까지.</p><div class="meta"><span>모아 v0.1</span><span>2026년 10월 14일 기준</span><span>오프라인 열람 가능</span></div></header>'
-    page += '<div class="layout"><aside><b>역할별 바로가기</b>' + "".join(nav) + '<p class="hint">항목을 누르면 해당 장으로 이동합니다.<br>각 장에서 세부 목차를 펼칠 수 있습니다.<br><br>찾기: Ctrl+F<br>인쇄: Ctrl+P<br><br>설치·자동 시작 등록 명령은 관리자가 대상 서버에서 직접 실행하는 안내입니다.</p></aside><main>' + "".join(articles) + '</main></div><footer>원본 문서: 화상회의/매뉴얼 · 프로그램 소스: 화상회의/중계서버</footer></body></html>'
-    output = ROOT.parent / "화상회의_상세매뉴얼.html"
-    output.write_text(page, encoding="utf-8")
-    print(f"Built {len(DOCS)} chapters: {output.name} ({output.stat().st_size:,} bytes)")
+    # Keep the historical command as a compatible entry point.
+    import runpy
+    runpy.run_path(str(ROOT.parent / '문서' / 'build_documents.py'), run_name='__main__')
 
 
 if __name__ == "__main__":

@@ -56,6 +56,7 @@
 </main>
 <main id="conference" class="conference" hidden>
   <section class="room-header"><div><div class="room-meta"><span id="mode-badge" class="badge"></span><span id="elapsed">00:00</span></div><h1 id="room-title"></h1></div><div class="room-actions"><button id="copy-code" class="subtle">접속 ID 복사</button><div class="minutes-export"><label for="minutes-format" class="format-label">저장 형식</label><select id="minutes-format"><option value="docx">Word (.docx)</option><option value="pdf">PDF (.pdf)</option><option value="txt">텍스트 (.txt)</option></select><button id="download" class="subtle">↓ 회의록 저장</button><label class="summary-option"><input id="minutes-summary" type="checkbox">회의록 요약 추가</label><small>전체 대화 저장 · 체크하면 요약도 함께 저장</small></div></div></section>
+  <div id="export-speech-status" class="speech-status speech-status-export" role="status" aria-live="polite" aria-atomic="true" hidden></div>
   <div class="meeting-layout">
     <section class="meeting-main">
       <div class="view-bar"><div class="segmented compact" role="tablist" aria-label="화면 배치"><button data-view="grid" class="active" role="tab">▦ 다중 화면</button><button data-view="focus" role="tab">▣ 발표자</button><button data-view="board" role="tab">▧ 화이트보드</button></div><button id="fullscreen" class="icon-button" title="회의 화면 전체 보기">⛶</button></div>

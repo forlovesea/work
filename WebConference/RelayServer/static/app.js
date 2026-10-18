@@ -387,6 +387,7 @@ function updateRoom(room) {
   $("toggle-minutes").textContent = room.minutes_enabled ? "끄기" : "켜기";
   $("record-label").textContent = room.minutes_enabled ? "● 음성 인식 기록 중" : "자동 기록 꺼짐";
   $("record-label").parentElement.classList.toggle("recording", room.minutes_enabled);
+  updateSpeechStatus(state.speechPending || 0);
   for (const [pid, pc] of state.peers) if (!room.participants.some(p => p.id === pid)) { pc.close(); state.peers.delete(pid); state.streams.delete(pid); document.getElementById(`audio-${pid}`)?.remove(); }
   renderPeople(); renderTiles(); renderFocus(); updateControls();
   for (const person of room.participants) subscribe(person);
@@ -502,9 +503,35 @@ async function stopShare(notify = true) {
   renderTiles(); renderFocus(); updateControls();
 }
 function updateSpeechStatus(pending) {
-  state.speechPending = pending;
-  $("speech-pending").textContent = state.config?.speech_engine === "faster-whisper"
-    ? `음성 수집·인식 대기 ${pending}건 · 저장 전 자동 기록을 끄고 0건이 될 때까지 기다려 주세요.` : "";
+  const count = Number.isFinite(pending) ? Math.max(0, Math.floor(pending)) : 0;
+  state.speechPending = count;
+  const visible = state.config?.speech_engine === "faster-whisper";
+  const recording = !!state.room?.minutes_enabled;
+  const phase = recording ? "recording" : count > 0 ? "waiting" : "ready";
+  const title = recording ? "저장 전 자동 기록을 꺼 주세요" : count > 0 ? "음성 인식 중 · 잠시 기다려 주세요" : "기록 처리 완료 · 저장할 수 있어요";
+  const message = recording
+    ? `${isHost() ? "회의록 탭에서 자동 기록을 끈 뒤" : "방장에게 자동 기록을 꺼 달라고 요청한 뒤"} 대기 0건을 확인해 주세요.`
+    : count > 0 ? "대기 건수가 0이 되면 회의록을 저장하세요. 완료될 때까지 방을 나가지 마세요."
+    : "대기 0건입니다. 저장 형식을 선택하고 회의록 저장을 눌러 주세요.";
+  for (const id of ["speech-pending", "export-speech-status"]) {
+    const panel = $(id);
+    panel.hidden = !visible;
+    const signature = `${visible}:${phase}:${count}:${message}`;
+    if (panel.dataset.status === signature) continue;
+    panel.dataset.status = signature;
+    panel.className = `speech-status ${id === "export-speech-status" ? "speech-status-export" : ""} is-${phase}`;
+    panel.setAttribute("aria-atomic", "true");
+    const copy = document.createElement("span"); copy.className = "speech-status-copy";
+    const heading = document.createElement("strong"); heading.textContent = title;
+    const detail = document.createElement("span"); detail.textContent = message;
+    copy.append(heading, detail);
+    const badge = document.createElement("span"); badge.className = `speech-count ${count > 0 ? "has-pending" : "is-zero"}`;
+    const caption = document.createElement("span"); caption.textContent = "인식 대기";
+    const number = document.createElement("b"); number.textContent = count.toLocaleString("ko-KR");
+    const unit = document.createElement("span"); unit.textContent = "건";
+    badge.append(caption, number, unit);
+    panel.replaceChildren(copy, badge);
+  }
 }
 function renderEntries() {
   const list = $("entries"); list.replaceChildren();

@@ -1,6 +1,8 @@
 # Ubuntu 20.04 직접 설치·운영
 
-새 회의 생성은 Master 승인 후 가능합니다. 설치·업데이트 전에 [Master 이메일 인증 및 SMTP 설정](MASTER_APPROVAL.md)을 확인하세요.
+문서 업데이트: **2026년 10월 19일 · 기능 기준 2392a2d**. 일반 사용자의 새 회의 생성은 Master 이메일 승인 후 가능하며, Master 비밀번호 인증 사용자는 승인 없이 직접 생성합니다. 설치·업데이트 전에 [이메일 및 SMTP 설정](MASTER_APPROVAL.md)과 [Master 키 등록](MASTER_ADMIN.md)을 확인하세요.
+
+**현재 운영 주소는 `https://61.105.141.21:10443`입니다.** 축전지·원격제어 서비스가 함께 운영되는 기존 서버는 [서버 운영 안내](SERVER_OPERATIONS.md)를 우선하고 Nginx·인증서·방화벽을 일괄 변경하지 않습니다. 공인 IP·10443 신규 설치 순서는 [통합 매뉴얼 10장](화상회의_상세매뉴얼.html#section-10)에 있습니다. 아래 2장의 도메인·80/443 예시는 해당 방식을 새로 선택할 때만 사용합니다.
 
 한국어 회의록의 정확도를 우선하고 지연을 허용하려면 [Whisper 전환 안내](WHISPER_DEPLOY.md)를 참고하세요. 기존 설치의 음성 인식 엔진만 교체하는 절차를 제공합니다.
 
@@ -28,6 +30,7 @@ sudo bash deploy/native/install.sh
 | `/opt/moa/releases/release-*` | 버전별 코드와 가상환경 |
 | `/opt/moa/current` | 현재 버전 심볼릭 링크 |
 | `/etc/moa/moa.env` | 환경 설정, root:moa 0640 |
+| `/etc/moa/master-key.json` | Master 키 해시, root:moa 0640, Git에 포함하지 않음 |
 | `/var/lib/moa/meetings.db` | 회의록 DB |
 | `/var/lib/moa/models` | 한국어 모델 |
 | `/etc/systemd/system/moa.service` | 전용 계정 서비스 |
@@ -41,7 +44,15 @@ curl -fsS http://127.0.0.1:8000/api/config
 
 `ok: true`, `speech_available: true`를 확인하세요. 기본 `MAX_PARTICIPANTS=8`은 접속 제한이며 동시 성능 보장값이 아닙니다. 실제 참석 인원으로 CPU·메모리·네트워크 부하를 시험하세요.
 
-## 2. HTTPS 설정
+### Master 키 최초 등록
+
+```bash
+sudo /opt/moa/current/.venv/bin/python /opt/moa/current/scripts/set_master_key.py
+```
+
+사용할 키를 두 번 입력합니다. 입력 문자는 표시되지 않습니다. 키 분실 시에도 같은 명령으로 새 키를 지정하며 키만 변경할 때는 재시작하지 않습니다. 환경 파일에 PUBLIC_BASE_URL과 필요 시 SMTP·Whisper 설정을 추가한 경우에는 회의가 없는 시간에 Moa를 재시작합니다. 실제 비밀번호를 코드나 문서에 넣지 않습니다.
+
+## 2. HTTPS 설정 — 도메인 기반 신규 구성 예시
 
 DNS가 실제 서버를 가리키고 TCP 80/443이 도달 가능해야 합니다. 기존 프록시가 있다면 포트를 중복 점유하지 않도록 기존 설정에 사이트를 추가하세요.
 
@@ -91,6 +102,8 @@ ICE_SERVERS_JSON='[{"urls":"turn:meet.example.com:3478?transport=udp","username"
 `sudo systemctl restart moa`로 적용합니다. 재시작은 진행 중인 회의를 종료합니다. worker 수를 늘리면 방과 WebRTC 상태를 공유하지 못하므로 단일 프로세스를 유지하세요.
 
 ## 4. 업데이트와 롤백
+
+최신 통신 상태·웹캠 화질 기능은 별도 패키지나 환경 변수 추가 없이 앱 업데이트로 적용됩니다. `static/media-quality.js`도 배포되어야 하므로 app.js만 단독 복사하지 않습니다. 적용 후 브라우저에서 Ctrl+F5로 새로고침합니다. 화질은 기본 자동이며 기존 서버에 1080p를 일괄 강제하지 않습니다.
 
 회의를 종료하고 백업한 뒤 Git 체크아웃의 `RelayServer`에서:
 

@@ -1,7 +1,7 @@
 # 모아 · Python 화상회의 중계서버
-일반 참여자·방장·서버 관리자의 세부 절차는 **[통합 상세 매뉴얼](../화상회의_상세매뉴얼.html)** 또는 [역할별 원문](../매뉴얼/00_매뉴얼_안내.md)을 참고하세요. Ubuntu 20.04의 현재 지원 조건과 부팅 자동 시작 등록은 상세 매뉴얼에 설명되어 있습니다.
+문서 업데이트: **2026년 10월 19일 · 기능 기준 2392a2d**. Master·참석자·방장·서버 관리자의 세부 절차는 **[통합 상세 매뉴얼](../화상회의_상세매뉴얼.html)** 또는 [역할별 원문](../문서/사용매뉴얼.md)을 참고하세요. 기존 서버의 일상 점검과 업데이트는 [서버 운영 안내](../SERVER_OPERATIONS.md)에 정리했습니다.
 
-Python 중계 서버와 브라우저 클라이언트로 구성한 첫 실행 버전입니다. 서버는 FastAPI + aiortc, 음성 인식은 Vosk 한국어 모델, 기록 저장은 SQLite를 사용합니다. 클라이언트는 설치 없이 Chrome/Edge에서 접속하며 브라우저의 카메라·화면 공유 API를 사용하는 부분은 JavaScript입니다.
+Python 중계 서버와 브라우저 클라이언트로 구성됩니다. 서버는 FastAPI + aiortc, 음성 인식은 Vosk 또는 지연을 허용하는 faster-whisper 한국어 모델, 기록 저장은 SQLite를 사용합니다. 클라이언트는 설치 없이 브라우저에서 접속하며 카메라·화면 공유 API와 통신 품질 측정은 JavaScript로 구현합니다.
 
 이 디렉토리(`화상회의/RelayServer`)가 서버의 독립 실행·배포 단위입니다. 영상·음성은 이 Python 서버를 경유하며, HTTPS는 Nginx, NAT 중계는 coturn을 사용합니다. `deploy/native/`의 설치 스크립트와 systemd 서비스로 운영합니다. 방 생성·입장 API, WebRTC 연결 협상, 발표권 제어, 화이트보드 동기화, 음성 인식 및 회의록 저장을 포함합니다.
 
@@ -20,6 +20,9 @@ Python 중계 서버와 브라우저 클라이언트로 구성한 첫 실행 버
 | 회의록 저장 | Word·PDF·텍스트 중 선택해 전체 대화 저장. ‘회의록 요약 추가’ 체크 시 주제별 대표 발언, 확정 결정, 실행 항목, 메모를 함께 저장 |
 | 다중 화면 | 모든 참석자의 영상 타일. 음성은 화면 배치에 관계없이 재생 |
 | 발표자 화면 | 발표자 영상 또는 공유 화면을 크게 표시. 전체 화면 버튼 지원 |
+| 통신 상태 | 보기 탭 오른쪽에 5단계 색상·막대. 터치하면 지연·손실·지터 표시. 내 브라우저와 서버 사이의 추정 상태 |
+| 웹캠 화질 | 기본 자동 360p~720p 조절. 수동 360p·540p·720p·1080p. 화면 공유는 웹캠 제한에서 제외 |
+| 저장 대기 안내 | 자동 기록 중 라벤더색, 처리 대기 살구색, 기록 꺼짐·대기 0건은 민트색. 큰 숫자와 부드러운 깜박임 |
 | 화이트보드 | 현재 발표자가 그리기·색·두께·지우기 제어. 늦게 들어와도 기존 그림 동기화 |
 | 열린 파일 | 화면 공유 버튼에서 파일을 연 창·탭·화면 선택. 파일 업로드나 공동 편집은 아님 |
 | 방장 퇴장 | 남은 참석자에게 방장 권한 자동 이전. 마지막 참석자 퇴장 시 방 종료 |
@@ -44,14 +47,14 @@ python -m venv .venv
 
 브라우저에서 **http://localhost:8000**을 엽니다. `run.cmd`로도 실행할 수 있습니다. PowerShell 실행 정책이 허용하는 환경에서는 `run.ps1`도 가능합니다. 이 작업에서 만들어진 `.venv`가 있으면 최초 설치 단계는 생략할 수 있습니다. 모델 다운로드를 생략하면 화상회의·수동 기록은 가능하고 자동 회의록 옵션은 비활성화됩니다.
 
-1. 내 이름을 입력하고 **새 회의 만들기**를 선택합니다.
+1. 내 이름을 입력합니다. **Master 인증** 후 직접 만들거나, **새 회의 만들기 → 이름·연락처 입력 → 이메일 인증**으로 승인을 받습니다. 로컬 Master 키는 `python scripts/set_master_key.py`로 먼저 등록합니다.
 2. 회의 이름과 방식을 지정합니다. 필요하면 자동 회의록을 켭니다.
 3. 방장이 **참석자** 탭의 **초대 링크 복사**로 링크를 공유합니다.
 4. 다른 브라우저/PC는 링크를 열고 이름을 확인한 뒤 **회의 참여하기**를 누릅니다. 다른 PC에서는 접속 가능한 HTTPS 주소가 필요하며 localhost 링크는 사용할 수 없습니다.
 5. 각자 스피커를 켜야 상대방 음성이 들립니다. 발언자는 마이크를 직접 켭니다.
 6. 회의 모드에서는 참석자가 손을 들고 방장이 **발표 지정**을 누릅니다.
 7. **회의록** 탭에서 전사를 보고 방장이 확정 결정·실행 항목을 추가합니다.
-8. 퇴장 전에 **회의록 저장**을 누릅니다. 서버에는 퇴장 후에도 기록이 보관됩니다.
+8. 방장이 자동 기록을 끄고 Whisper 대기 0건을 확인한 뒤 Word·PDF·TXT와 요약 여부를 선택해 **회의록 저장**을 누릅니다. 화면의 민트색 저장 가능 안내를 확인하세요. 서버에는 퇴장 후에도 완료된 기록이 보관됩니다.
 
 로컬 2개 탭 시험은 가능하지만 실제 음성 시험에는 헤드셋 또는 서로 다른 장치를 권장합니다. 공유 화면에는 시스템 소리가 포함되지 않으며 발표자의 마이크 음성을 사용합니다.
 
@@ -62,6 +65,7 @@ python -m venv .venv
 ```bash
 sudo bash deploy/native/build-python.sh
 sudo bash deploy/native/install.sh
+sudo /opt/moa/current/.venv/bin/python /opt/moa/current/scripts/set_master_key.py
 ```
 
 설정은 `/etc/moa/moa.env`, 회의록은 `/var/lib/moa/meetings.db`, 모델은 `/var/lib/moa/models`에 저장됩니다. 상태는 `sudo systemctl status moa`, 로그는 `sudo journalctl -u moa -f`로 확인합니다. 단일 worker를 유지하세요. `deploy/native/`에 설치 스크립트, systemd 서비스, Nginx 및 환경 파일 예제가 있습니다.
@@ -92,6 +96,7 @@ server.py             실행 진입점 (수신 주소, 포트, 환경 파일 설
 app/domain.py         방장·발표권 규칙, SQLite, 회의록 정리
 app/media.py          서버 음성 차단, Vosk 실시간 전사
 static/               한국어 브라우저 UI (HTML/CSS/JavaScript)
+static/media-quality.js 통신 통계 평가와 자동 화질 전환 규칙
 scripts/              한국어 모델 설치, 기록 내보내기, 브라우저 검증
 tests/                권한·방·기록·실제 WebRTC 미디어 테스트
 deploy/native/        Ubuntu 직접 설치, systemd, Nginx 예제
@@ -107,6 +112,7 @@ python -m pytest -q
 # 실제 메일 없이 승인 과정을 검증 (시스템 Chrome 필요):
 python scripts/browser_approval_smoke.py
 python scripts/browser_master_smoke.py
+python scripts/browser_quality_smoke.py
 # 아래 명령은 개발용 승인 생략 서버에서만 실행:
 # python -c "import uvicorn; from app.main import create_app; uvicorn.run(create_app(db_path='test-results/browser.db', approval_required=False), host='127.0.0.1', port=8000)"
 python scripts/browser_smoke.py

@@ -14,6 +14,8 @@ import org.json.*;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.Iterator;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -32,6 +34,8 @@ public class MainActivity extends Activity {
     private String pendingControlCommand;
     private long controlCommandDeadline;
     private String site = "", device = "", page = "devices";
+    private final Set<String> selectedEvents = new HashSet<>();
+    private AlertDialog historyDeleteDialog;
     private final Runnable poll = new Runnable() {
         @Override public void run() {
             if (!resumed) return;
@@ -86,7 +90,7 @@ public class MainActivity extends Activity {
 
     @Override protected void onResume() { super.onResume(); resumed = true; handler.post(poll); }
     @Override protected void onPause() { resumed = false; handler.removeCallbacks(poll); super.onPause(); }
-    @Override protected void onDestroy() { resumed = false; generation++; if (settingsDialog != null) settingsDialog.dismiss(); handler.removeCallbacksAndMessages(null); network.shutdownNow(); super.onDestroy(); }
+    @Override protected void onDestroy() { resumed = false; generation++; if (historyDeleteDialog != null) historyDeleteDialog.dismiss(); if (settingsDialog != null) settingsDialog.dismiss(); handler.removeCallbacksAndMessages(null); network.shutdownNow(); super.onDestroy(); }
 
     private void exitApp() {
         if (closing) return;
@@ -142,10 +146,10 @@ public class MainActivity extends Activity {
         view.setTextColor(heading ? BatteryDashboard.INK : BatteryDashboard.MUTED); view.setPadding(6, 12, 6, 12); content.addView(view);
     }
 
-    private void navigate(String next) { page = next; generation++; content.removeAllViews(); scroll.scrollTo(0, 0); refresh(); }
+    private void navigate(String next) { selectedEvents.clear(); page = next; generation++; content.removeAllViews(); scroll.scrollTo(0, 0); refresh(); }
 
     private void refresh() {
-        if (closing || network.isShutdown() || busy || isFinishing() || (settingsDialog != null && settingsDialog.isShowing())) return;
+        if (closing || network.isShutdown() || busy || isFinishing() || historyDeleteDialog != null || (settingsDialog != null && settingsDialog.isShowing())) return;
         if (settings.url().isEmpty()) { status.setText("서버 연결 대기"); status.setTextColor(BatteryDashboard.MUTED); content.setAlpha(1f); content.removeAllViews(); dashboard.empty(content, this::showSettings); return; }
         busy = true;
         final int requestGeneration = generation;
@@ -241,15 +245,118 @@ public class MainActivity extends Activity {
             JSONArray events = response.getJSONArray("events");
             dashboard.currentAlarmCards(content,response);
             text("발생 / 복구 이력", true);
+            Set<String> visibleIds = new HashSet<>();
+            for (int i = 0; i < events.length(); i++) visibleIds.add(events.getJSONObject(i).getString("event_id"));
+            selectedEvents.retainAll(visibleIds);
+            LinearLayout historyActions = new LinearLayout(this);
+            content.addView(historyActions);
+            Button deleteSelected = navigationButton(historyActions, "선택 삭제 (" + selectedEvents.size() + ")", true, false,
+                () -> confirmHistoryDeletion(false));
+            deleteSelected.setEnabled(!selectedEvents.isEmpty());
+            Button deleteAll = navigationButton(historyActions, "전체 삭제", true, false,
+                () -> confirmHistoryDeletion(true));
+            deleteAll.setEnabled(events.length() > 0);
+            if (events.length() == 0) text("저장된 발생 / 복구 이력이 없습니다.", false);
             for (int i = 0; i < events.length(); i++) {
                 JSONObject e = events.getJSONObject(i);
-                text((e.optString("transition").equals("raised") ? "발생" : "복구") + " · " +
-                    DisplayTime.epoch(e.optDouble("created_at")) + "\n" + e.optString("message"), false);
+                String eventId = e.getString("event_id");
+                boolean raised = e.optString("transition").equals("raised");
+                int ink = raised ? Color.rgb(105, 56, 44) : Color.rgb(35, 86, 72);
+                int fill = raised ? (i % 2 == 0 ? Color.rgb(255, 235, 226) : Color.rgb(255, 244, 233))
+                    : (i % 2 == 0 ? Color.rgb(225, 244, 236) : Color.rgb(236, 248, 242));
+                LinearLayout eventCard = new LinearLayout(this);
+                eventCard.setOrientation(LinearLayout.VERTICAL);
+                eventCard.setPadding(dashboard.dp(12), dashboard.dp(10), dashboard.dp(12), dashboard.dp(12));
+                android.graphics.drawable.GradientDrawable cardBackground = dashboard.background(fill, 14);
+                cardBackground.setStroke(dashboard.dp(1), raised ? Color.rgb(232, 195, 180) : Color.rgb(174, 213, 196));
+                eventCard.setBackground(cardBackground);
+                LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(-1, -2);
+                cardParams.topMargin = dashboard.dp(12);
+                content.addView(eventCard, cardParams);
+                CheckBox selected = new CheckBox(this);
+                selected.setText((raised ? "발생" : "복구") + " · " +
+                    DisplayTime.epoch(e.optDouble("created_at")) + "\n" + e.optString("message"));
+                selected.setTextColor(ink);
+                selected.setButtonTintList(android.content.res.ColorStateList.valueOf(ink));
+                selected.setTextSize(16);
+                selected.setLineSpacing(dashboard.dp(5), 1.12f);
+                selected.setPadding(dashboard.dp(4), dashboard.dp(6), dashboard.dp(4), dashboard.dp(10));
+                selected.setMinHeight(dashboard.dp(48));
+                selected.setChecked(selectedEvents.contains(eventId));
+                selected.setOnCheckedChangeListener((view, checked) -> {
+                    if (checked) selectedEvents.add(eventId); else selectedEvents.remove(eventId);
+                    deleteSelected.setText("선택 삭제 (" + selectedEvents.size() + ")");
+                    deleteSelected.setEnabled(!selectedEvents.isEmpty());
+                });
+                eventCard.addView(selected);
+                View divider = new View(this);
+                divider.setBackgroundColor(raised ? Color.rgb(232, 205, 191) : Color.rgb(190, 220, 205));
+                eventCard.addView(divider, new LinearLayout.LayoutParams(-1, dashboard.dp(1)));
                 if (e.isNull("acknowledged_at")) {
-                    String id = e.getString("event_id"); button(content, "확인 기록", () -> acknowledge(id));
-                } else text("사용자 확인 완료", false);
+                    Button acknowledgeButton = new Button(this);
+                    acknowledgeButton.setText("확인 기록");
+                    acknowledgeButton.setAllCaps(false);
+                    acknowledgeButton.setTextColor(ink);
+                    acknowledgeButton.setBackgroundTintList(android.content.res.ColorStateList.valueOf(
+                        raised ? Color.rgb(246, 215, 200) : Color.rgb(201, 230, 216)));
+                    acknowledgeButton.setOnClickListener(v -> acknowledge(eventId));
+                    LinearLayout.LayoutParams actionParams = new LinearLayout.LayoutParams(-1, dashboard.dp(48));
+                    actionParams.topMargin = dashboard.dp(8);
+                    eventCard.addView(acknowledgeButton, actionParams);
+                } else {
+                    TextView acknowledged = dashboard.label("✓ 사용자 확인 완료", 14, ink);
+                    acknowledged.setPadding(dashboard.dp(8), dashboard.dp(12), dashboard.dp(8), dashboard.dp(2));
+                    eventCard.addView(acknowledged);
+                }
             }
         }
+    }
+
+    private void confirmHistoryDeletion(boolean all) {
+        if (historyDeleteDialog != null || (!all && selectedEvents.isEmpty())) return;
+        final String targetSite = site, targetDevice = device;
+        final Set<String> ids = new HashSet<>(selectedEvents);
+        final int targetGeneration = generation;
+        historyDeleteDialog = new AlertDialog.Builder(this)
+            .setTitle(all ? "전체 이력 삭제" : "선택 이력 삭제")
+            .setMessage(targetSite + " / " + targetDevice + "\n" +
+                (all ? "화면에 표시되지 않은 이전 이력까지 모두 삭제합니다." : "선택한 " + ids.size() + "건을 삭제합니다.") +
+                "\n현재 계정의 발생 / 복구 이력에서 삭제되며 현재 알람 상태는 유지됩니다.")
+            .setNegativeButton("취소", null)
+            .setPositiveButton("삭제", (dialog, which) -> {
+                if (closing || network.isShutdown() || targetGeneration != generation) return;
+                if (busy) {
+                    Toast.makeText(this, "서버 조회 중입니다. 잠시 후 다시 삭제하세요.", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                generation++;
+                busy = true;
+                status.setText("이력 삭제 중…");
+                network.execute(() -> {
+                    try {
+                        final String url = settings.url(), token = settings.token();
+                        JSONObject body = new JSONObject().put("site_id", targetSite).put("device_id", targetDevice);
+                        if (all) body.put("all", true); else body.put("event_ids", new JSONArray(ids));
+                        new ApiClient(url, token).request("POST", "/api/v1/alarms/delete-history", body);
+                        runOnUiThread(() -> {
+                            busy = false;
+                            if (closing || isFinishing() || isDestroyed()) return;
+                            selectedEvents.removeAll(ids);
+                            Toast.makeText(this, "이력이 삭제되었습니다.", Toast.LENGTH_SHORT).show();
+                            refresh();
+                        });
+                    } catch (Exception e) {
+                        runOnUiThread(() -> {
+                            busy = false;
+                            if (closing || isFinishing() || isDestroyed()) return;
+                            status.setText("이력 삭제 실패: " + e.getMessage());
+                            status.setTextColor(BatteryDashboard.AMBER);
+                        });
+                    }
+                });
+            }).create();
+        historyDeleteDialog.setOnDismissListener(dialog -> historyDeleteDialog = null);
+        historyDeleteDialog.show();
     }
 
     private void showChargeLimitDialog(JSONObject snapshot) {

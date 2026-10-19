@@ -43,6 +43,7 @@ def cleanup(storage, options, instant=None):
                 ORDER BY e.created_at LIMIT ?''', (alarm_cutoff, limit))]
             for event in events:
                 db.execute('DELETE FROM alarm_acknowledgements WHERE event_id=?', (event,))
+                db.execute('DELETE FROM alarm_history_deleted WHERE event_id=?', (event,))
                 db.execute('DELETE FROM push_outbox WHERE event_id=?', (event,))
                 db.execute('DELETE FROM alarm_events WHERE event_id=?', (event,))
             counts['alarms'] = len(events)

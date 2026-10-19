@@ -94,7 +94,7 @@ def query(storage,viewer,path,params):
         args=(grant['site_id'],grant['device_id'])
         if path=='/api/v1/alarms':
             active=[dict(r) for r in db.execute('SELECT rule_key,event_id,message,last_observed FROM alarm_state WHERE site_id=? AND device_id=? AND active=1',args)]
-            events=[dict(r) for r in db.execute("""SELECT e.*,a.acknowledged_at FROM alarm_events e LEFT JOIN alarm_acknowledgements a ON e.event_id=a.event_id AND a.viewer_id=? WHERE site_id=? AND device_id=? ORDER BY created_at DESC LIMIT 100""",(viewer['id'],)+args)]
+            events=[dict(r) for r in db.execute("""SELECT e.*,a.acknowledged_at FROM alarm_events e LEFT JOIN alarm_acknowledgements a ON e.event_id=a.event_id AND a.viewer_id=? WHERE site_id=? AND device_id=? AND NOT EXISTS (SELECT 1 FROM alarm_history_deleted d WHERE d.event_id=e.event_id AND d.viewer_id=?) ORDER BY created_at DESC LIMIT 100""",(viewer['id'],)+args+(viewer['id'],))]
             row=db.execute('''SELECT s.payload FROM devices d JOIN samples s
                 ON d.collector_id=s.collector_id AND d.sample_id=s.sample_id
                 WHERE d.site_id=? AND d.device_id=?''',args).fetchone()
@@ -133,6 +133,26 @@ def mutate(storage, viewer, method, path, body):
     if not isinstance(body, dict):
         return 400, dict(error='invalid_body')
     with storage.lock, closing(storage.connect()) as db, db:
+        if method == 'POST' and path == '/api/v1/alarms/delete-history':
+            grant = dict(site_id=body.get('site_id'), device_id=body.get('device_id'))
+            if not all(identifier(v) for v in grant.values()):
+                return 400, dict(error='invalid_device')
+            if grant not in viewer['devices']:
+                return 403, dict(error='forbidden')
+            ids = body.get('event_ids')
+            all_events = body.get('all', False)
+            if type(all_events) is not bool or (all_events and ids is not None):
+                return 400, dict(error='invalid_selection')
+            if not all_events and (not isinstance(ids, list) or not 1 <= len(ids) <= 100
+                                   or any(not isinstance(i, str) or not 1 <= len(i) <= 64 for i in ids)):
+                return 400, dict(error='invalid_selection')
+            sql = 'SELECT event_id,? FROM alarm_events WHERE site_id=? AND device_id=?'
+            args = (viewer['id'], grant['site_id'], grant['device_id'])
+            if not all_events:
+                sql += ' AND event_id IN (' + ','.join('?' for _ in ids) + ')'
+                args += tuple(ids)
+            deleted = db.execute('INSERT OR IGNORE INTO alarm_history_deleted(event_id,viewer_id) ' + sql, args).rowcount
+            return 200, dict(ok=True, deleted=deleted)
         if method == 'POST' and path == '/api/v1/commands':
             site_id,device_id=body.get('site_id'),body.get('device_id')
             if not identifier(site_id) or not identifier(device_id):

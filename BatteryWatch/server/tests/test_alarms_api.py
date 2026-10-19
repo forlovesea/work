@@ -82,6 +82,38 @@ class AlarmTests(unittest.TestCase):
         with closing(self.storage.connect()) as db:
             self.assertEqual(db.execute("SELECT active FROM alarm_state WHERE rule_key='low_soc:1:0'").fetchone()[0], 1)
 
+    def test_history_delete_selection_is_persistent_and_viewer_scoped(self):
+        self.raise_alarm()
+        event = self.events()[0]['event_id']
+        route = '/api/v1/alarms/delete-history'
+        body = dict(site_id='site', device_id='battery', event_ids=[event])
+        self.assertEqual(mutate(self.storage, self.viewer, 'POST', route, body)[1]['deleted'], 1)
+        self.assertEqual(mutate(self.storage, self.viewer, 'POST', route, body)[1]['deleted'], 0)
+        params = dict(site_id=['site'], device_id=['battery'])
+        result = query(self.storage, self.viewer, '/api/v1/alarms', params)[1]
+        self.assertEqual(result['events'], [])
+        self.assertEqual(len(result['active']), 1)
+        other = dict(self.viewer, id='other')
+        self.assertEqual(len(query(self.storage, other, '/api/v1/alarms', params)[1]['events']), 1)
+        self.sample(1023, 26); self.engine.tick(1023)
+        self.assertEqual(query(self.storage, self.viewer, '/api/v1/alarms', params)[1]['events'][0]['transition'], 'cleared')
+
+    def test_history_delete_all_covers_more_than_display_limit_and_checks_scope(self):
+        route = '/api/v1/alarms/delete-history'
+        with closing(self.storage.connect()) as db, db:
+            db.executemany('INSERT INTO alarm_events VALUES(?,?,?,?,?,?,?)',
+                [(str(i), 'site', 'battery', 'rule', 'raised', i, 'message') for i in range(105)] +
+                [('foreign', 'other', 'battery', 'rule', 'raised', 0, 'message')])
+        body = dict(site_id='site', device_id='battery', all=True)
+        denied = dict(self.viewer, devices=[])
+        self.assertEqual(mutate(self.storage, denied, 'POST', route, body)[0], 403)
+        for invalid in ({}, {'event_ids': []}, {'all': 'true'}, {'all': True, 'event_ids': ['1']}):
+            self.assertEqual(mutate(self.storage, self.viewer, 'POST', route,
+                dict(site_id='site', device_id='battery', **invalid))[0], 400)
+        self.assertEqual(mutate(self.storage, self.viewer, 'POST', route, body)[1]['deleted'], 105)
+        with closing(self.storage.connect()) as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM alarm_history_deleted WHERE event_id='foreign'").fetchone()[0], 0)
+
     def test_missing_reading_breaks_pending_duration(self):
         self.sample(1000); self.engine.tick(1000)
         self.sample(1005, None); self.engine.tick(1005)

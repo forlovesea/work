@@ -68,6 +68,9 @@ def initialize(storage):
             CREATE TABLE IF NOT EXISTS alarm_acknowledgements (
                 event_id TEXT, viewer_id TEXT, acknowledged_at REAL NOT NULL,
                 PRIMARY KEY(event_id,viewer_id));
+            CREATE TABLE IF NOT EXISTS alarm_history_deleted (
+                event_id TEXT, viewer_id TEXT,
+                PRIMARY KEY(event_id,viewer_id));
             CREATE TABLE IF NOT EXISTS push_devices (
                 installation_id TEXT PRIMARY KEY, viewer_id TEXT NOT NULL,
                 token TEXT UNIQUE NOT NULL, updated_at REAL NOT NULL);

@@ -27,7 +27,7 @@
 - Apache 2.4 및 Apache에서 실행 가능한 PHP 7.4 이상
 - PHP PDO SQLite 확장 (`pdo_sqlite`)
 
-앱은 TLS 인증서가 발급된 도메인의 `https://<실제-도메인>/installed-management/` 주소로 연결합니다. HTTPS에는 도메인에 유효한 TLS 인증서가 필요합니다. 기존 OpenProject의 `/OpenProject/` 프록시 규칙과 서비스를 변경하지 않고, OpenProject 설정이 이미 포함하도록 구성된 별도 `custom/server` 파일에 앱 전용 HTTPS 가상호스트를 추가합니다. 앱 경로는 HTTPS에서만 열고, Apache에서 모든 클라이언트 IP를 허용합니다. 앱 자체 암호 로그인은 계속 적용됩니다.
+앱은 `https://61.105.141.21/installed-management/` 주소로 연결합니다. HTTPS를 사용하려면 인증서에 공인 IP `61.105.141.21`이 IP 주소 SAN(Subject Alternative Name)으로 포함되어 있어야 하며, 스마트폰이 신뢰하는 인증기관(CA)이 발급한 인증서를 사용해야 합니다. 기존 OpenProject의 `/OpenProject/` 프록시 규칙과 서비스를 변경하지 않고, OpenProject 설정이 이미 포함하도록 구성된 별도 `custom/server` 파일에 앱 전용 HTTPS 가상호스트를 추가합니다. 앱 경로는 HTTPS에서만 열고, Apache에서 모든 클라이언트 IP를 허용합니다. 앱 자체 암호 로그인은 계속 적용됩니다.
 
 ## 설치 및 Apache 연결 예시
 
@@ -119,9 +119,9 @@ php-fpm7.4 -i | grep -i pdo_sqlite
 
 두 명령에서 `pdo_sqlite`가 모두 확인되지 않으면 다음 단계로 진행하지 말고 패키지 설치 오류를 해결합니다. `php -v`가 처음에 “명령을 찾을 수 없음”이었던 것은 CLI 미설치 상태이므로 `php7.4-cli`도 명시적으로 설치합니다.
 
-### 4. 도메인과 TLS 인증서 준비
+### 4. 공인 IP용 TLS 인증서 준비
 
-Apache의 443 포트가 LISTEN 상태라는 것만으로 HTTPS 사이트와 인증서가 준비된 것은 아닙니다. 먼저 현재 가상호스트와 서버 이름을 확인합니다.
+Apache의 443 포트가 LISTEN 상태라는 것만으로 IP 주소용 인증서가 설치되어 있거나 HTTPS가 준비된 것은 아닙니다. 먼저 현재 가상호스트와 인증서 설정을 확인합니다.
 
 ```bash
 sudo apache2ctl -S
@@ -132,9 +132,18 @@ sudo grep -R -nE 'VirtualHost.*:443|ServerName|SSLCertificateFile|SSLCertificate
 
 앞서 확인된 서버는 이미 TCP 443을 LISTEN하고 있으므로 `Listen 443`을 중복해서 추가하지 않습니다. `apache2ctl -S`에 기존 `*:443` 가상호스트가 표시되지 않고 아래 사용자 include 경로가 존재하면, 다음 단계처럼 앱 전용 가상호스트를 별도로 추가할 수 있습니다.
 
-스마트폰에서 사용할 도메인(예: `installed.example.com`)을 준비하고, 해당 이름이 이 서버로 연결되도록 DNS를 설정합니다. 도메인에 유효한 인증서와 개인 키가 필요합니다. 아래 설정 예시는 인증서가 `/etc/letsencrypt/live/<실제-도메인>/`에 있다고 가정합니다. 이미 사용 중인 인증서가 있으면 실제 파일 경로를 사용하세요. 인증서가 없으면 서버 운영 정책에 맞는 절차로 먼저 발급하고, 발급 기관의 검증이 끝날 때까지 Apache 설정을 적용하지 마세요. 공개 CA 인증서는 일반적으로 도메인이 필요하며, 서버 IP만으로 접속하면 인증서 이름 검증이 맞지 않을 수 있습니다.
+도메인이나 DNS 레코드는 사용하지 않습니다. 인증서 발급 기관에 `61.105.141.21` IP 주소 자체가 인증서 SAN에 들어가는 인증서를 요청하세요. **도메인 이름만 들어 있는 인증서는 이 IP 주소 접속에 사용할 수 없습니다.** 발급 기관이 공인 IP용 인증서를 제공하는지, 이 IP를 검증할 수 있는지, 갱신 주기와 자동 갱신 방법이 무엇인지 사전에 확인하세요. 인증서가 준비되기 전에는 HTTPS 설정을 적용하지 않습니다.
 
-이미 같은 도메인을 처리하는 `*:443` 가상호스트가 있다면 중복 가상호스트를 만들지 말고, 해당 HTTPS 가상호스트 안에 아래 `Alias` 및 `<Directory>` 블록을 추가합니다. 같은 도메인에 새 HTTPS 가상호스트를 만드는 경우 기존 사이트 선택이 달라질 수 있으므로 설정 전에 운영자와 확인하세요.
+인증서와 개인 키는 서버에 안전하게 보관하고, 아래 설정 예시에서는 각각 `/etc/ssl/installed-management/fullchain.pem`, `/etc/ssl/installed-management/privkey.pem`에 있다고 가정합니다. 실제 저장 경로가 다르면 설정과 확인 명령의 경로를 함께 바꾸세요. 인증서에 IP SAN이 있는지 확인합니다.
+
+```bash
+openssl x509 -in /etc/ssl/installed-management/fullchain.pem \
+  -noout -ext subjectAltName
+```
+
+출력에 `IP Address:61.105.141.21`이 있어야 합니다. 인증서가 이 IP를 포함하지 않거나 스마트폰에서 신뢰되지 않으면 경고를 무시하거나 브라우저 보안을 낮추지 마세요. 자체 서명 인증서를 사용할 경우에는 모든 스마트폰에 해당 인증서를 신뢰하도록 별도로 설치·관리해야 하며, 그 전까지는 정상적인 공개 HTTPS로 사용할 수 없습니다.
+
+`*:443` 기존 HTTPS 가상호스트가 있으면 중복 가상호스트를 만들지 말고, 해당 HTTPS 가상호스트에 앱 `Alias` 및 `<Directory>` 블록을 추가합니다. 기존 443 기본 가상호스트가 OpenProject 또는 다른 서비스를 처리한다면 새 가상호스트가 그 서비스의 HTTPS 응답을 바꾸지 않는지 운영자와 확인하세요.
 
 ### 5. 앱 전용 HTTPS 가상호스트 설정
 
@@ -144,7 +153,7 @@ sudo grep -R -nE 'VirtualHost.*:443|ServerName|SSLCertificateFile|SSLCertificate
 IncludeOptional /etc/openproject/addons/apache2/custom/server/*.conf
 ```
 
-아래 앱 전용 설정 파일을 만듭니다. 실제 도메인과 인증서 경로의 `<실제-도메인>`을 모두 교체하세요.
+아래 앱 전용 설정 파일을 만듭니다. 인증서 경로가 실제 인증서 및 개인 키 파일과 일치하는지 확인하세요.
 
 ```bash
 sudo install -d -o root -g root -m 755 /etc/openproject/addons/apache2/custom/server
@@ -155,12 +164,12 @@ sudo nano /etc/openproject/addons/apache2/custom/server/installed-management-htt
 
 ```apache
 <VirtualHost *:443>
-    ServerName <실제-도메인>
+    ServerName 61.105.141.21
     DocumentRoot /var/www/html
 
     SSLEngine on
-    SSLCertificateFile /etc/letsencrypt/live/<실제-도메인>/fullchain.pem
-    SSLCertificateKeyFile /etc/letsencrypt/live/<실제-도메인>/privkey.pem
+    SSLCertificateFile /etc/ssl/installed-management/fullchain.pem
+    SSLCertificateKeyFile /etc/ssl/installed-management/privkey.pem
     SetEnv HTTPS on
 
     Alias /installed-management /home/jihyun/proj/github/work/InstalledManagementVersion/public
@@ -189,14 +198,17 @@ sudo mv /etc/openproject/addons/apache2/custom/vhost/installed-management.conf \
 
 ### 6. 문법 검사 후 안전하게 반영
 
-먼저 Apache 설정 문법과 인증서 파일을 확인합니다. 도메인 자리표시자가 남아 있거나 인증서 경로가 실제 파일과 다르면 진행하지 마세요.
+먼저 인증서 SAN과 인증서/개인 키 파일, Apache 설정 문법을 확인합니다. IP SAN이 없거나 파일 경로가 실제 파일과 다르면 진행하지 마세요.
 
 ```bash
-DOMAIN=installed.example.com
-sudo test -s "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
-sudo test -s "/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
+openssl x509 -in /etc/ssl/installed-management/fullchain.pem \
+  -noout -ext subjectAltName
+sudo test -s /etc/ssl/installed-management/fullchain.pem
+sudo test -s /etc/ssl/installed-management/privkey.pem
 sudo apache2ctl configtest
 ```
+
+인증서 출력에 `IP Address:61.105.141.21`이 있는지 확인한 뒤 진행합니다.
 
 `AH01574: module dav_module is already loaded` 또는 `AH00558: apache2: Could not reliably determine the server's fully qualified domain name` 경고만 표시되더라도 마지막에 `Syntax OK`가 나오면 문법 검사는 통과한 것입니다. 이 앱을 연결하기 위해 기존 DAV 설정이나 전역 `ServerName`을 변경하지 마세요. `Syntax OK`가 나오지 않으면 reload하지 말고 오류를 해결합니다.
 
@@ -207,7 +219,7 @@ sudo systemctl reload apache2
 sudo systemctl --no-pager --full status apache2
 ```
 
-도메인의 DNS가 서버 IP를 가리키고, 네트워크 방화벽에서 TCP 443이 허용되어 있는지 확인합니다. 스마트폰 브라우저에서 `https://<실제-도메인>/installed-management/`를 열고 인증서 경고가 없는지 확인합니다. 기본 암호 `jjh1234`로 로그인한 뒤 바로 암호 변경 명령을 실행하세요. 화면과 설치 정보 조회를 확인하고 테스트 기록을 저장한 뒤 `data/installed-management.sqlite`가 생성되는지 확인합니다. `http://<서버-IP>:9230/installed-management/`는 더 이상 앱 접속 주소로 사용하지 않습니다.
+네트워크 방화벽에서 TCP 443이 허용되어 있는지 확인합니다. 스마트폰 브라우저에서 `https://61.105.141.21/installed-management/`를 열고 인증서 경고가 없는지 확인합니다. 기본 암호 `jjh1234`로 로그인한 뒤 바로 암호 변경 명령을 실행하세요. 화면과 설치 정보 조회를 확인하고 테스트 기록을 저장한 뒤 `data/installed-management.sqlite`가 생성되는지 확인합니다. `http://61.105.141.21:9230/installed-management/`는 더 이상 앱 접속 주소로 사용하지 않습니다.
 
 ### 로그인 암호 변경
 
@@ -219,7 +231,7 @@ sudo php /home/jihyun/proj/github/work/InstalledManagementVersion/bin/set-passwo
 
 암호 해시는 `data/password.hash`에 해시 형태로 저장되며 웹 공개 디렉터리 밖에 있고 Git에도 포함되지 않습니다. Apache의 `www-data` 계정이 읽을 수 있도록 명령은 `sudo`로 실행해야 합니다. 암호 변경 후 Apache 재시작은 필요하지 않습니다. 다른 계정에 설치한 경우 명령 경로의 `/home/jihyun`을 실제 경로로 바꾸세요.
 
-HTTPS 인증서가 만료되거나 도메인과 일치하지 않으면 로그인하지 말고 인증서/갱신 설정을 먼저 확인합니다. HTTPS 연결에서 앱은 PHP 세션 쿠키에 `Secure`, `HttpOnly`, `SameSite=Strict` 속성을 설정합니다. HTTPS로 암호화하더라도 서버와 애플리케이션을 최신 상태로 유지하고, 관리자 암호를 강하게 설정하세요. `Require all granted`를 사용하므로 네트워크 방화벽에서 필요한 포트만 허용하고 서버 관리 인터페이스는 외부에 노출하지 않는 것이 좋습니다.
+HTTPS 인증서가 만료되거나 `61.105.141.21` IP SAN이 없거나 스마트폰에서 신뢰되지 않으면 로그인하지 말고 인증서/갱신 설정을 먼저 확인합니다. HTTPS 연결에서 앱은 PHP 세션 쿠키에 `Secure`, `HttpOnly`, `SameSite=Strict` 속성을 설정합니다. HTTPS로 암호화하더라도 서버와 애플리케이션을 최신 상태로 유지하고, 관리자 암호를 강하게 설정하세요. `Require all granted`를 사용하므로 네트워크 방화벽에서 필요한 포트만 허용하고 서버 관리 인터페이스는 외부에 노출하지 않는 것이 좋습니다.
 
 서버에서 로그를 확인하려면 다음을 사용합니다.
 

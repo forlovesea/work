@@ -223,20 +223,41 @@ function currentModuleCounts() {
     return [...rackModules.querySelectorAll('select')].map((select) => Number(select.value));
 }
 
-function renderRackModules(count, selectedCounts = []) {
+function defaultRackName(index) {
+    return `랙 ${String(index + 1).padStart(2, '0')}`;
+}
+
+function currentRackNames() {
+    return [...rackModules.querySelectorAll('.rack-name')].map((input, index) =>
+        input.value.trim() || defaultRackName(index));
+}
+
+function recordRackName(record, index) {
+    return record.rack_names?.[index] || defaultRackName(index);
+}
+
+function renderRackModules(count, selectedCounts = [], selectedNames = []) {
     rackModules.replaceChildren();
 
     for (let index = 0; index < count; index += 1) {
-        const label = document.createElement('label');
+        const label = document.createElement('div');
         label.className = 'rack-card';
 
-        const rackName = document.createElement('span');
+        const rackName = document.createElement('input');
         rackName.className = 'rack-name';
-        rackName.textContent = `랙 ${String(index + 1).padStart(2, '0')}`;
+        rackName.type = 'text';
+        rackName.maxLength = 100;
+        rackName.value = selectedNames[index] ?? defaultRackName(index);
+        rackName.placeholder = defaultRackName(index);
+        rackName.setAttribute('aria-label', `${index + 1}번째 랙 이름`);
 
         const select = document.createElement('select');
         select.className = 'module-select';
         select.setAttribute('aria-label', `랙 ${index + 1} 모듈 수`);
+        rackName.addEventListener('input', () => {
+            select.setAttribute('aria-label', `${rackName.value.trim() || defaultRackName(index)} 모듈 수`);
+        });
+        select.setAttribute('aria-label', `${rackName.value.trim() || defaultRackName(index)} 모듈 수`);
         for (let modules = 1; modules <= 10; modules += 1) {
             const option = document.createElement('option');
             option.value = String(modules);
@@ -351,7 +372,7 @@ function applyPreviousRecord() {
     existingVersionInput.value = record.existing_version;
     upgradeVersionInput.value = record.upgrade_version;
     rackCountInput.value = String(record.rack_count);
-    renderRackModules(record.rack_count, record.module_counts);
+    renderRackModules(record.rack_count, record.module_counts, record.rack_names);
     fillAdditionalFields(record);
     visitDateInput.value = today();
     setFormMessage('이전 입력값을 불러왔습니다. 방문 날짜와 내용을 확인해 주세요.');
@@ -384,7 +405,7 @@ function currentFilterSummary() {
 
 function moduleSummary(record) {
     return record.module_counts
-        .map((count, index) => `${index + 1}번 랙 ${count}대`)
+        .map((count, index) => `${recordRackName(record, index)} ${count}대`)
         .join(', ');
 }
 
@@ -967,7 +988,7 @@ function renderImportPreview(records, errors) {
         const heading = document.createElement('strong');
         heading.textContent = `${record.source_row}행 · ${record.visit_date} · ${record.device_name}`;
         const detail = document.createElement('span');
-        detail.textContent = `${record.existing_version} → ${record.upgrade_version} · 랙 ${record.rack_count}개 · 모듈 ${record.module_counts.join(', ')}`;
+        detail.textContent = `${record.existing_version} → ${record.upgrade_version} · 랙 ${record.rack_count}개 · 모듈 ${moduleSummary(record)}`;
         row.append(heading, detail);
         importRows.append(row);
     }
@@ -1296,7 +1317,7 @@ function createRecordCard(record) {
     const moduleSummary = document.createElement('span');
     moduleSummary.className = 'module-summary';
     moduleSummary.textContent = record.module_counts
-        .map((count, index) => `${index + 1}번 ${count}대`)
+        .map((count, index) => `${recordRackName(record, index)} ${count}대`)
         .join(' · ');
     const editButton = document.createElement('button');
     editButton.className = 'record-edit-button';
@@ -1346,7 +1367,7 @@ function startEditingRecord(record) {
     existingVersionInput.value = record.existing_version;
     upgradeVersionInput.value = record.upgrade_version;
     rackCountInput.value = String(record.rack_count);
-    renderRackModules(record.rack_count, record.module_counts);
+    renderRackModules(record.rack_count, record.module_counts, record.rack_names);
     previousRecordSelect.value = '';
     setEditMode(record.id);
     fillAdditionalFields(record);
@@ -1522,7 +1543,7 @@ function createActivityCard(activity) {
         }
     } else if (details.record) {
         const record = details.record;
-        detailLines.push(`랙 ${record.rack_count}개 · 모듈 ${record.module_counts.join(', ')}`);
+        detailLines.push(`랙 ${record.rack_count}개 · 모듈 ${moduleSummary(record)}`);
     }
     if (detailLines.length > 0) {
         const detailList = document.createElement('div');
@@ -1668,10 +1689,9 @@ function deleteFilteredRecords() {
 rackCountInput.addEventListener('input', () => {
     const count = Number(rackCountInput.value);
     if (!Number.isInteger(count) || count < 1 || count > 100) {
-        rackModules.replaceChildren();
         return;
     }
-    renderRackModules(count, currentModuleCounts());
+    renderRackModules(count, currentModuleCounts(), currentRackNames());
 });
 
 loginForm.addEventListener('submit', async (event) => {
@@ -1834,6 +1854,7 @@ recordForm.addEventListener('submit', async (event) => {
             upgrade_version: upgradeVersionInput.value,
             rack_count: Number(rackCountInput.value),
             module_counts: currentModuleCounts(),
+            rack_names: currentRackNames(),
             site_name: siteNameInput.value.trim(),
             address: siteAddressInput.value.trim(),
             contacts: [...contactList.children].map((row) => ({

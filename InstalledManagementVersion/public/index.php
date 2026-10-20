@@ -200,7 +200,7 @@ try {
                     <div class="rack-heading">
                         <div>
                             <h3 id="rack-title">축전지 랙 구성</h3>
-                            <p>랙별 설치 모듈 수를 선택하세요. 모듈은 랙마다 1~10대입니다.</p>
+                            <p>랙 이름을 수정하고 설치 모듈 수를 선택하세요. 이름을 비우면 기본 이름이 사용됩니다. 모듈은 랙마다 1~10대입니다.</p>
                         </div>
                         <label class="rack-count-field">
                             <span>랙 수</span>

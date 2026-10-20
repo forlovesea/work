@@ -10,10 +10,24 @@ const rackModules = document.querySelector('#rackModules');
 const formMessage = document.querySelector('#formMessage');
 const saveButton = document.querySelector('#saveButton');
 const previousRecordSelect = document.querySelector('#previousRecordSelect');
+const downloadTemplateButton = document.querySelector('#downloadTemplateButton');
+const importFile = document.querySelector('#importFile');
+const importPreview = document.querySelector('#importPreview');
+const importSummary = document.querySelector('#importSummary');
+const importMessage = document.querySelector('#importMessage');
+const importErrors = document.querySelector('#importErrors');
+const importRows = document.querySelector('#importRows');
+const applyImportButton = document.querySelector('#applyImportButton');
 const entryTab = document.querySelector('#entryTab');
 const queryTab = document.querySelector('#queryTab');
+const activityTab = document.querySelector('#activityTab');
 const entryPanel = document.querySelector('#entryPanel');
 const queryPanel = document.querySelector('#queryPanel');
+const activityPanel = document.querySelector('#activityPanel');
+const activityCount = document.querySelector('#activityCount');
+const refreshActivityButton = document.querySelector('#refreshActivityButton');
+const activityMessage = document.querySelector('#activityMessage');
+const activityList = document.querySelector('#activityList');
 const dateModeInputs = [...document.querySelectorAll('input[name="dateMode"]')];
 const singleDateFields = document.querySelector('#singleDateFields');
 const dateRangeFields = document.querySelector('#dateRangeFields');
@@ -26,6 +40,13 @@ const filterMessage = document.querySelector('#filterMessage');
 const refreshButton = document.querySelector('#refreshButton');
 const historyList = document.querySelector('#historyList');
 const recordCount = document.querySelector('#recordCount');
+const selectAllRecords = document.querySelector('#selectAllRecords');
+const selectedCount = document.querySelector('#selectedCount');
+const deleteSelectedButton = document.querySelector('#deleteSelectedButton');
+const deleteFilteredButton = document.querySelector('#deleteFilteredButton');
+const recordActionMessage = document.querySelector('#recordActionMessage');
+const cancelEditButton = document.querySelector('#cancelEditButton');
+const formTitle = document.querySelector('#form-title');
 const exportFormat = document.querySelector('#exportFormat');
 const reportOption = document.querySelector('#reportOption');
 const reportFormat = document.querySelector('#reportFormat');
@@ -37,6 +58,15 @@ let savedRecords = [];
 let displayedRecords = [];
 let filterTimer;
 let requestSequence = 0;
+let activityRequestSequence = 0;
+let importReadSequence = 0;
+let pendingImportRecords = [];
+let importValidationErrors = [];
+let selectedRecordIds = new Set();
+let displayedFilterParams = {};
+let isLoadingRecords = false;
+let isMutatingRecords = false;
+let editingRecordId = null;
 
 function today() {
     const now = new Date();
@@ -370,6 +400,505 @@ function createZip(files) {
     });
 }
 
+function createTemplateCell(reference, value, style = '') {
+    const styleAttribute = style ? ` s="${style}"` : '';
+    if (value === '') {
+        return `<c r="${reference}"${styleAttribute}/>`;
+    }
+    return `<c r="${reference}" t="inlineStr"${styleAttribute}><is><t xml:space="preserve">${xmlEscape(value)}</t></is></c>`;
+}
+
+function downloadImportTemplate() {
+    const headers = [
+        '현장방문날짜',
+        '장비명',
+        '기존 설치 버전',
+        '업그레이드 버전',
+        '축전지 랙 수',
+        '랙별 모듈 수 (쉼표 구분)',
+    ];
+    const dataRows = [
+        `<row r="1" ht="30" customHeight="1">${headers.map((value, index) => (
+            createTemplateCell(`${columnName(index)}1`, value, '1')
+        )).join('')}</row>`,
+        ...Array.from({ length: 100 }, (_, rowIndex) => {
+            const rowNumber = rowIndex + 2;
+            const cells = headers.map((_, columnIndex) => (
+                createTemplateCell(`${columnName(columnIndex)}${rowNumber}`, '', '2')
+            )).join('');
+            return `<row r="${rowNumber}" ht="24" customHeight="1">${cells}</row>`;
+        }),
+    ].join('');
+    const instructionRows = [
+        ['작성 안내', '내용'],
+        ['입력 방법', '첫 번째 시트 "설치 정보"의 2행부터 현장별로 한 줄씩 입력하세요.'],
+        ['현장방문날짜', 'YYYY-MM-DD 형식으로 입력하세요. 예: 2026-10-20'],
+        ['장비명', 'Door LCD, SMU02C 또는 등록할 장비명을 입력하세요.'],
+        ['버전', '기존 설치 버전과 업그레이드 버전을 빠짐없이 입력하세요.'],
+        ['축전지 랙 수', '1~100 사이의 정수로 입력하세요.'],
+        ['랙별 모듈 수', '랙 순서대로 1~10 사이 숫자를 쉼표로 구분하세요. 예: 랙 수 3, 값 4,5,3'],
+        ['등록 제한', '한 번 업로드할 때 최대 100개 현장을 등록합니다. 빈 행은 무시합니다.'],
+        ['주의', '열 제목을 수정하거나 삭제하지 마세요. 업로드 전에 화면에서 모든 행의 검증 결과를 확인합니다.'],
+    ];
+    const guidanceRows = instructionRows.map((row, rowIndex) => (
+        `<row r="${rowIndex + 1}" ht="${rowIndex === 0 ? 28 : 34}" customHeight="1">${
+            row.map((value, columnIndex) => createTemplateCell(
+                `${columnName(columnIndex)}${rowIndex + 1}`,
+                value,
+                rowIndex === 0 ? '1' : (columnIndex === 0 ? '3' : '2'),
+            )).join('')
+        }</row>`
+    )).join('');
+    const files = [
+        {
+            name: '[Content_Types].xml',
+            content: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>',
+        },
+        {
+            name: '_rels/.rels',
+            content: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>',
+        },
+        {
+            name: 'xl/workbook.xml',
+            content: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><bookViews><workbookView xWindow="0" yWindow="0" windowWidth="24000" windowHeight="12000" activeTab="0"/></bookViews><sheets><sheet name="설치 정보" sheetId="1" r:id="rId1"/><sheet name="작성 안내" sheetId="2" r:id="rId2"/></sheets></workbook>',
+        },
+        {
+            name: 'xl/_rels/workbook.xml.rels',
+            content: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>',
+        },
+        {
+            name: 'xl/styles.xml',
+            content: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="164" formatCode="@"/></numFmts><fonts count="2"><font><sz val="11"/><name val="맑은 고딕"/></font><font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="맑은 고딕"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF3157B7"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="4"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyAlignment="1"><alignment vertical="center"/></xf><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>',
+        },
+        {
+            name: 'xl/worksheets/sheet1.xml',
+            content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols><col min="1" max="1" width="18" customWidth="1"/><col min="2" max="4" width="22" customWidth="1"/><col min="5" max="5" width="16" customWidth="1"/><col min="6" max="6" width="34" customWidth="1"/></cols><sheetData>${dataRows}</sheetData><autoFilter ref="A1:F101"/></worksheet>`,
+        },
+        {
+            name: 'xl/worksheets/sheet2.xml',
+            content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><cols><col min="1" max="1" width="22" customWidth="1"/><col min="2" max="2" width="82" customWidth="1"/></cols><sheetData>${guidanceRows}</sheetData></worksheet>`,
+        },
+    ];
+    downloadBlob(createZip(files), '설치정보_일괄등록_템플릿.xlsx');
+}
+
+function parseXml(bytes, label) {
+    const xml = new DOMParser().parseFromString(new TextDecoder('utf-8').decode(bytes), 'application/xml');
+    if (xml.getElementsByTagName('parsererror').length > 0) {
+        throw new Error(`${label} XML을 읽을 수 없습니다.`);
+    }
+    return xml;
+}
+
+function packagePath(basePath, target) {
+    const path = target.startsWith('/')
+        ? target.slice(1)
+        : `${basePath.slice(0, basePath.lastIndexOf('/') + 1)}${target}`;
+    const parts = [];
+    for (const part of path.split('/')) {
+        if (part === '..') {
+            parts.pop();
+        } else if (part && part !== '.') {
+            parts.push(part);
+        }
+    }
+    return parts.join('/');
+}
+
+async function inflateRaw(data) {
+    let reader;
+    try {
+        const stream = new Blob([data]).stream()
+            .pipeThrough(new DecompressionStream('deflate-raw'));
+        reader = stream.getReader();
+    } catch {
+        throw new Error('Excel 파일 압축을 해제할 수 없습니다. 최신 브라우저에서 다시 시도해 주세요.');
+    }
+
+    const chunks = [];
+    let size = 0;
+    try {
+        while (true) {
+            const result = await reader.read();
+            if (result.done) {
+                break;
+            }
+            size += result.value.length;
+            if (size > 20 * 1024 * 1024) {
+                await reader.cancel();
+                throw new Error('압축 해제 후 파일 크기가 제한(20MB)을 초과합니다.');
+            }
+            chunks.push(result.value);
+        }
+    } catch (error) {
+        if (error.message === '압축 해제 후 파일 크기가 제한(20MB)을 초과합니다.') {
+            throw error;
+        }
+        throw new Error('Excel 파일 압축을 해제할 수 없습니다. 최신 브라우저에서 다시 시도해 주세요.');
+    }
+
+    const output = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) {
+        output.set(chunk, offset);
+        offset += chunk.length;
+    }
+    return output;
+}
+
+async function readXlsxEntries(file) {
+    if (file.size > 5 * 1024 * 1024) {
+        throw new Error('Excel 파일은 5MB 이하만 업로드할 수 있습니다.');
+    }
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const minimumEndOffset = Math.max(0, bytes.length - 22 - 65535);
+    let endOffset = -1;
+    for (let offset = bytes.length - 22; offset >= minimumEndOffset; offset -= 1) {
+        if (view.getUint32(offset, true) === 0x06054b50) {
+            endOffset = offset;
+            break;
+        }
+    }
+    if (endOffset < 0) {
+        throw new Error('올바른 XLSX 파일이 아닙니다. Excel 통합 문서(.xlsx)를 선택해 주세요.');
+    }
+
+    const diskNumber = view.getUint16(endOffset + 4, true);
+    const centralDisk = view.getUint16(endOffset + 6, true);
+    const entryCount = view.getUint16(endOffset + 10, true);
+    const centralSize = view.getUint32(endOffset + 12, true);
+    let offset = view.getUint32(endOffset + 16, true);
+    if (diskNumber !== 0 || centralDisk !== 0 || entryCount > 1000 ||
+        offset + centralSize > endOffset) {
+        throw new Error('분할되었거나 지원하지 않는 XLSX 파일입니다.');
+    }
+
+    const entries = new Map();
+    let totalUncompressedSize = 0;
+    for (let index = 0; index < entryCount; index += 1) {
+        const entryOffset = offset;
+        if (offset + 46 > bytes.length || view.getUint32(offset, true) !== 0x02014b50) {
+            throw new Error('Excel 파일의 ZIP 구성이 올바르지 않습니다.');
+        }
+        const flags = view.getUint16(offset + 8, true);
+        const method = view.getUint16(offset + 10, true);
+        const compressedSize = view.getUint32(offset + 20, true);
+        const uncompressedSize = view.getUint32(offset + 24, true);
+        const nameLength = view.getUint16(offset + 28, true);
+        const extraLength = view.getUint16(offset + 30, true);
+        const commentLength = view.getUint16(offset + 32, true);
+        const localOffset = view.getUint32(offset + 42, true);
+        const name = new TextDecoder('utf-8').decode(bytes.subarray(offset + 46, offset + 46 + nameLength));
+        offset += 46 + nameLength + extraLength + commentLength;
+
+        if ((flags & 1) !== 0 || (method !== 0 && method !== 8) ||
+            compressedSize === 0xffffffff || uncompressedSize === 0xffffffff ||
+            localOffset + 30 > bytes.length) {
+            throw new Error('암호화되었거나 지원하지 않는 압축 형식의 Excel 파일입니다.');
+        }
+        totalUncompressedSize += uncompressedSize;
+        if (totalUncompressedSize > 20 * 1024 * 1024) {
+            throw new Error('압축 해제 후 파일 크기가 제한(20MB)을 초과합니다.');
+        }
+        if (view.getUint32(localOffset, true) !== 0x04034b50) {
+            throw new Error('Excel 파일의 ZIP 항목이 손상되었습니다.');
+        }
+        const localNameLength = view.getUint16(localOffset + 26, true);
+        const localExtraLength = view.getUint16(localOffset + 28, true);
+        const dataOffset = localOffset + 30 + localNameLength + localExtraLength;
+        if (dataOffset + compressedSize > bytes.length) {
+            throw new Error('Excel 파일의 ZIP 데이터가 손상되었습니다.');
+        }
+        const compressedData = bytes.subarray(dataOffset, dataOffset + compressedSize);
+        let content;
+        if (method === 0) {
+            content = compressedData;
+        } else {
+            if (typeof DecompressionStream !== 'function') {
+                throw new Error('이 브라우저는 XLSX 압축 해제를 지원하지 않습니다. 최신 Chrome, Edge 또는 Safari를 사용해 주세요.');
+            }
+            content = await inflateRaw(compressedData);
+        }
+        if (content.length !== uncompressedSize || crc32(content) !== view.getUint32(entryOffset + 16, true)) {
+            throw new Error('Excel 파일이 손상되었거나 올바르지 않습니다.');
+        }
+        if (entries.has(name)) {
+            throw new Error('Excel 파일에 중복된 ZIP 항목이 있습니다.');
+        }
+        entries.set(name, content);
+    }
+    return entries;
+}
+
+function parseSharedStrings(xml) {
+    return [...xml.getElementsByTagNameNS('*', 'si')].map((item) => (
+        [...item.getElementsByTagNameNS('*', 't')].map((text) => text.textContent || '').join('')
+    ));
+}
+
+function getCellValue(cell, sharedStrings) {
+    const type = cell.getAttribute('t');
+    if (type === 'inlineStr') {
+        return [...cell.getElementsByTagNameNS('*', 't')]
+            .map((text) => text.textContent || '')
+            .join('');
+    }
+    const valueNode = cell.getElementsByTagNameNS('*', 'v')[0];
+    const value = valueNode?.textContent ?? '';
+    if (type === 's') {
+        const index = Number(value);
+        if (!Number.isInteger(index) || index < 0 || index >= sharedStrings.length) {
+            throw new Error('Excel 공유 문자열 인덱스가 올바르지 않습니다.');
+        }
+        return sharedStrings[index];
+    }
+    return value;
+}
+
+function columnIndexFromReference(reference) {
+    const letters = reference.match(/^[A-Z]+/i)?.[0];
+    if (!letters) {
+        return -1;
+    }
+    let index = 0;
+    for (const letter of letters.toUpperCase()) {
+        index = index * 26 + letter.charCodeAt(0) - 64;
+    }
+    return index - 1;
+}
+
+function parseImportRows(sheetXml, sharedStrings) {
+    const rows = [...sheetXml.getElementsByTagNameNS('*', 'row')];
+    if (rows.length === 0 || Number(rows[0].getAttribute('r') || 1) !== 1) {
+        throw new Error('첫 번째 행에는 템플릿의 열 제목이 있어야 합니다.');
+    }
+    const expectedHeaders = [
+        '현장방문날짜',
+        '장비명',
+        '기존 설치 버전',
+        '업그레이드 버전',
+        '축전지 랙 수',
+        '랙별 모듈 수 (쉼표 구분)',
+    ];
+    const headerValues = [];
+    for (const cell of rows[0].getElementsByTagNameNS('*', 'c')) {
+        const column = columnIndexFromReference(cell.getAttribute('r') || '');
+        if (column >= 0) {
+            headerValues[column] = getCellValue(cell, sharedStrings).trim();
+        }
+    }
+    const missingHeaders = expectedHeaders.filter((header) => !headerValues.includes(header));
+    if (missingHeaders.length > 0 || expectedHeaders.some((header, index) => headerValues[index] !== header)) {
+        throw new Error('열 제목이 템플릿과 다릅니다. 열 제목을 바꾸지 말고 새 템플릿을 내려받아 주세요.');
+    }
+
+    const records = [];
+    const errors = [];
+    for (const [rowIndex, row] of rows.slice(1).entries()) {
+        const rowNumber = Number(row.getAttribute('r')) || rowIndex + 2;
+        const values = [];
+        for (const cell of row.getElementsByTagNameNS('*', 'c')) {
+            const column = columnIndexFromReference(cell.getAttribute('r') || '');
+            if (column >= expectedHeaders.length) {
+                if (getCellValue(cell, sharedStrings).trim() !== '') {
+                    errors.push({ row: rowNumber, message: '템플릿에 없는 열에 값이 있습니다.' });
+                }
+            } else if (column >= 0) {
+                values[column] = getCellValue(cell, sharedStrings).trim();
+            }
+        }
+        if (!values.some((value) => value)) {
+            continue;
+        }
+        if (records.length >= 100) {
+            errors.push({ row: rowNumber, message: '한 번에 최대 100개 현장까지만 등록할 수 있습니다.' });
+            continue;
+        }
+
+        const [visitDate, deviceName, existingVersion, upgradeVersion, rackCountText, moduleCountsText] = values;
+        const rackCount = /^\d+$/.test(rackCountText || '') ? Number(rackCountText) : NaN;
+        const moduleCounts = (moduleCountsText || '').split(',').map((value) => (
+            /^\d+$/.test(value.trim()) ? Number(value.trim()) : NaN
+        ));
+        const parsedDate = /^\d{4}-\d{2}-\d{2}$/.test(visitDate || '')
+            ? new Date(`${visitDate}T00:00:00Z`)
+            : null;
+        if (!parsedDate || Number.isNaN(parsedDate.getTime()) ||
+            parsedDate.toISOString().slice(0, 10) !== visitDate) {
+            errors.push({ row: rowNumber, message: '현장방문날짜는 실제 날짜인 YYYY-MM-DD 형식이어야 합니다.' });
+        }
+        for (const [value, label, maxLength] of [
+            [deviceName, '장비명', 100],
+            [existingVersion, '기존 설치 버전', 50],
+            [upgradeVersion, '업그레이드 버전', 50],
+        ]) {
+            if (!value || [...value].length > maxLength) {
+                errors.push({ row: rowNumber, message: `${label}을(를) 입력하고 ${maxLength}자 이내로 작성하세요.` });
+            }
+        }
+        if (!Number.isInteger(rackCount) || rackCount < 1 || rackCount > 100) {
+            errors.push({ row: rowNumber, message: '축전지 랙 수는 1~100 사이의 정수여야 합니다.' });
+        }
+        if (!moduleCountsText || !moduleCounts.every((count) => Number.isInteger(count) && count >= 1 && count <= 10)) {
+            errors.push({ row: rowNumber, message: '랙별 모듈 수는 쉼표로 구분한 1~10 사이의 정수여야 합니다.' });
+        } else if (moduleCounts.length !== rackCount) {
+            errors.push({ row: rowNumber, message: '랙 수와 쉼표로 구분한 모듈 수의 개수가 일치해야 합니다.' });
+        }
+        records.push({
+            visit_date: visitDate || '',
+            device_name: deviceName || '',
+            existing_version: existingVersion || '',
+            upgrade_version: upgradeVersion || '',
+            rack_count: rackCount,
+            module_counts: moduleCounts,
+            source_row: rowNumber,
+        });
+    }
+
+    if (records.length === 0 && errors.length === 0) {
+        errors.push({ row: null, message: '등록할 현장 정보가 없습니다. 두 번째 행부터 값을 입력하세요.' });
+    }
+    return { records, errors };
+}
+
+async function readImportWorkbook(file) {
+    const entries = await readXlsxEntries(file);
+    const workbookBytes = entries.get('xl/workbook.xml');
+    const relationshipsBytes = entries.get('xl/_rels/workbook.xml.rels');
+    if (!workbookBytes || !relationshipsBytes) {
+        throw new Error('Excel 통합 문서 구조가 올바르지 않습니다.');
+    }
+    const workbook = parseXml(workbookBytes, '통합 문서');
+    const relationships = parseXml(relationshipsBytes, '통합 문서 관계');
+    const sheet = [...workbook.getElementsByTagNameNS('*', 'sheet')]
+        .find((item) => item.getAttribute('name') === '설치 정보');
+    if (!sheet) {
+        throw new Error('"설치 정보" 시트를 찾을 수 없습니다. 제공된 템플릿을 사용해 주세요.');
+    }
+    const relationshipId = sheet.getAttributeNS(
+        'http://schemas.openxmlformats.org/officeDocument/2006/relationships',
+        'id',
+    );
+    const relation = [...relationships.getElementsByTagNameNS('*', 'Relationship')]
+        .find((item) => item.getAttribute('Id') === relationshipId);
+    if (!relation) {
+        throw new Error('설치 정보 시트 연결을 찾을 수 없습니다.');
+    }
+    const sheetPath = packagePath('xl/workbook.xml', relation.getAttribute('Target'));
+    const sheetBytes = entries.get(sheetPath);
+    if (!sheetBytes) {
+        throw new Error('설치 정보 시트 데이터를 찾을 수 없습니다.');
+    }
+    const sharedStringsBytes = entries.get('xl/sharedStrings.xml');
+    const sharedStrings = sharedStringsBytes
+        ? parseSharedStrings(parseXml(sharedStringsBytes, '공유 문자열'))
+        : [];
+    return parseImportRows(parseXml(sheetBytes, '설치 정보 시트'), sharedStrings);
+}
+
+function renderImportPreview(records, errors) {
+    pendingImportRecords = records;
+    importValidationErrors = errors;
+    importPreview.hidden = false;
+    importSummary.textContent = `${records.length}개 현장 · ${errors.length}개 오류`;
+    importMessage.textContent = errors.length > 0
+        ? '오류가 하나라도 있으면 등록할 수 없습니다. Excel의 해당 행을 수정한 뒤 다시 업로드하세요.'
+        : '아래 내용을 확인하세요. 등록을 누르면 모든 현장이 한 번에 저장됩니다.';
+    importMessage.classList.toggle('is-error', errors.length > 0);
+    applyImportButton.disabled = records.length === 0 || errors.length > 0;
+    importErrors.replaceChildren();
+    for (const error of errors) {
+        const item = document.createElement('li');
+        item.textContent = `${error.row ? `${error.row}행: ` : ''}${error.message}`;
+        importErrors.append(item);
+    }
+    importRows.replaceChildren();
+    for (const record of records) {
+        const row = document.createElement('article');
+        row.className = 'import-row';
+        const heading = document.createElement('strong');
+        heading.textContent = `${record.source_row}행 · ${record.visit_date} · ${record.device_name}`;
+        const detail = document.createElement('span');
+        detail.textContent = `${record.existing_version} → ${record.upgrade_version} · 랙 ${record.rack_count}개 · 모듈 ${record.module_counts.join(', ')}`;
+        row.append(heading, detail);
+        importRows.append(row);
+    }
+}
+
+async function handleImportFileChange() {
+    const requestId = ++importReadSequence;
+    const file = importFile.files?.[0];
+    pendingImportRecords = [];
+    importValidationErrors = [];
+    importPreview.hidden = !file;
+    if (!file) {
+        return;
+    }
+
+    applyImportButton.disabled = true;
+    importSummary.textContent = 'Excel 파일을 확인하고 있습니다.';
+    importMessage.textContent = '';
+    importErrors.replaceChildren();
+    importRows.replaceChildren();
+    try {
+        const result = await readImportWorkbook(file);
+        if (requestId !== importReadSequence) {
+            return;
+        }
+        renderImportPreview(result.records, result.errors);
+    } catch (error) {
+        if (requestId !== importReadSequence) {
+            return;
+        }
+        renderImportPreview([], [{ row: null, message: error.message }]);
+    }
+}
+
+async function applyImport() {
+    if (pendingImportRecords.length === 0 || importValidationErrors.length > 0) {
+        return;
+    }
+    applyImportButton.disabled = true;
+    importMessage.classList.remove('is-error');
+    importMessage.textContent = '일괄 등록 중입니다. 창을 닫지 마세요.';
+    try {
+        const response = await fetch('api.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({
+                action: 'bulk_create',
+                records: pendingImportRecords,
+            }),
+        });
+        const result = await response.json();
+        if (!response.ok) {
+            if (Array.isArray(result.row_errors)) {
+                const errors = result.row_errors.flatMap((rowError) => (
+                    rowError.messages.map((message) => ({
+                        row: rowError.row,
+                        message,
+                    }))
+                ));
+                renderImportPreview(pendingImportRecords, errors);
+            }
+            throw new Error(result.error || '일괄 등록을 완료하지 못했습니다.');
+        }
+
+        importFile.value = '';
+        importPreview.hidden = true;
+        importRows.replaceChildren();
+        pendingImportRecords = [];
+        importValidationErrors = [];
+        setFormMessage(`${result.created_count}개 현장 기록을 모두 등록했습니다.`);
+        await loadData();
+    } catch (error) {
+        importMessage.textContent = error.message;
+        importMessage.classList.add('is-error');
+        applyImportButton.disabled = pendingImportRecords.length === 0 || importValidationErrors.length > 0;
+    }
+}
+
 function exportExcel() {
     const rows = exportRows();
     const sheetRows = rows.map((row, rowIndex) => {
@@ -572,17 +1101,23 @@ function exportResults() {
 function createRecordCard(record) {
     const article = document.createElement('article');
     article.className = 'record-card';
+    article.dataset.recordId = String(record.id);
 
     const main = document.createElement('div');
     main.className = 'record-main';
     const titleRow = document.createElement('div');
     titleRow.className = 'record-title-row';
+    const selection = document.createElement('input');
+    selection.className = 'record-selection';
+    selection.type = 'checkbox';
+    selection.setAttribute('aria-label', `${record.visit_date} ${record.device_name} 기록 선택`);
+    selection.checked = selectedRecordIds.has(record.id);
     const title = document.createElement('h3');
     title.textContent = record.device_name;
     const date = document.createElement('time');
     date.dateTime = record.visit_date;
     date.textContent = formatDate(record.visit_date);
-    titleRow.append(title, date);
+    titleRow.append(selection, title, date);
 
     const versions = document.createElement('p');
     versions.className = 'record-versions';
@@ -603,9 +1138,73 @@ function createRecordCard(record) {
     moduleSummary.textContent = record.module_counts
         .map((count, index) => `${index + 1}번 ${count}대`)
         .join(' · ');
-    rackSummary.append(rackLabel, moduleSummary);
+    const editButton = document.createElement('button');
+    editButton.className = 'record-edit-button';
+    editButton.type = 'button';
+    editButton.dataset.action = 'edit';
+    editButton.textContent = '수정';
+    editButton.setAttribute('aria-label', `${record.visit_date} ${record.device_name} 설치 기록 수정`);
+    rackSummary.append(rackLabel, moduleSummary, editButton);
     article.append(main, rackSummary);
     return article;
+}
+
+function updateRecordActionControls() {
+    const visibleIds = displayedRecords.map((record) => record.id);
+    const selectedVisibleCount = visibleIds.filter((id) => selectedRecordIds.has(id)).length;
+    selectedCount.textContent = `(${selectedVisibleCount})`;
+    selectAllRecords.checked = visibleIds.length > 0 && selectedVisibleCount === visibleIds.length;
+    selectAllRecords.indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < visibleIds.length;
+    selectAllRecords.disabled = isLoadingRecords || isMutatingRecords || visibleIds.length === 0;
+    deleteSelectedButton.disabled = isLoadingRecords || isMutatingRecords || selectedVisibleCount === 0;
+    deleteFilteredButton.disabled = isLoadingRecords || isMutatingRecords || visibleIds.length === 0;
+}
+
+function setRecordActionMessage(message, isError = false) {
+    recordActionMessage.textContent = message;
+    recordActionMessage.classList.toggle('is-error', isError);
+}
+
+function setEditMode(recordId = null) {
+    editingRecordId = recordId;
+    const isEditing = recordId !== null;
+    formTitle.textContent = isEditing ? '설치 정보 수정' : '설치 정보 입력';
+    saveButton.textContent = isEditing ? '수정 내용 저장' : '＋ 방문 기록 저장';
+    cancelEditButton.hidden = !isEditing;
+}
+
+function startEditingRecord(record) {
+    if (![...deviceSelect.options].some((option) => option.value === record.device_name)) {
+        const option = document.createElement('option');
+        option.value = record.device_name;
+        option.textContent = record.device_name;
+        deviceSelect.insertBefore(option, deviceSelect.lastElementChild);
+    }
+    deviceSelect.value = record.device_name;
+    updateCustomDeviceField();
+    visitDateInput.value = record.visit_date;
+    existingVersionInput.value = record.existing_version;
+    upgradeVersionInput.value = record.upgrade_version;
+    rackCountInput.value = String(record.rack_count);
+    renderRackModules(record.rack_count, record.module_counts);
+    previousRecordSelect.value = '';
+    setEditMode(record.id);
+    setFormMessage(`${record.visit_date} ${record.device_name} 기록을 수정 중입니다.`);
+    setActiveTab('entry');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function resetEntryForm() {
+    recordForm.reset();
+    visitDateInput.value = today();
+    deviceSelect.value = [...deviceSelect.options].some((option) => option.value === 'Door LCD')
+        ? 'Door LCD'
+        : deviceSelect.options[0].value;
+    rackCountInput.value = '1';
+    updateCustomDeviceField();
+    renderRackModules(1);
+    previousRecordSelect.value = '';
+    setEditMode();
 }
 
 function currentDateMode() {
@@ -643,12 +1242,15 @@ function buildQueryString() {
 
 async function loadData() {
     const requestId = ++requestSequence;
+    const queryParams = buildQueryString();
+    isLoadingRecords = true;
+    updateRecordActionControls();
     refreshButton.disabled = true;
     exportButton.disabled = true;
     filterMessage.textContent = '';
 
     try {
-        const response = await fetch(`api.php?${buildQueryString().toString()}`, {
+        const response = await fetch(`api.php?${queryParams.toString()}`, {
             headers: { Accept: 'application/json' },
         });
         const data = await response.json();
@@ -665,6 +1267,9 @@ async function loadData() {
         fillSelect(versionFilter, data.current_versions, '전체 버전');
 
         displayedRecords = data.records;
+        displayedFilterParams = Object.fromEntries(queryParams.entries());
+        const visibleIds = new Set(displayedRecords.map((record) => record.id));
+        selectedRecordIds = new Set([...selectedRecordIds].filter((id) => visibleIds.has(id)));
         exportButton.disabled = displayedRecords.length === 0;
         historyList.replaceChildren();
         recordCount.textContent = `총 ${data.records.length}건`;
@@ -678,12 +1283,14 @@ async function loadData() {
                 historyList.append(createRecordCard(record));
             }
         }
+        updateRecordActionControls();
     } catch (error) {
         if (requestId !== requestSequence) {
             return;
         }
         recordCount.textContent = '기록을 불러오지 못했습니다.';
         displayedRecords = [];
+        selectedRecordIds.clear();
         exportButton.disabled = true;
         historyList.replaceChildren();
         const errorMessage = document.createElement('p');
@@ -691,9 +1298,12 @@ async function loadData() {
         errorMessage.textContent = error.message;
         historyList.append(errorMessage);
         filterMessage.textContent = error.message;
+        updateRecordActionControls();
     } finally {
         if (requestId === requestSequence) {
             refreshButton.disabled = false;
+            isLoadingRecords = false;
+            updateRecordActionControls();
         }
     }
 }
@@ -703,19 +1313,194 @@ function scheduleFilterLoad() {
     filterTimer = window.setTimeout(loadData, 180);
 }
 
+function formatActivityTime(value) {
+    const timestamp = new Date(`${value.replace(' ', 'T')}Z`);
+    if (Number.isNaN(timestamp.getTime())) {
+        return value;
+    }
+    return new Intl.DateTimeFormat('ko-KR', {
+        dateStyle: 'medium',
+        timeStyle: 'medium',
+        timeZone: 'Asia/Seoul',
+    }).format(timestamp);
+}
+
+function createActivityCard(activity) {
+    const labels = {
+        create: '등록',
+        update: '수정',
+        delete: '삭제',
+    };
+    const article = document.createElement('article');
+    article.className = 'activity-item';
+
+    const time = document.createElement('time');
+    time.className = 'activity-time';
+    time.dateTime = `${activity.occurred_at.replace(' ', 'T')}Z`;
+    time.textContent = formatActivityTime(activity.occurred_at);
+
+    const content = document.createElement('div');
+    content.className = 'activity-content';
+    const titleRow = document.createElement('div');
+    titleRow.className = 'activity-title-row';
+    const badge = document.createElement('span');
+    badge.className = `activity-badge is-${activity.action}`;
+    badge.textContent = labels[activity.action] ?? '작업';
+    const summary = document.createElement('strong');
+    summary.className = 'activity-summary';
+    summary.textContent = activity.summary;
+    titleRow.append(badge, summary);
+    content.append(titleRow);
+
+    const details = activity.details ?? {};
+    const detailLines = [];
+    if (activity.action === 'update' && details.changes) {
+        for (const [field, change] of Object.entries(details.changes)) {
+            detailLines.push(`${field}: ${change.before} → ${change.after}`);
+        }
+    } else if (details.record) {
+        const record = details.record;
+        detailLines.push(`랙 ${record.rack_count}개 · 모듈 ${record.module_counts.join(', ')}`);
+    }
+    if (detailLines.length > 0) {
+        const detailList = document.createElement('div');
+        detailList.className = 'activity-details';
+        for (const line of detailLines) {
+            const detail = document.createElement('p');
+            detail.className = 'activity-detail-line';
+            detail.textContent = line;
+            detailList.append(detail);
+        }
+        content.append(detailList);
+    }
+    article.append(time, content);
+    return article;
+}
+
+async function loadActivityLog() {
+    const requestId = ++activityRequestSequence;
+    refreshActivityButton.disabled = true;
+    activityMessage.textContent = '';
+    try {
+        const response = await fetch('api.php?action=activity', {
+            headers: { Accept: 'application/json' },
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.error || '작업 이력을 불러오지 못했습니다.');
+        }
+        if (requestId !== activityRequestSequence) {
+            return;
+        }
+        const activities = data.activities;
+        if (!Array.isArray(activities)) {
+            throw new Error('작업 이력 응답 형식이 올바르지 않습니다.');
+        }
+        activityCount.textContent = `최근 1년 · 총 ${activities.length}건`;
+        activityList.replaceChildren();
+        if (activities.length === 0) {
+            const empty = document.createElement('p');
+            empty.className = 'empty-state';
+            empty.textContent = '최근 1년간 등록·수정·삭제된 작업이 없습니다.';
+            activityList.append(empty);
+        } else {
+            for (const activity of activities) {
+                activityList.append(createActivityCard(activity));
+            }
+        }
+    } catch (error) {
+        if (requestId !== activityRequestSequence) {
+            return;
+        }
+        activityCount.textContent = '작업 이력을 불러오지 못했습니다.';
+        activityList.replaceChildren();
+        const errorMessage = document.createElement('p');
+        errorMessage.className = 'empty-state is-error';
+        errorMessage.textContent = error.message;
+        activityList.append(errorMessage);
+        activityMessage.textContent = error.message;
+    } finally {
+        if (requestId === activityRequestSequence) {
+            refreshActivityButton.disabled = false;
+        }
+    }
+}
+
 function setActiveTab(tab) {
     const showQuery = tab === 'query';
-    entryTab.classList.toggle('is-active', !showQuery);
+    const showActivity = tab === 'activity';
+    entryTab.classList.toggle('is-active', !showQuery && !showActivity);
     queryTab.classList.toggle('is-active', showQuery);
-    entryTab.setAttribute('aria-selected', String(!showQuery));
+    activityTab.classList.toggle('is-active', showActivity);
+    entryTab.setAttribute('aria-selected', String(!showQuery && !showActivity));
     queryTab.setAttribute('aria-selected', String(showQuery));
-    entryTab.tabIndex = showQuery ? -1 : 0;
+    activityTab.setAttribute('aria-selected', String(showActivity));
+    entryTab.tabIndex = showQuery || showActivity ? -1 : 0;
     queryTab.tabIndex = showQuery ? 0 : -1;
-    entryPanel.hidden = showQuery;
+    activityTab.tabIndex = showActivity ? 0 : -1;
+    entryPanel.hidden = showQuery || showActivity;
     queryPanel.hidden = !showQuery;
+    activityPanel.hidden = !showActivity;
     if (showQuery) {
         loadData();
+    } else if (showActivity) {
+        loadActivityLog();
     }
+}
+
+async function deleteRecords(payload, confirmation, progressMessage) {
+    if (!window.confirm(confirmation)) {
+        return;
+    }
+    isMutatingRecords = true;
+    updateRecordActionControls();
+    setRecordActionMessage(progressMessage);
+    try {
+        const response = await fetch('api.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        const result = await response.json();
+        if (!response.ok) {
+            throw new Error(result.error || '설치 기록을 삭제하지 못했습니다.');
+        }
+        selectedRecordIds.clear();
+        setRecordActionMessage(`${result.deleted_count}건의 설치 기록을 삭제했습니다.`);
+        await loadData();
+    } catch (error) {
+        setRecordActionMessage(error.message, true);
+    } finally {
+        isMutatingRecords = false;
+        updateRecordActionControls();
+    }
+}
+
+function deleteSelectedRecords() {
+    const recordIds = displayedRecords
+        .filter((record) => selectedRecordIds.has(record.id))
+        .map((record) => record.id);
+    if (recordIds.length === 0) {
+        setRecordActionMessage('삭제할 기록을 먼저 선택해 주세요.', true);
+        return;
+    }
+    void deleteRecords(
+        { action: 'delete_selected', record_ids: recordIds },
+        `선택한 ${recordIds.length}건의 설치 기록을 삭제할까요? 삭제한 기록은 복구할 수 없습니다.`,
+        `${recordIds.length}건의 선택 기록을 삭제하고 있습니다.`,
+    );
+}
+
+function deleteFilteredRecords() {
+    const count = displayedRecords.length;
+    if (count === 0) {
+        return;
+    }
+    void deleteRecords(
+        { action: 'delete_filtered', filters: displayedFilterParams },
+        `현재 조회 결과 ${count}건을 모두 삭제할까요?\n다른 조회 조건의 기록은 삭제되지 않습니다. 삭제한 기록은 복구할 수 없습니다.`,
+        `현재 조회 조건에 맞는 ${count}건을 삭제하고 있습니다.`,
+    );
 }
 
 rackCountInput.addEventListener('input', () => {
@@ -729,9 +1514,54 @@ rackCountInput.addEventListener('input', () => {
 
 deviceSelect.addEventListener('change', updateCustomDeviceField);
 previousRecordSelect.addEventListener('change', applyPreviousRecord);
+downloadTemplateButton.addEventListener('click', downloadImportTemplate);
+importFile.addEventListener('change', handleImportFileChange);
+applyImportButton.addEventListener('click', applyImport);
 entryTab.addEventListener('click', () => setActiveTab('entry'));
 queryTab.addEventListener('click', () => setActiveTab('query'));
+activityTab.addEventListener('click', () => setActiveTab('activity'));
 refreshButton.addEventListener('click', loadData);
+refreshActivityButton.addEventListener('click', loadActivityLog);
+selectAllRecords.addEventListener('change', () => {
+    for (const record of displayedRecords) {
+        if (selectAllRecords.checked) {
+            selectedRecordIds.add(record.id);
+        } else {
+            selectedRecordIds.delete(record.id);
+        }
+    }
+    for (const checkbox of historyList.querySelectorAll('.record-selection')) {
+        checkbox.checked = selectAllRecords.checked;
+    }
+    updateRecordActionControls();
+});
+deleteSelectedButton.addEventListener('click', deleteSelectedRecords);
+deleteFilteredButton.addEventListener('click', deleteFilteredRecords);
+historyList.addEventListener('change', (event) => {
+    if (!(event.target instanceof HTMLInputElement) || !event.target.matches('.record-selection')) {
+        return;
+    }
+    const recordId = Number(event.target.closest('.record-card')?.dataset.recordId);
+    if (!Number.isInteger(recordId)) {
+        return;
+    }
+    if (event.target.checked) {
+        selectedRecordIds.add(recordId);
+    } else {
+        selectedRecordIds.delete(recordId);
+    }
+    updateRecordActionControls();
+});
+historyList.addEventListener('click', (event) => {
+    if (!(event.target instanceof Element) || !event.target.matches('[data-action="edit"]')) {
+        return;
+    }
+    const recordId = Number(event.target.closest('.record-card')?.dataset.recordId);
+    const record = displayedRecords.find((item) => item.id === recordId);
+    if (record) {
+        startEditingRecord(record);
+    }
+});
 exportFormat.addEventListener('change', () => {
     reportOption.hidden = exportFormat.value !== 'pdf';
     showExportMessage(exportFormat.value === 'pdf'
@@ -739,6 +1569,10 @@ exportFormat.addEventListener('change', () => {
         : '현재 조회된 목록을 선택한 파일 형식으로 내보냅니다.');
 });
 exportButton.addEventListener('click', exportResults);
+cancelEditButton.addEventListener('click', () => {
+    resetEntryForm();
+    setFormMessage('설치 정보 수정을 취소했습니다.');
+});
 
 for (const input of dateModeInputs) {
     input.addEventListener('change', () => {
@@ -765,37 +1599,37 @@ recordForm.addEventListener('submit', async (event) => {
         return;
     }
 
+    const isEditing = editingRecordId !== null;
     saveButton.disabled = true;
-    setFormMessage('기록을 저장하고 있습니다.');
+    setFormMessage(isEditing ? '수정 내용을 저장하고 있습니다.' : '기록을 저장하고 있습니다.');
 
     try {
+        const payload = {
+            visit_date: visitDateInput.value,
+            device_name: deviceName,
+            existing_version: existingVersionInput.value,
+            upgrade_version: upgradeVersionInput.value,
+            rack_count: Number(rackCountInput.value),
+            module_counts: currentModuleCounts(),
+        };
+        if (isEditing) {
+            payload.action = 'update_record';
+            payload.id = editingRecordId;
+        }
         const response = await fetch('api.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-            body: JSON.stringify({
-                visit_date: visitDateInput.value,
-                device_name: deviceName,
-                existing_version: existingVersionInput.value,
-                upgrade_version: upgradeVersionInput.value,
-                rack_count: Number(rackCountInput.value),
-                module_counts: currentModuleCounts(),
-            }),
+            body: JSON.stringify(payload),
         });
         const result = await response.json();
         if (!response.ok) {
-            throw new Error(result.error || '기록을 저장하지 못했습니다.');
+            throw new Error(result.error || (isEditing
+                ? '수정 내용을 저장하지 못했습니다.'
+                : '기록을 저장하지 못했습니다.'));
         }
 
-        recordForm.reset();
-        visitDateInput.value = today();
-        deviceSelect.value = [...deviceSelect.options].some((option) => option.value === 'Door LCD')
-            ? 'Door LCD'
-            : deviceSelect.options[0].value;
-        rackCountInput.value = '1';
-        updateCustomDeviceField();
-        renderRackModules(1);
-        previousRecordSelect.value = '';
-        setFormMessage('방문 기록을 저장했습니다.');
+        resetEntryForm();
+        setFormMessage(isEditing ? '설치 기록을 수정했습니다.' : '방문 기록을 저장했습니다.');
         await loadData();
     } catch (error) {
         setFormMessage(error.message, true);

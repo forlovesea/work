@@ -41,6 +41,20 @@ function connectDatabase(): PDO
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )'
     );
+    $database->exec(
+        'CREATE TABLE IF NOT EXISTS activity_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            record_id INTEGER NOT NULL,
+            action TEXT NOT NULL CHECK (action IN (\'create\', \'update\', \'delete\')),
+            summary TEXT NOT NULL,
+            details TEXT NOT NULL,
+            occurred_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )'
+    );
+    $database->exec(
+        'CREATE INDEX IF NOT EXISTS idx_activity_log_occurred_at ON activity_log (occurred_at)'
+    );
+    $database->exec("DELETE FROM activity_log WHERE occurred_at < datetime('now', '-1 year')");
 
     $seedDevice = $database->prepare('INSERT OR IGNORE INTO devices (name) VALUES (?)');
     foreach (['Door LCD', 'SMU02C'] as $deviceName) {
@@ -56,27 +70,53 @@ function isValidDate(string $value): bool
     return $date !== false && $date->format('Y-m-d') === $value;
 }
 
+function isListArray(array $value): bool
+{
+    return $value === [] || array_keys($value) === range(0, count($value) - 1);
+}
+
+function activityRecordData(array $record): array
+{
+    $moduleCounts = $record['module_counts'];
+    if (is_string($moduleCounts)) {
+        $moduleCounts = json_decode($moduleCounts, true, 512, JSON_THROW_ON_ERROR);
+    }
+
+    return [
+        'visit_date' => $record['visit_date'],
+        'device_name' => $record['device_name'],
+        'existing_version' => $record['existing_version'],
+        'upgrade_version' => $record['upgrade_version'],
+        'rack_count' => (int) $record['rack_count'],
+        'module_counts' => array_values($moduleCounts),
+    ];
+}
+
+function recordActivity(PDO $database, string $action, int $recordId, array $record, array $details = []): void
+{
+    $recordData = activityRecordData($record);
+    $summary = sprintf(
+        '%s · %s · %s → %s',
+        $recordData['visit_date'],
+        $recordData['device_name'],
+        $recordData['existing_version'],
+        $recordData['upgrade_version']
+    );
+    $auditDetails = ['record' => $recordData] + $details;
+    $insert = $database->prepare(
+        'INSERT INTO activity_log (record_id, action, summary, details) VALUES (?, ?, ?, ?)'
+    );
+    $insert->execute([
+        $recordId,
+        $action,
+        $summary,
+        json_encode($auditDetails, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+    ]);
+}
+
 function loadData(PDO $database, array $filters): array
 {
-    $conditions = [];
-    $parameters = [];
-
-    if ($filters['date_mode'] === 'day') {
-        $conditions[] = 'visit_date = ?';
-        $parameters[] = $filters['date'];
-    } elseif ($filters['date_mode'] === 'range') {
-        $conditions[] = 'visit_date BETWEEN ? AND ?';
-        $parameters[] = $filters['start_date'];
-        $parameters[] = $filters['end_date'];
-    }
-    if ($filters['device'] !== '') {
-        $conditions[] = 'device_name = ?';
-        $parameters[] = $filters['device'];
-    }
-    if ($filters['version'] !== '') {
-        $conditions[] = 'upgrade_version = ?';
-        $parameters[] = $filters['version'];
-    }
+    [$conditions, $parameters] = filterConditions($filters);
 
     $sql = 'SELECT id, visit_date, device_name, existing_version, upgrade_version,
                    rack_count, module_counts, created_at
@@ -130,6 +170,70 @@ function loadData(PDO $database, array $filters): array
     ];
 }
 
+function validatedFilters(array $source): array
+{
+    $dateMode = $source['date_mode'] ?? 'all';
+    if (!is_string($dateMode) || !in_array($dateMode, ['day', 'range', 'all'], true)) {
+        respond(422, ['error' => '조회 기간 선택을 확인해 주세요.']);
+    }
+
+    $filters = [
+        'date_mode' => $dateMode,
+        'date' => '',
+        'start_date' => '',
+        'end_date' => '',
+        'device' => $source['device'] ?? '',
+        'version' => $source['version'] ?? '',
+    ];
+    if ($dateMode === 'day') {
+        $filters['date'] = $source['date'] ?? '';
+        if (!is_string($filters['date']) || !isValidDate($filters['date'])) {
+            respond(422, ['error' => '조회 날짜를 선택해 주세요.']);
+        }
+    } elseif ($dateMode === 'range') {
+        $filters['start_date'] = $source['start_date'] ?? '';
+        $filters['end_date'] = $source['end_date'] ?? '';
+        if (!is_string($filters['start_date']) || !isValidDate($filters['start_date']) ||
+            !is_string($filters['end_date']) || !isValidDate($filters['end_date'])) {
+            respond(422, ['error' => '시작 날짜와 끝 날짜를 선택해 주세요.']);
+        }
+        if ($filters['start_date'] > $filters['end_date']) {
+            respond(422, ['error' => '시작 날짜는 끝 날짜보다 늦을 수 없습니다.']);
+        }
+    }
+
+    $deviceLength = is_string($filters['device']) ? preg_match_all('/./us', $filters['device']) : false;
+    $versionLength = is_string($filters['version']) ? preg_match_all('/./us', $filters['version']) : false;
+    if ($deviceLength === false || $deviceLength > 100 ||
+        $versionLength === false || $versionLength > 50) {
+        respond(422, ['error' => '장비명 또는 버전 필터를 확인해 주세요.']);
+    }
+    return $filters;
+}
+
+function filterConditions(array $filters): array
+{
+    $conditions = [];
+    $parameters = [];
+    if ($filters['date_mode'] === 'day') {
+        $conditions[] = 'visit_date = ?';
+        $parameters[] = $filters['date'];
+    } elseif ($filters['date_mode'] === 'range') {
+        $conditions[] = 'visit_date BETWEEN ? AND ?';
+        $parameters[] = $filters['start_date'];
+        $parameters[] = $filters['end_date'];
+    }
+    if ($filters['device'] !== '') {
+        $conditions[] = 'device_name = ?';
+        $parameters[] = $filters['device'];
+    }
+    if ($filters['version'] !== '') {
+        $conditions[] = 'upgrade_version = ?';
+        $parameters[] = $filters['version'];
+    }
+    return [$conditions, $parameters];
+}
+
 function requiredText(array $input, string $key, int $maxLength): string
 {
     $value = $input[$key] ?? null;
@@ -146,49 +250,89 @@ function requiredText(array $input, string $key, int $maxLength): string
     return $value;
 }
 
+function validateBulkRecord($input): array
+{
+    if (!is_array($input)) {
+        return ['record' => null, 'errors' => ['행 데이터 형식이 올바르지 않습니다.']];
+    }
+
+    $errors = [];
+    $textFields = [
+        'visit_date' => ['현장방문날짜', 10],
+        'device_name' => ['장비명', 100],
+        'existing_version' => ['기존 설치 버전', 50],
+        'upgrade_version' => ['업그레이드 버전', 50],
+    ];
+    $record = [];
+
+    foreach ($textFields as $key => [$label, $maxLength]) {
+        $value = $input[$key] ?? null;
+        if (!is_string($value)) {
+            $errors[] = $label . '을(를) 입력해 주세요.';
+            $record[$key] = '';
+            continue;
+        }
+        $value = trim($value);
+        $length = preg_match_all('/./us', $value);
+        if ($value === '' || $length === false || $length > $maxLength) {
+            $errors[] = $label . '이(가) 비어 있거나 허용 길이를 초과했습니다.';
+        }
+        $record[$key] = $value;
+    }
+
+    if ($record['visit_date'] !== '' && !isValidDate($record['visit_date'])) {
+        $errors[] = '현장방문날짜는 YYYY-MM-DD 형식이어야 합니다.';
+    }
+
+    $rackCount = $input['rack_count'] ?? null;
+    $moduleCounts = $input['module_counts'] ?? null;
+    if (!is_int($rackCount) || $rackCount < 1 || $rackCount > 100) {
+        $errors[] = '랙 수는 1~100 사이의 정수여야 합니다.';
+    }
+    if (!is_array($moduleCounts)) {
+        $errors[] = '랙별 모듈 수 목록을 확인해 주세요.';
+        $moduleCounts = [];
+    } else {
+        if (!isListArray($moduleCounts)) {
+            $errors[] = '랙별 모듈 수는 랙 순서대로 입력해야 합니다.';
+        }
+        if (is_int($rackCount) && count($moduleCounts) !== $rackCount) {
+            $errors[] = '랙 수와 랙별 모듈 수의 개수가 일치해야 합니다.';
+        }
+    }
+    foreach ($moduleCounts as $moduleCount) {
+        if (!is_int($moduleCount) || $moduleCount < 1 || $moduleCount > 10) {
+            $errors[] = '각 랙의 모듈 수는 1~10 사이의 정수여야 합니다.';
+            break;
+        }
+    }
+
+    $record['rack_count'] = $rackCount;
+    $record['module_counts'] = $moduleCounts;
+    return ['record' => $record, 'errors' => $errors];
+}
+
 try {
     $database = connectDatabase();
 
     if ($_SERVER['REQUEST_METHOD'] === 'GET') {
-        $dateMode = $_GET['date_mode'] ?? 'all';
-        if (!in_array($dateMode, ['day', 'range', 'all'], true)) {
-            respond(422, ['error' => '조회 기간 선택을 확인해 주세요.']);
-        }
-
-        $filters = [
-            'date_mode' => $dateMode,
-            'date' => '',
-            'start_date' => '',
-            'end_date' => '',
-            'device' => '',
-            'version' => '',
-        ];
-        if ($dateMode === 'day') {
-            $filters['date'] = $_GET['date'] ?? '';
-            if (!is_string($filters['date']) || !isValidDate($filters['date'])) {
-                respond(422, ['error' => '조회 날짜를 선택해 주세요.']);
+        if (($_GET['action'] ?? '') === 'activity') {
+            $activityQuery = $database->query(
+                "SELECT id, record_id, action, summary, details, occurred_at
+                 FROM activity_log
+                 WHERE occurred_at >= datetime('now', '-1 year')
+                 ORDER BY occurred_at DESC, id DESC"
+            );
+            $activities = $activityQuery->fetchAll();
+            foreach ($activities as &$activity) {
+                $activity['id'] = (int) $activity['id'];
+                $activity['record_id'] = (int) $activity['record_id'];
+                $activity['details'] = json_decode($activity['details'], true, 512, JSON_THROW_ON_ERROR);
             }
-        } elseif ($dateMode === 'range') {
-            $filters['start_date'] = $_GET['start_date'] ?? '';
-            $filters['end_date'] = $_GET['end_date'] ?? '';
-            if (!is_string($filters['start_date']) || !isValidDate($filters['start_date']) ||
-                !is_string($filters['end_date']) || !isValidDate($filters['end_date'])) {
-                respond(422, ['error' => '시작 날짜와 끝 날짜를 선택해 주세요.']);
-            }
-            if ($filters['start_date'] > $filters['end_date']) {
-                respond(422, ['error' => '시작 날짜는 끝 날짜보다 늦을 수 없습니다.']);
-            }
+            unset($activity);
+            respond(200, ['activities' => $activities]);
         }
-        $filters['device'] = $_GET['device'] ?? '';
-        $filters['version'] = $_GET['version'] ?? '';
-        $deviceLength = is_string($filters['device']) ? preg_match_all('/./us', $filters['device']) : false;
-        $versionLength = is_string($filters['version']) ? preg_match_all('/./us', $filters['version']) : false;
-        if ($deviceLength === false || $deviceLength > 100 ||
-            $versionLength === false || $versionLength > 50) {
-            respond(422, ['error' => '장비명 또는 버전 필터를 확인해 주세요.']);
-        }
-
-        respond(200, loadData($database, $filters));
+        respond(200, loadData($database, validatedFilters($_GET)));
     }
 
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -200,14 +344,212 @@ try {
         respond(415, ['error' => 'JSON 형식의 요청만 저장할 수 있습니다.']);
     }
 
+    $rawInput = file_get_contents('php://input', false, null, 0, 2000001);
+    if ($rawInput === false) {
+        respond(400, ['error' => '요청 데이터를 읽을 수 없습니다.']);
+    }
+    if (strlen($rawInput) > 2000000) {
+        respond(413, ['error' => '일괄 등록 데이터가 너무 큽니다. 파일 행 수를 나누어 다시 시도해 주세요.']);
+    }
+
     try {
-        $input = json_decode(file_get_contents('php://input'), true, 512, JSON_THROW_ON_ERROR);
+        $input = json_decode($rawInput, true, 512, JSON_THROW_ON_ERROR);
     } catch (JsonException $exception) {
         respond(400, ['error' => '요청 데이터를 읽을 수 없습니다.']);
     }
 
     if (!is_array($input)) {
         respond(400, ['error' => '요청 데이터 형식이 올바르지 않습니다.']);
+    }
+
+    if (($input['action'] ?? '') === 'update_record') {
+        $recordId = $input['id'] ?? null;
+        if (!is_int($recordId) || $recordId < 1) {
+            respond(422, ['error' => '수정할 기록을 확인해 주세요.']);
+        }
+        $validated = validateBulkRecord($input);
+        if ($validated['errors'] !== []) {
+            respond(422, ['error' => implode(' ', $validated['errors'])]);
+        }
+
+        $database->beginTransaction();
+        $exists = $database->prepare(
+            'SELECT visit_date, device_name, existing_version, upgrade_version, rack_count, module_counts
+             FROM records WHERE id = ?'
+        );
+        $exists->execute([$recordId]);
+        $oldRecord = $exists->fetch();
+        if ($oldRecord === false) {
+            $database->rollBack();
+            respond(404, ['error' => '수정할 설치 기록을 찾을 수 없습니다. 새로고침 후 다시 시도해 주세요.']);
+        }
+        $oldRecord = activityRecordData($oldRecord);
+        $newRecord = activityRecordData($validated['record']);
+        $fieldLabels = [
+            'visit_date' => '현장방문날짜',
+            'device_name' => '장비명',
+            'existing_version' => '기존 설치 버전',
+            'upgrade_version' => '업그레이드 버전',
+            'rack_count' => '축전지 랙 수',
+            'module_counts' => '랙별 모듈 수',
+        ];
+        $changes = [];
+        foreach ($fieldLabels as $field => $label) {
+            if ($oldRecord[$field] !== $newRecord[$field]) {
+                $formatValue = static function ($value): string {
+                    return is_array($value) ? implode(', ', $value) : (string) $value;
+                };
+                $changes[$label] = [
+                    'before' => $formatValue($oldRecord[$field]),
+                    'after' => $formatValue($newRecord[$field]),
+                ];
+            }
+        }
+        $deviceInsert = $database->prepare('INSERT OR IGNORE INTO devices (name) VALUES (?)');
+        $deviceInsert->execute([$validated['record']['device_name']]);
+        $recordUpdate = $database->prepare(
+            'UPDATE records
+             SET visit_date = ?, device_name = ?, existing_version = ?, upgrade_version = ?,
+                 rack_count = ?, module_counts = ?
+             WHERE id = ?'
+        );
+        $recordUpdate->execute([
+            $validated['record']['visit_date'],
+            $validated['record']['device_name'],
+            $validated['record']['existing_version'],
+            $validated['record']['upgrade_version'],
+            $validated['record']['rack_count'],
+            json_encode(array_values($validated['record']['module_counts']), JSON_THROW_ON_ERROR),
+            $recordId,
+        ]);
+        if ($changes !== []) {
+            recordActivity($database, 'update', $recordId, $newRecord, ['changes' => $changes]);
+        }
+        $database->commit();
+
+        respond(200, ['record_id' => $recordId]);
+    }
+
+    if (($input['action'] ?? '') === 'delete_selected') {
+        $recordIds = $input['record_ids'] ?? null;
+        if (!is_array($recordIds) || !isListArray($recordIds) ||
+            count($recordIds) < 1 || count($recordIds) > 5000) {
+            respond(422, ['error' => '선택 삭제할 기록을 확인해 주세요. 한 번에 최대 5,000건까지 삭제할 수 있습니다.']);
+        }
+        foreach ($recordIds as $recordId) {
+            if (!is_int($recordId) || $recordId < 1) {
+                respond(422, ['error' => '삭제할 기록 번호가 올바르지 않습니다.']);
+            }
+        }
+        $recordIds = array_values(array_unique($recordIds));
+        $database->beginTransaction();
+        $deletedCount = 0;
+        foreach (array_chunk($recordIds, 500) as $idChunk) {
+            $placeholders = implode(',', array_fill(0, count($idChunk), '?'));
+            $recordsQuery = $database->prepare(
+                'SELECT id, visit_date, device_name, existing_version, upgrade_version,
+                        rack_count, module_counts
+                 FROM records WHERE id IN (' . $placeholders . ')'
+            );
+            $recordsQuery->execute($idChunk);
+            $recordsToDelete = $recordsQuery->fetchAll();
+            foreach ($recordsToDelete as $record) {
+                recordActivity($database, 'delete', (int) $record['id'], $record);
+            }
+            $delete = $database->prepare('DELETE FROM records WHERE id IN (' . $placeholders . ')');
+            $delete->execute($idChunk);
+            $deletedCount += $delete->rowCount();
+        }
+        $database->commit();
+
+        respond(200, ['deleted_count' => $deletedCount]);
+    }
+
+    if (($input['action'] ?? '') === 'delete_filtered') {
+        if (!is_array($input['filters'] ?? null)) {
+            respond(422, ['error' => '현재 조회 조건을 확인한 뒤 다시 시도해 주세요.']);
+        }
+        $filters = validatedFilters($input['filters']);
+        [$conditions, $parameters] = filterConditions($filters);
+        $sql = 'DELETE FROM records';
+        $selectSql = 'SELECT id, visit_date, device_name, existing_version, upgrade_version,
+                             rack_count, module_counts FROM records';
+        if ($conditions !== []) {
+            $sql .= ' WHERE ' . implode(' AND ', $conditions);
+            $selectSql .= ' WHERE ' . implode(' AND ', $conditions);
+        }
+        $database->beginTransaction();
+        $recordsQuery = $database->prepare($selectSql);
+        $recordsQuery->execute($parameters);
+        foreach ($recordsQuery->fetchAll() as $record) {
+            recordActivity($database, 'delete', (int) $record['id'], $record);
+        }
+        $delete = $database->prepare($sql);
+        $delete->execute($parameters);
+        $deletedCount = $delete->rowCount();
+        $database->commit();
+
+        respond(200, ['deleted_count' => $deletedCount]);
+    }
+
+    if (($input['action'] ?? '') === 'bulk_create') {
+        $records = $input['records'] ?? null;
+        if (!is_array($records) || count($records) < 1 || count($records) > 100 ||
+            !isListArray($records)) {
+            respond(422, ['error' => '한 번에 1~100개 현장 기록만 등록할 수 있습니다.']);
+        }
+
+        $validatedRecords = [];
+        $rowErrors = [];
+        foreach (array_values($records) as $index => $row) {
+            $validated = validateBulkRecord($row);
+            if ($validated['errors'] !== []) {
+                $sourceRow = is_array($row) && isset($row['source_row']) &&
+                    is_int($row['source_row']) && $row['source_row'] >= 2
+                    ? $row['source_row']
+                    : $index + 2;
+                $rowErrors[] = [
+                    'row' => $sourceRow,
+                    'messages' => $validated['errors'],
+                ];
+            } else {
+                $validatedRecords[] = $validated['record'];
+            }
+        }
+        if ($rowErrors !== []) {
+            respond(422, [
+                'error' => '입력값을 확인해 주세요. 오류가 있는 행은 저장되지 않았습니다.',
+                'row_errors' => $rowErrors,
+            ]);
+        }
+
+        $database->beginTransaction();
+        $deviceInsert = $database->prepare('INSERT OR IGNORE INTO devices (name) VALUES (?)');
+        $recordInsert = $database->prepare(
+            'INSERT INTO records (
+                visit_date, device_name, existing_version, upgrade_version, rack_count, module_counts
+            ) VALUES (?, ?, ?, ?, ?, ?)'
+        );
+        foreach ($validatedRecords as $record) {
+            $deviceInsert->execute([$record['device_name']]);
+            $recordInsert->execute([
+                $record['visit_date'],
+                $record['device_name'],
+                $record['existing_version'],
+                $record['upgrade_version'],
+                $record['rack_count'],
+                json_encode(array_values($record['module_counts']), JSON_THROW_ON_ERROR),
+            ]);
+            recordActivity(
+                $database,
+                'create',
+                (int) $database->lastInsertId(),
+                $record
+            );
+        }
+        $database->commit();
+
+        respond(201, ['created_count' => count($validatedRecords)]);
     }
 
     $visitDate = requiredText($input, 'visit_date', 10);
@@ -248,9 +590,18 @@ try {
         $rackCount,
         json_encode(array_values($moduleCounts), JSON_THROW_ON_ERROR),
     ]);
+    $recordId = (int) $database->lastInsertId();
+    recordActivity($database, 'create', $recordId, [
+        'visit_date' => $visitDate,
+        'device_name' => $deviceName,
+        'existing_version' => $existingVersion,
+        'upgrade_version' => $upgradeVersion,
+        'rack_count' => $rackCount,
+        'module_counts' => $moduleCounts,
+    ]);
     $database->commit();
 
-    respond(201, ['record_id' => (int) $database->lastInsertId()]);
+    respond(201, ['record_id' => $recordId]);
 } catch (PDOException $exception) {
     if (isset($database) && $database->inTransaction()) {
         $database->rollBack();

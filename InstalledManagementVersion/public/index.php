@@ -30,6 +30,11 @@
                 <span class="tab-icon" aria-hidden="true">⌕</span>
                 설치 정보 조회
             </button>
+            <button id="activityTab" class="main-tab" type="button" role="tab"
+                    aria-selected="false" aria-controls="activityPanel" tabindex="-1">
+                <span class="tab-icon" aria-hidden="true">↻</span>
+                작업이력
+            </button>
         </nav>
 
         <section id="entryPanel" class="tab-panel panel form-panel" role="tabpanel"
@@ -48,6 +53,42 @@
                     <option value="">최근 입력한 기록을 선택하면 항목을 자동으로 채웁니다</option>
                 </select>
             </label>
+
+            <section class="bulk-import-panel" aria-labelledby="bulk-import-title">
+                <div class="bulk-import-heading">
+                    <div>
+                        <p class="eyebrow">MULTIPLE FIELD RECORDS</p>
+                        <h3 id="bulk-import-title">Excel로 여러 현장 등록</h3>
+                        <p>템플릿을 내려받아 현장별 한 줄씩 작성한 후 업로드하세요.</p>
+                    </div>
+                    <button id="downloadTemplateButton" class="secondary-button template-button" type="button">
+                        <span aria-hidden="true">↓</span> Excel 템플릿
+                    </button>
+                </div>
+
+                <div class="bulk-import-controls">
+                    <label class="field upload-field">
+                        <span>작성한 Excel 파일 (.xlsx)</span>
+                        <input id="importFile" type="file"
+                               accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+                    </label>
+                    <p class="bulk-import-hint">
+                        날짜는 YYYY-MM-DD, 랙별 모듈 수는 쉼표로 구분해 입력합니다.
+                        예: 랙 수 3, 모듈 수 4,5,3. 한 번에 최대 100개 현장을 등록할 수 있습니다.
+                    </p>
+                </div>
+
+                <div id="importPreview" class="import-preview" hidden>
+                    <div class="import-preview-heading">
+                        <strong id="importSummary"></strong>
+                        <button id="applyImportButton" class="primary-button import-apply-button"
+                                type="button" disabled>검증 후 일괄 등록</button>
+                    </div>
+                    <p id="importMessage" class="import-message" role="status" aria-live="polite"></p>
+                    <ul id="importErrors" class="import-errors"></ul>
+                    <div id="importRows" class="import-rows"></div>
+                </div>
+            </section>
 
             <form id="recordForm">
                 <div class="form-grid">
@@ -103,9 +144,12 @@
 
                 <div class="form-footer">
                     <p id="formMessage" class="form-message" role="status" aria-live="polite"></p>
-                    <button id="saveButton" class="primary-button" type="submit">
-                        <span aria-hidden="true">＋</span> 방문 기록 저장
-                    </button>
+                    <div class="form-actions">
+                        <button id="cancelEditButton" class="secondary-button" type="button" hidden>수정 취소</button>
+                        <button id="saveButton" class="primary-button" type="submit">
+                            <span aria-hidden="true">＋</span> 방문 기록 저장
+                        </button>
+                    </div>
                 </div>
             </form>
         </section>
@@ -122,6 +166,22 @@
                     <span aria-hidden="true">↻</span> 새로고침
                 </button>
             </div>
+
+            <div class="record-actions" aria-label="설치 정보 관리">
+                <label class="select-all-field">
+                    <input id="selectAllRecords" type="checkbox" disabled>
+                    <span>현재 목록 전체 선택</span>
+                </label>
+                <div class="record-action-buttons">
+                    <button id="deleteSelectedButton" class="danger-button" type="button" disabled>
+                        선택 삭제 <span id="selectedCount">(0)</span>
+                    </button>
+                    <button id="deleteFilteredButton" class="danger-button" type="button" disabled>
+                        현재 조회 결과 전체 삭제
+                    </button>
+                </div>
+            </div>
+            <p id="recordActionMessage" class="record-action-message" role="status" aria-live="polite"></p>
 
             <div class="filter-panel" aria-label="설치 정보 조회 조건">
                 <fieldset class="date-mode-fieldset">
@@ -206,6 +266,24 @@
 
             <div id="historyList" class="history-list" aria-live="polite">
                 <p class="empty-state">기록을 불러오는 중입니다.</p>
+            </div>
+        </section>
+        <section id="activityPanel" class="tab-panel panel activity-panel" role="tabpanel"
+                 aria-labelledby="activityTab" hidden>
+            <div class="section-heading activity-heading">
+                <div>
+                    <p class="eyebrow">CHANGE HISTORY · LAST 12 MONTHS</p>
+                    <h2>작업이력</h2>
+                    <p id="activityCount" class="record-count">작업 이력을 불러오는 중...</p>
+                </div>
+                <button id="refreshActivityButton" class="secondary-button" type="button">
+                    <span aria-hidden="true">↻</span> 새로고침
+                </button>
+            </div>
+            <p class="activity-description">최근 1년간 등록·수정·삭제된 설치 정보와 작업 시간을 확인할 수 있습니다.</p>
+            <p id="activityMessage" class="activity-message" role="status" aria-live="polite"></p>
+            <div id="activityList" class="activity-list" aria-live="polite">
+                <p class="empty-state">작업 이력을 불러오는 중입니다.</p>
             </div>
         </section>
         <footer class="page-footer">Installed Management Version</footer>

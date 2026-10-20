@@ -26,14 +26,63 @@
 
 ## 설치 및 Apache 연결 예시
 
-프로젝트를 서버의 `/opt/installed-management-version`에 배치하고 `www-data`가 `data` 디렉터리에 쓸 수 있도록 권한을 설정합니다.
+### 1. GitHub에서 프로젝트 내려받기
+
+Ubuntu 서버에 접속한 뒤 Git이 있는지 확인합니다.
 
 ```bash
+git --version
+```
+
+Git이 없다면 서버 관리자가 설치합니다.
+
+```bash
+sudo apt update
+sudo apt install git
+```
+
+저장소 전체 파일을 작업 트리에 펼치지 않고 `InstalledManagementVersion`만 sparse checkout으로 내려받습니다. 아래 checkout 경로(`/opt/installed-management-version-source`)가 아직 없어야 합니다.
+
+```bash
+sudo git clone --depth 1 --filter=blob:none --sparse --branch main \
+  https://github.com/forlovesea/work.git \
+  /opt/installed-management-version-source
+sudo git -C /opt/installed-management-version-source \
+  sparse-checkout set InstalledManagementVersion
+```
+
+공개 웹 파일만 Apache 서비스 경로에 복사합니다. SQLite 데이터는 공개 디렉터리 밖에 두기 위해 별도의 쓰기 가능 디렉터리를 만듭니다.
+
+```bash
+sudo install -d -o root -g root -m 755 /opt/installed-management-version/public
+sudo cp -a \
+  /opt/installed-management-version-source/InstalledManagementVersion/public/. \
+  /opt/installed-management-version/public/
 sudo install -d -o www-data -g www-data -m 770 /opt/installed-management-version/data
 sudo chown -R root:root /opt/installed-management-version/public
 sudo find /opt/installed-management-version/public -type d -exec chmod 755 {} \;
 sudo find /opt/installed-management-version/public -type f -exec chmod 644 {} \;
 ```
+
+`www-data`에는 `data` 디렉터리 쓰기 권한만 주고 `public`에는 쓰기 권한을 주지 않습니다. 앱의 공개 경로는 `/opt/installed-management-version/public`, SQLite 파일 경로는 `/opt/installed-management-version/data/installed-management.sqlite`입니다.
+
+### 2. 이후 최신 버전으로 갱신
+
+서버에 새 코드를 내려받을 때는 sparse checkout 저장소를 fast-forward로 갱신한 뒤 공개 파일만 복사합니다.
+
+```bash
+sudo git -C /opt/installed-management-version-source pull --ff-only origin main
+sudo cp -a \
+  /opt/installed-management-version-source/InstalledManagementVersion/public/. \
+  /opt/installed-management-version/public/
+sudo chown -R root:root /opt/installed-management-version/public
+sudo find /opt/installed-management-version/public -type d -exec chmod 755 {} \;
+sudo find /opt/installed-management-version/public -type f -exec chmod 644 {} \;
+```
+
+이 갱신 절차는 `data` 디렉터리와 SQLite 파일을 덮어쓰거나 삭제하지 않습니다. 배포 전 데이터베이스를 백업하고, 갱신 후 앱을 확인하세요.
+
+### 3. Apache 연결
 
 PHP 7.4 이상과 PDO SQLite가 아직 설치되어 있지 않은 경우에만 서버 관리자가 별도로 설치 여부를 검토합니다. 설치된 PHP 핸들러(Apache 모듈 또는 PHP-FPM)에 앱의 `public` 디렉터리를 연결해야 합니다. 예를 들어 기존 가상호스트 설정에 다음 Alias를 추가할 수 있습니다.
 

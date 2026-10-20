@@ -1,2 +1,4 @@
 *.sqlite
 *.sqlite-*
+password.hash
+password.hash.*.tmp

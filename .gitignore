@@ -6,6 +6,8 @@ app.lock
 build/
 dist/
 bin/
+!InstalledManagementVersion/bin/
+!InstalledManagementVersion/bin/set-password.php
 obj/
 .venv/
 .pytest_cache/

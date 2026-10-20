@@ -1,4 +1,11 @@
 const recordForm = document.querySelector('#recordForm');
+const loginPanel = document.querySelector('#loginPanel');
+const loginForm = document.querySelector('#loginForm');
+const loginPasswordInput = document.querySelector('#loginPassword');
+const loginButton = document.querySelector('#loginButton');
+const loginMessage = document.querySelector('#loginMessage');
+const appShell = document.querySelector('#appShell');
+const logoutButton = document.querySelector('#logoutButton');
 const visitDateInput = document.querySelector('#visitDate');
 const deviceSelect = document.querySelector('#deviceSelect');
 const customDeviceField = document.querySelector('#customDeviceField');
@@ -67,6 +74,53 @@ let displayedFilterParams = {};
 let isLoadingRecords = false;
 let isMutatingRecords = false;
 let editingRecordId = null;
+let csrfToken = '';
+
+function showLogin(message = '', isError = false) {
+    csrfToken = '';
+    appShell.hidden = true;
+    loginPanel.hidden = false;
+    loginMessage.textContent = message;
+    loginMessage.classList.toggle('is-error', isError);
+    loginPasswordInput.value = '';
+    loginPasswordInput.focus();
+}
+
+async function authenticatedFetch(url, options = {}) {
+    const response = await fetch(url, {
+        ...options,
+        headers: {
+            ...options.headers,
+            'X-CSRF-Token': csrfToken,
+        },
+    });
+    if (response.status === 401) {
+        showLogin('로그인 세션이 만료되었습니다. 다시 로그인해 주세요.', true);
+    }
+    return response;
+}
+
+async function bootstrapSession() {
+    try {
+        const response = await fetch('api.php?action=session', {
+            headers: { Accept: 'application/json' },
+        });
+        const result = await response.json();
+        if (!response.ok) {
+            throw new Error(result.error || '로그인 상태를 확인하지 못했습니다.');
+        }
+        if (!result.authenticated) {
+            showLogin();
+            return;
+        }
+        csrfToken = result.csrf_token;
+        loginPanel.hidden = true;
+        appShell.hidden = false;
+        loadData();
+    } catch (error) {
+        showLogin(error.message, true);
+    }
+}
 
 function today() {
     const now = new Date();
@@ -863,7 +917,7 @@ async function applyImport() {
     importMessage.classList.remove('is-error');
     importMessage.textContent = '일괄 등록 중입니다. 창을 닫지 마세요.';
     try {
-        const response = await fetch('api.php', {
+        const response = await authenticatedFetch('api.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
             body: JSON.stringify({
@@ -1250,7 +1304,7 @@ async function loadData() {
     filterMessage.textContent = '';
 
     try {
-        const response = await fetch(`api.php?${queryParams.toString()}`, {
+        const response = await authenticatedFetch(`api.php?${queryParams.toString()}`, {
             headers: { Accept: 'application/json' },
         });
         const data = await response.json();
@@ -1382,7 +1436,7 @@ async function loadActivityLog() {
     refreshActivityButton.disabled = true;
     activityMessage.textContent = '';
     try {
-        const response = await fetch('api.php?action=activity', {
+        const response = await authenticatedFetch('api.php?action=activity', {
             headers: { Accept: 'application/json' },
         });
         const data = await response.json();
@@ -1456,7 +1510,7 @@ async function deleteRecords(payload, confirmation, progressMessage) {
     updateRecordActionControls();
     setRecordActionMessage(progressMessage);
     try {
-        const response = await fetch('api.php', {
+        const response = await authenticatedFetch('api.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
             body: JSON.stringify(payload),
@@ -1510,6 +1564,67 @@ rackCountInput.addEventListener('input', () => {
         return;
     }
     renderRackModules(count, currentModuleCounts());
+});
+
+loginForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!loginForm.reportValidity()) {
+        return;
+    }
+    loginButton.disabled = true;
+    loginMessage.classList.remove('is-error');
+    loginMessage.textContent = '로그인 중입니다.';
+    try {
+        const response = await fetch('api.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({
+                action: 'login',
+                password: loginPasswordInput.value,
+            }),
+        });
+        const result = await response.json();
+        if (!response.ok) {
+            throw new Error(result.error || '로그인하지 못했습니다.');
+        }
+        csrfToken = result.csrf_token;
+        loginPasswordInput.value = '';
+        loginMessage.textContent = '';
+        loginPanel.hidden = true;
+        appShell.hidden = false;
+        loadData();
+    } catch (error) {
+        loginMessage.textContent = error.message;
+        loginMessage.classList.add('is-error');
+        loginPasswordInput.select();
+    } finally {
+        loginButton.disabled = false;
+    }
+});
+
+logoutButton.addEventListener('click', async () => {
+    logoutButton.disabled = true;
+    try {
+        const response = await authenticatedFetch('api.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ action: 'logout' }),
+        });
+        const result = await response.json();
+        if (!response.ok) {
+            throw new Error(result.error || '로그아웃하지 못했습니다.');
+        }
+        showLogin('로그아웃했습니다.');
+    } catch (error) {
+        if (loginPanel.hidden) {
+            window.alert(error.message);
+        } else {
+            loginMessage.textContent = error.message;
+            loginMessage.classList.add('is-error');
+        }
+    } finally {
+        logoutButton.disabled = false;
+    }
 });
 
 deviceSelect.addEventListener('change', updateCustomDeviceField);
@@ -1616,7 +1731,7 @@ recordForm.addEventListener('submit', async (event) => {
             payload.action = 'update_record';
             payload.id = editingRecordId;
         }
-        const response = await fetch('api.php', {
+        const response = await authenticatedFetch('api.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
             body: JSON.stringify(payload),
@@ -1644,4 +1759,4 @@ filterStartDate.value = today();
 filterEndDate.value = today();
 updateDateFields();
 renderRackModules(1);
-loadData();
+bootstrapSession();

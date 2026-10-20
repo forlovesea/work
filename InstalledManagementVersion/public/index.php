@@ -1,3 +1,18 @@
+<?php
+require_once dirname(__DIR__) . '/lib/auth.php';
+startAppSession();
+header('Cache-Control: no-store, private');
+header('Pragma: no-cache');
+
+$isAuthenticated = isAppAuthenticated();
+$authSetupError = '';
+try {
+    ensurePasswordHash();
+} catch (Throwable $exception) {
+    error_log('Installed Management Version authentication setup error: ' . $exception->getMessage());
+    $authSetupError = '로그인 설정을 준비하지 못했습니다. 서버 관리자에게 문의해 주세요.';
+}
+?>
 <!doctype html>
 <html lang="ko">
 <head>
@@ -9,7 +24,27 @@
     <script src="assets/app.js" defer></script>
 </head>
 <body>
-    <main class="page-shell">
+    <main id="loginPanel" class="login-shell"<?php echo $isAuthenticated && $authSetupError === '' ? ' hidden' : ''; ?>>
+        <section class="login-panel panel" aria-labelledby="loginTitle">
+            <div class="brand-mark" aria-hidden="true">IM</div>
+            <p class="eyebrow">SECURE FIELD SERVICE</p>
+            <h1 id="loginTitle">현장 설치 버전관리</h1>
+            <p class="login-description">계속하려면 암호를 입력하세요.</p>
+            <form id="loginForm">
+                <label class="field" for="loginPassword">
+                    <span>암호</span>
+                    <input id="loginPassword" name="password" type="password" autocomplete="current-password"
+                           required autofocus>
+                </label>
+                <button id="loginButton" class="primary-button" type="submit">로그인</button>
+                <p id="loginMessage" class="login-message" role="status" aria-live="polite"><?php
+                    echo htmlspecialchars($authSetupError, ENT_QUOTES, 'UTF-8');
+                ?></p>
+            </form>
+        </section>
+    </main>
+
+    <main id="appShell" class="page-shell"<?php echo $isAuthenticated && $authSetupError === '' ? '' : ' hidden'; ?>>
         <header class="page-header">
             <div class="brand-mark" aria-hidden="true">IM</div>
             <div>
@@ -17,6 +52,7 @@
                 <h1>현장 설치 버전관리</h1>
                 <p class="subtitle">현장 장비의 설치 버전과 랙 구성을 기록합니다.</p>
             </div>
+            <button id="logoutButton" class="secondary-button logout-button" type="button">로그아웃</button>
         </header>
 
         <nav class="main-tabs" role="tablist" aria-label="설치 정보 메뉴">

@@ -12,6 +12,31 @@ function respond(int $status, array $payload): void
     exit;
 }
 
+require_once dirname(__DIR__) . '/lib/auth.php';
+
+function readJsonRequest(): array
+{
+    if (strpos($_SERVER['CONTENT_TYPE'] ?? '', 'application/json') !== 0) {
+        respond(415, ['error' => 'JSON 형식의 요청만 처리할 수 있습니다.']);
+    }
+    $rawInput = file_get_contents('php://input', false, null, 0, 2000001);
+    if ($rawInput === false) {
+        respond(400, ['error' => '요청 데이터를 읽을 수 없습니다.']);
+    }
+    if (strlen($rawInput) > 2000000) {
+        respond(413, ['error' => '요청 데이터가 너무 큽니다.']);
+    }
+    try {
+        $input = json_decode($rawInput, true, 512, JSON_THROW_ON_ERROR);
+    } catch (JsonException $exception) {
+        respond(400, ['error' => '요청 데이터를 읽을 수 없습니다.']);
+    }
+    if (!is_array($input)) {
+        respond(400, ['error' => '요청 데이터 형식이 올바르지 않습니다.']);
+    }
+    return $input;
+}
+
 function connectDatabase(): PDO
 {
     $dataDirectory = dirname(__DIR__) . '/data';
@@ -313,6 +338,45 @@ function validateBulkRecord($input): array
 }
 
 try {
+    startAppSession();
+    $requestAction = $_GET['action'] ?? '';
+    if ($_SERVER['REQUEST_METHOD'] === 'GET' && $requestAction === 'session') {
+        ensurePasswordHash();
+        respond(200, [
+            'authenticated' => isAppAuthenticated(),
+            'csrf_token' => isAppAuthenticated() ? csrfToken() : null,
+        ]);
+    }
+
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $requestInput = readJsonRequest();
+        $requestAction = $requestInput['action'] ?? '';
+        if ($requestAction === 'login') {
+            $password = $requestInput['password'] ?? null;
+            $passwordHash = ensurePasswordHash();
+            if (!is_string($password) || strlen($password) > 72 ||
+                !password_verify($password, $passwordHash)) {
+                respond(401, ['error' => '암호가 올바르지 않습니다.']);
+            }
+            session_regenerate_id(true);
+            $_SESSION['app_authenticated'] = true;
+            unset($_SESSION['app_csrf_token']);
+            respond(200, ['csrf_token' => csrfToken()]);
+        }
+
+        if (!isAppAuthenticated()) {
+            respond(401, ['error' => '로그인이 필요합니다.']);
+        }
+        verifyCsrfToken();
+        if ($requestAction === 'logout') {
+            $_SESSION = [];
+            session_regenerate_id(true);
+            respond(200, ['logged_out' => true]);
+        }
+    } elseif (!isAppAuthenticated()) {
+        respond(401, ['error' => '로그인이 필요합니다.']);
+    }
+
     $database = connectDatabase();
 
     if ($_SERVER['REQUEST_METHOD'] === 'GET') {
@@ -340,27 +404,7 @@ try {
         respond(405, ['error' => '지원하지 않는 요청입니다.']);
     }
 
-    if (strpos($_SERVER['CONTENT_TYPE'] ?? '', 'application/json') !== 0) {
-        respond(415, ['error' => 'JSON 형식의 요청만 저장할 수 있습니다.']);
-    }
-
-    $rawInput = file_get_contents('php://input', false, null, 0, 2000001);
-    if ($rawInput === false) {
-        respond(400, ['error' => '요청 데이터를 읽을 수 없습니다.']);
-    }
-    if (strlen($rawInput) > 2000000) {
-        respond(413, ['error' => '일괄 등록 데이터가 너무 큽니다. 파일 행 수를 나누어 다시 시도해 주세요.']);
-    }
-
-    try {
-        $input = json_decode($rawInput, true, 512, JSON_THROW_ON_ERROR);
-    } catch (JsonException $exception) {
-        respond(400, ['error' => '요청 데이터를 읽을 수 없습니다.']);
-    }
-
-    if (!is_array($input)) {
-        respond(400, ['error' => '요청 데이터 형식이 올바르지 않습니다.']);
-    }
+    $input = $requestInput;
 
     if (($input['action'] ?? '') === 'update_record') {
         $recordId = $input['id'] ?? null;

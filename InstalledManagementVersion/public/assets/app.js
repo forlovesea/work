@@ -1,4 +1,90 @@
 const recordForm = document.querySelector('#recordForm');
+const siteNameInput = document.querySelector('#siteName');
+const siteAddressInput = document.querySelector('#siteAddress');
+const workStatusInput = document.querySelector('#workStatus');
+const workStatusOtherInput = document.querySelector('#workStatusOther');
+const workStatusOtherField = document.querySelector('#workStatusOtherField');
+const notesInput = document.querySelector('#installationNotes');
+const contactList = document.querySelector('#contactList');
+const addContactButton = document.querySelector('#addContactButton');
+
+function updateWorkStatusField() {
+    const isOther = workStatusInput.value === '기타';
+    workStatusOtherField.hidden = !isOther;
+    workStatusOtherInput.disabled = !isOther;
+    workStatusOtherInput.required = isOther;
+}
+
+function addContact(contact = {}) {
+    if (contactList.children.length >= 20) return;
+    const row = document.createElement('div');
+    row.className = 'contact-row';
+    for (const [key, label, maxLength] of [['name', '이름', 100], ['phone', '연락처', 50]]) {
+        const field = document.createElement('label');
+        field.className = 'field';
+        const caption = document.createElement('span');
+        caption.textContent = label;
+        const input = document.createElement('input');
+        input.type = key === 'phone' ? 'tel' : 'text';
+        input.dataset.contactField = key;
+        input.maxLength = maxLength;
+        input.value = contact[key] || '';
+        field.append(caption, input);
+        row.append(field);
+    }
+    const inputs = [...row.querySelectorAll('input')];
+    const validatePair = () => {
+        const hasValue = inputs.some((input) => input.value.trim());
+        inputs.forEach((input) => {
+            input.required = hasValue;
+            input.setCustomValidity(hasValue && !input.value.trim() ? '담당자 이름과 연락처를 함께 입력해 주세요.' : '');
+        });
+    };
+    inputs.forEach((input) => input.addEventListener('input', validatePair));
+    validatePair();
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'secondary-button';
+    remove.textContent = '삭제';
+    remove.setAttribute('aria-label', '담당자 삭제');
+    remove.addEventListener('click', () => {
+        row.remove();
+        if (!contactList.children.length) addContact();
+        addContactButton.disabled = false;
+    });
+    row.append(remove);
+    contactList.append(row);
+    addContactButton.disabled = contactList.children.length >= 20;
+}
+
+function fillAdditionalFields(record = {}) {
+    siteNameInput.value = record.site_name || '';
+    siteAddressInput.value = record.address || '';
+    notesInput.value = record.notes || '';
+    workStatusInput.value = record.work_status || '방문예정';
+    workStatusOtherInput.value = record.work_status_other || '';
+    updateWorkStatusField();
+    contactList.replaceChildren();
+    addContactButton.disabled = false;
+    const contacts = record.contacts || [];
+    (contacts.length ? contacts : [{}]).forEach(addContact);
+}
+
+function additionalRecordDetails(record) {
+    return [
+        ['설치장소(국소)', record.site_name],
+        ['주소', record.address],
+        ['담당자 정보', (record.contacts || []).map((contact) => `${contact.name} (${contact.phone})`).join(', ')],
+        ['작업상태', record.work_status === '기타' ? `기타: ${record.work_status_other || ''}` : record.work_status],
+        ['비고', record.notes],
+    ].filter(([, value]) => value);
+}
+
+workStatusInput.addEventListener('change', updateWorkStatusField);
+addContactButton.addEventListener('click', () => {
+    addContact();
+    contactList.lastElementChild.querySelector('input').focus();
+});
 const loginPanel = document.querySelector('#loginPanel');
 const loginForm = document.querySelector('#loginForm');
 const loginPasswordInput = document.querySelector('#loginPassword');
@@ -266,6 +352,7 @@ function applyPreviousRecord() {
     upgradeVersionInput.value = record.upgrade_version;
     rackCountInput.value = String(record.rack_count);
     renderRackModules(record.rack_count, record.module_counts);
+    fillAdditionalFields(record);
     visitDateInput.value = today();
     setFormMessage('이전 입력값을 불러왔습니다. 방문 날짜와 내용을 확인해 주세요.');
 }
@@ -334,7 +421,8 @@ function csvCell(value) {
 
 function exportRows() {
     return [
-        ['현장방문날짜', '장비명', '기존 설치 버전', '현재 설치 버전', '축전지 랙 수', '랙별 모듈 수'],
+        ['현장방문날짜', '장비명', '기존 설치 버전', '현재 설치 버전', '축전지 랙 수', '랙별 모듈 수',
+            '설치장소(국소)', '주소', '담당자 정보', '작업상태', '비고'],
         ...displayedRecords.map((record) => [
             record.visit_date,
             record.device_name,
@@ -342,6 +430,11 @@ function exportRows() {
             record.upgrade_version,
             record.rack_count,
             moduleSummary(record),
+            record.site_name || '',
+            record.address || '',
+            (record.contacts || []).map((contact) => `${contact.name} (${contact.phone})`).join(', '),
+            record.work_status === '기타' ? `기타: ${record.work_status_other || ''}` : record.work_status || '',
+            record.notes || '',
         ]),
     ];
 }
@@ -989,7 +1082,7 @@ function exportExcel() {
         },
         {
             name: 'xl/worksheets/sheet1.xml',
-            content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols><col min="1" max="1" width="15" customWidth="1"/><col min="2" max="4" width="22" customWidth="1"/><col min="5" max="5" width="14" customWidth="1"/><col min="6" max="6" width="48" customWidth="1"/></cols><sheetData>${sheetRows}</sheetData><autoFilter ref="A1:F${rows.length}"/></worksheet>`,
+            content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols><col min="1" max="1" width="15" customWidth="1"/><col min="2" max="4" width="22" customWidth="1"/><col min="5" max="5" width="14" customWidth="1"/><col min="6" max="6" width="48" customWidth="1"/></cols><sheetData>${sheetRows}</sheetData><autoFilter ref="A1:K${rows.length}"/></worksheet>`,
         },
     ];
     downloadBlob(createZip(files), `${exportBaseName()}.xlsx`);
@@ -1098,6 +1191,13 @@ function buildPrintableReport(isCustomerReport) {
             ]) {
                 addReportElement(row, 'td', '', String(value));
             }
+            const details = additionalRecordDetails(record);
+            if (details.length) {
+                const detailRow = addReportElement(tbody, 'tr');
+                const detailCell = addReportElement(detailRow, 'td', 'record-site-detail',
+                    details.map(([label, value]) => `${label}: ${value}`).join('\n'));
+                detailCell.colSpan = 6;
+            }
         }
     }
 
@@ -1181,6 +1281,12 @@ function createRecordCard(record) {
         document.createTextNode(record.upgrade_version),
     );
     main.append(titleRow, versions);
+    for (const [label, value] of additionalRecordDetails(record)) {
+        const detail = document.createElement('p');
+        detail.className = 'record-site-detail';
+        detail.textContent = `${label}: ${value}`;
+        main.append(detail);
+    }
 
     const rackSummary = document.createElement('div');
     rackSummary.className = 'record-racks';
@@ -1243,6 +1349,7 @@ function startEditingRecord(record) {
     renderRackModules(record.rack_count, record.module_counts);
     previousRecordSelect.value = '';
     setEditMode(record.id);
+    fillAdditionalFields(record);
     setFormMessage(`${record.visit_date} ${record.device_name} 기록을 수정 중입니다.`);
     setActiveTab('entry');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1250,6 +1357,7 @@ function startEditingRecord(record) {
 
 function resetEntryForm() {
     recordForm.reset();
+    fillAdditionalFields();
     visitDateInput.value = today();
     deviceSelect.value = [...deviceSelect.options].some((option) => option.value === 'Door LCD')
         ? 'Door LCD'
@@ -1726,6 +1834,15 @@ recordForm.addEventListener('submit', async (event) => {
             upgrade_version: upgradeVersionInput.value,
             rack_count: Number(rackCountInput.value),
             module_counts: currentModuleCounts(),
+            site_name: siteNameInput.value.trim(),
+            address: siteAddressInput.value.trim(),
+            contacts: [...contactList.children].map((row) => ({
+                name: row.querySelector('[data-contact-field="name"]').value.trim(),
+                phone: row.querySelector('[data-contact-field="phone"]').value.trim(),
+            })).filter((contact) => contact.name || contact.phone),
+            notes: notesInput.value.trim(),
+            work_status: workStatusInput.value,
+            work_status_other: workStatusInput.value === '기타' ? workStatusOtherInput.value.trim() : '',
         };
         if (isEditing) {
             payload.action = 'update_record';
@@ -1759,4 +1876,5 @@ filterStartDate.value = today();
 filterEndDate.value = today();
 updateDateFields();
 renderRackModules(1);
+fillAdditionalFields();
 bootstrapSession();

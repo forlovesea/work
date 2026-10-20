@@ -66,6 +66,21 @@ function connectDatabase(): PDO
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )'
     );
+    $recordColumns = $database->query('PRAGMA table_info(records)')->fetchAll();
+    $existingColumns = array_column($recordColumns, 'name');
+    $additionalColumns = [
+        'site_name' => "TEXT NOT NULL DEFAULT ''",
+        'address' => "TEXT NOT NULL DEFAULT ''",
+        'contacts_json' => "TEXT NOT NULL DEFAULT '[]'",
+        'notes' => "TEXT NOT NULL DEFAULT ''",
+        'work_status' => "TEXT NOT NULL DEFAULT '방문예정'",
+        'work_status_other' => "TEXT NOT NULL DEFAULT ''",
+    ];
+    foreach ($additionalColumns as $column => $definition) {
+        if (!in_array($column, $existingColumns, true)) {
+            $database->exec("ALTER TABLE records ADD COLUMN {$column} {$definition}");
+        }
+    }
     $database->exec(
         'CREATE TABLE IF NOT EXISTS activity_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -106,6 +121,10 @@ function activityRecordData(array $record): array
     if (is_string($moduleCounts)) {
         $moduleCounts = json_decode($moduleCounts, true, 512, JSON_THROW_ON_ERROR);
     }
+    $contacts = $record['contacts_json'] ?? $record['contacts'] ?? [];
+    if (is_string($contacts)) {
+        $contacts = json_decode($contacts, true, 512, JSON_THROW_ON_ERROR);
+    }
 
     return [
         'visit_date' => $record['visit_date'],
@@ -114,6 +133,12 @@ function activityRecordData(array $record): array
         'upgrade_version' => $record['upgrade_version'],
         'rack_count' => (int) $record['rack_count'],
         'module_counts' => array_values($moduleCounts),
+        'site_name' => $record['site_name'] ?? '',
+        'address' => $record['address'] ?? '',
+        'contacts' => array_values($contacts),
+        'notes' => $record['notes'] ?? '',
+        'work_status' => $record['work_status'] ?? '방문예정',
+        'work_status_other' => $record['work_status_other'] ?? '',
     ];
 }
 
@@ -144,7 +169,8 @@ function loadData(PDO $database, array $filters): array
     [$conditions, $parameters] = filterConditions($filters);
 
     $sql = 'SELECT id, visit_date, device_name, existing_version, upgrade_version,
-                   rack_count, module_counts, created_at
+                   rack_count, module_counts, site_name, address, contacts_json, notes,
+                   work_status, work_status_other, created_at
             FROM records';
     if ($conditions !== []) {
         $sql .= ' WHERE ' . implode(' AND ', $conditions);
@@ -159,6 +185,8 @@ function loadData(PDO $database, array $filters): array
         $record['id'] = (int) $record['id'];
         $record['rack_count'] = (int) $record['rack_count'];
         $record['module_counts'] = json_decode($record['module_counts'], true, 512, JSON_THROW_ON_ERROR);
+        $record['contacts'] = json_decode($record['contacts_json'], true, 512, JSON_THROW_ON_ERROR);
+        unset($record['contacts_json']);
     }
     unset($record);
 
@@ -172,7 +200,8 @@ function loadData(PDO $database, array $filters): array
     $upgradeVersions = $currentVersions;
     $inputHistory = $database->query(
         'SELECT id, visit_date, device_name, existing_version, upgrade_version,
-                rack_count, module_counts
+                rack_count, module_counts, site_name, address, contacts_json, notes,
+                work_status, work_status_other
          FROM records
          ORDER BY visit_date DESC, id DESC
          LIMIT 100'
@@ -182,6 +211,8 @@ function loadData(PDO $database, array $filters): array
         $record['id'] = (int) $record['id'];
         $record['rack_count'] = (int) $record['rack_count'];
         $record['module_counts'] = json_decode($record['module_counts'], true, 512, JSON_THROW_ON_ERROR);
+        $record['contacts'] = json_decode($record['contacts_json'], true, 512, JSON_THROW_ON_ERROR);
+        unset($record['contacts_json']);
     }
     unset($record);
 
@@ -275,6 +306,83 @@ function requiredText(array $input, string $key, int $maxLength): string
     return $value;
 }
 
+function validateAdditionalFields(array $input): array
+{
+    $errors = [];
+    $fields = [
+        'site_name' => ['설치장소(국소)', 100],
+        'address' => ['주소', 300],
+        'notes' => ['비고', 2000],
+        'work_status_other' => ['기타 작업상태', 100],
+    ];
+    $record = [];
+    foreach ($fields as $key => [$label, $maxLength]) {
+        $value = $input[$key] ?? '';
+        if (!is_string($value)) {
+            $errors[] = $label . ' 입력 형식이 올바르지 않습니다.';
+            $record[$key] = '';
+            continue;
+        }
+        $value = trim($value);
+        $length = preg_match_all('/./us', $value);
+        if ($length === false || $length > $maxLength) {
+            $errors[] = $label . '은(는) ' . $maxLength . '자 이내로 입력해 주세요.';
+        }
+        $record[$key] = $value;
+    }
+
+    $workStatus = $input['work_status'] ?? '방문예정';
+    $allowedStatuses = ['방문예정', '작업완료', '작업실패', '작업보류', '기타'];
+    if (!is_string($workStatus) || !in_array($workStatus, $allowedStatuses, true)) {
+        $errors[] = '작업상태를 목록에서 선택해 주세요.';
+        $workStatus = '방문예정';
+    }
+    if ($workStatus === '기타' && $record['work_status_other'] === '') {
+        $errors[] = '기타 작업상태 내용을 입력해 주세요.';
+    }
+    if ($workStatus !== '기타') {
+        $record['work_status_other'] = '';
+    }
+    $record['work_status'] = $workStatus;
+
+    $contacts = $input['contacts'] ?? [];
+    if (!is_array($contacts) || !isListArray($contacts) || count($contacts) > 20) {
+        $errors[] = '담당자는 최대 20명까지 입력할 수 있습니다.';
+        $contacts = [];
+    }
+    $record['contacts'] = [];
+    foreach ($contacts as $index => $contact) {
+        if (!is_array($contact)) {
+            $errors[] = '담당자 ' . ($index + 1) . ' 정보 형식이 올바르지 않습니다.';
+            continue;
+        }
+        $name = $contact['name'] ?? '';
+        $phone = $contact['phone'] ?? '';
+        if (!is_string($name) || !is_string($phone)) {
+            $errors[] = '담당자 이름과 연락처는 문자로 입력해 주세요.';
+            continue;
+        }
+        $name = trim($name);
+        $phone = trim($phone);
+        $nameLength = preg_match_all('/./us', $name);
+        $phoneLength = preg_match_all('/./us', $phone);
+        if ($name === '' && $phone === '') {
+            continue;
+        }
+        if ($name === '' || $phone === '') {
+            $errors[] = '담당자 이름과 연락처를 함께 입력해 주세요.';
+            continue;
+        }
+        if ($nameLength === false || $nameLength > 100 || $phoneLength === false || $phoneLength > 50) {
+            $errors[] = '담당자 이름은 100자, 연락처는 50자 이내로 입력해 주세요.';
+            continue;
+        }
+        $record['contacts'][] = ['name' => $name, 'phone' => $phone];
+    }
+
+    return ['record' => $record, 'errors' => $errors];
+}
+
 function validateBulkRecord($input): array
 {
     if (!is_array($input)) {
@@ -332,6 +440,9 @@ function validateBulkRecord($input): array
         }
     }
 
+    $additional = validateAdditionalFields($input);
+    $errors = array_merge($errors, $additional['errors']);
+    $record = array_merge($record, $additional['record']);
     $record['rack_count'] = $rackCount;
     $record['module_counts'] = $moduleCounts;
     return ['record' => $record, 'errors' => $errors];
@@ -418,7 +529,8 @@ try {
 
         $database->beginTransaction();
         $exists = $database->prepare(
-            'SELECT visit_date, device_name, existing_version, upgrade_version, rack_count, module_counts
+            'SELECT visit_date, device_name, existing_version, upgrade_version, rack_count, module_counts,
+                    site_name, address, contacts_json, notes, work_status, work_status_other
              FROM records WHERE id = ?'
         );
         $exists->execute([$recordId]);
@@ -436,12 +548,26 @@ try {
             'upgrade_version' => '업그레이드 버전',
             'rack_count' => '축전지 랙 수',
             'module_counts' => '랙별 모듈 수',
+            'site_name' => '설치장소(국소)',
+            'address' => '주소',
+            'contacts' => '담당자 정보',
+            'notes' => '비고',
+            'work_status' => '작업상태',
+            'work_status_other' => '기타 작업상태',
         ];
         $changes = [];
         foreach ($fieldLabels as $field => $label) {
             if ($oldRecord[$field] !== $newRecord[$field]) {
                 $formatValue = static function ($value): string {
-                    return is_array($value) ? implode(', ', $value) : (string) $value;
+                    if (is_array($value)) {
+                        return isset($value[0]['name'])
+                            ? implode(', ', array_map(
+                                static fn(array $contact): string => $contact['name'] . ' (' . $contact['phone'] . ')',
+                                $value
+                            ))
+                            : implode(', ', $value);
+                    }
+                    return (string) $value;
                 };
                 $changes[$label] = [
                     'before' => $formatValue($oldRecord[$field]),
@@ -454,7 +580,8 @@ try {
         $recordUpdate = $database->prepare(
             'UPDATE records
              SET visit_date = ?, device_name = ?, existing_version = ?, upgrade_version = ?,
-                 rack_count = ?, module_counts = ?
+                 rack_count = ?, module_counts = ?, site_name = ?, address = ?, contacts_json = ?,
+                 notes = ?, work_status = ?, work_status_other = ?
              WHERE id = ?'
         );
         $recordUpdate->execute([
@@ -464,6 +591,12 @@ try {
             $validated['record']['upgrade_version'],
             $validated['record']['rack_count'],
             json_encode(array_values($validated['record']['module_counts']), JSON_THROW_ON_ERROR),
+            $validated['record']['site_name'],
+            $validated['record']['address'],
+            json_encode($validated['record']['contacts'], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+            $validated['record']['notes'],
+            $validated['record']['work_status'],
+            $validated['record']['work_status_other'],
             $recordId,
         ]);
         if ($changes !== []) {
@@ -492,7 +625,8 @@ try {
             $placeholders = implode(',', array_fill(0, count($idChunk), '?'));
             $recordsQuery = $database->prepare(
                 'SELECT id, visit_date, device_name, existing_version, upgrade_version,
-                        rack_count, module_counts
+                        rack_count, module_counts, site_name, address, contacts_json, notes,
+                        work_status, work_status_other
                  FROM records WHERE id IN (' . $placeholders . ')'
             );
             $recordsQuery->execute($idChunk);
@@ -517,7 +651,8 @@ try {
         [$conditions, $parameters] = filterConditions($filters);
         $sql = 'DELETE FROM records';
         $selectSql = 'SELECT id, visit_date, device_name, existing_version, upgrade_version,
-                             rack_count, module_counts FROM records';
+                             rack_count, module_counts, site_name, address, contacts_json, notes,
+                             work_status, work_status_other FROM records';
         if ($conditions !== []) {
             $sql .= ' WHERE ' . implode(' AND ', $conditions);
             $selectSql .= ' WHERE ' . implode(' AND ', $conditions);
@@ -571,8 +706,9 @@ try {
         $deviceInsert = $database->prepare('INSERT OR IGNORE INTO devices (name) VALUES (?)');
         $recordInsert = $database->prepare(
             'INSERT INTO records (
-                visit_date, device_name, existing_version, upgrade_version, rack_count, module_counts
-            ) VALUES (?, ?, ?, ?, ?, ?)'
+                visit_date, device_name, existing_version, upgrade_version, rack_count, module_counts,
+                site_name, address, contacts_json, notes, work_status, work_status_other
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         foreach ($validatedRecords as $record) {
             $deviceInsert->execute([$record['device_name']]);
@@ -583,6 +719,12 @@ try {
                 $record['upgrade_version'],
                 $record['rack_count'],
                 json_encode(array_values($record['module_counts']), JSON_THROW_ON_ERROR),
+                $record['site_name'],
+                $record['address'],
+                json_encode($record['contacts'], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+                $record['notes'],
+                $record['work_status'],
+                $record['work_status_other'],
             ]);
             recordActivity(
                 $database,
@@ -617,14 +759,28 @@ try {
         }
     }
 
+    $additional = validateAdditionalFields($input);
+    if ($additional['errors'] !== []) {
+        respond(422, ['error' => implode(' ', $additional['errors'])]);
+    }
+    $record = array_merge([
+        'visit_date' => $visitDate,
+        'device_name' => $deviceName,
+        'existing_version' => $existingVersion,
+        'upgrade_version' => $upgradeVersion,
+        'rack_count' => $rackCount,
+        'module_counts' => $moduleCounts,
+    ], $additional['record']);
+
     $database->beginTransaction();
     $deviceInsert = $database->prepare('INSERT OR IGNORE INTO devices (name) VALUES (?)');
     $deviceInsert->execute([$deviceName]);
 
     $recordInsert = $database->prepare(
         'INSERT INTO records (
-            visit_date, device_name, existing_version, upgrade_version, rack_count, module_counts
-        ) VALUES (?, ?, ?, ?, ?, ?)'
+            visit_date, device_name, existing_version, upgrade_version, rack_count, module_counts,
+            site_name, address, contacts_json, notes, work_status, work_status_other
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
     $recordInsert->execute([
         $visitDate,
@@ -633,6 +789,12 @@ try {
         $upgradeVersion,
         $rackCount,
         json_encode(array_values($moduleCounts), JSON_THROW_ON_ERROR),
+        $record['site_name'],
+        $record['address'],
+        json_encode($record['contacts'], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+        $record['notes'],
+        $record['work_status'],
+        $record['work_status_other'],
     ]);
     $recordId = (int) $database->lastInsertId();
     recordActivity($database, 'create', $recordId, [
@@ -642,6 +804,12 @@ try {
         'upgrade_version' => $upgradeVersion,
         'rack_count' => $rackCount,
         'module_counts' => $moduleCounts,
+        'site_name' => $record['site_name'],
+        'address' => $record['address'],
+        'contacts' => $record['contacts'],
+        'notes' => $record['notes'],
+        'work_status' => $record['work_status'],
+        'work_status_other' => $record['work_status_other'],
     ]);
     $database->commit();
 

@@ -127,6 +127,39 @@ try {
             </section>
 
             <form id="recordForm">
+                <div class="form-grid site-fields">
+                    <label class="field">
+                        <span>설치장소(국소)</span>
+                        <input id="siteName" name="site_name" type="text" maxlength="100" placeholder="설치 국소명을 입력하세요">
+                    </label>
+                    <label class="field">
+                        <span>주소</span>
+                        <input id="siteAddress" name="address" type="text" maxlength="300" autocomplete="street-address">
+                    </label>
+                    <label class="field">
+                        <span>작업상태</span>
+                        <select id="workStatus" name="work_status">
+                            <option>방문예정</option>
+                            <option>작업완료</option>
+                            <option>작업실패</option>
+                            <option>작업보류</option>
+                            <option>기타</option>
+                        </select>
+                    </label>
+                    <label id="workStatusOtherField" class="field" hidden>
+                        <span>기타 작업상태 <span class="required" aria-hidden="true">*</span></span>
+                        <input id="workStatusOther" name="work_status_other" type="text" maxlength="100" disabled
+                               placeholder="작업상태를 직접 입력하세요">
+                    </label>
+                </div>
+                <section class="contacts-section" aria-labelledby="contacts-title">
+                    <div class="rack-heading">
+                        <h3 id="contacts-title">담당자 정보</h3>
+                        <button id="addContactButton" class="secondary-button" type="button">+추가</button>
+                    </div>
+                    <p class="contacts-hint">담당자는 최대 20명까지 추가할 수 있습니다. 입력 시 이름과 연락처를 함께 작성해 주세요.</p>
+                    <div id="contactList"></div>
+                </section>
                 <div class="form-grid">
                     <label class="field">
                         <span>현장방문날짜 <span class="required" aria-hidden="true">*</span></span>
@@ -178,6 +211,11 @@ try {
                     <div id="rackModules" class="rack-list"></div>
                 </section>
 
+                <label class="field notes-field">
+                    <span>비고</span>
+                    <textarea id="installationNotes" name="notes" rows="4" maxlength="2000"
+                              placeholder="설치 시 특이사항을 기록하세요"></textarea>
+                </label>
                 <div class="form-footer">
                     <p id="formMessage" class="form-message" role="status" aria-live="polite"></p>
                     <div class="form-actions">

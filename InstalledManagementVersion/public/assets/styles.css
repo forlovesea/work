@@ -17,6 +17,55 @@
     box-sizing: border-box;
 }
 
+.site-fields,
+.contacts-section {
+    margin-bottom: 24px;
+}
+
+.contacts-hint {
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+.contact-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: end;
+    margin-top: 12px;
+}
+
+.contact-row button {
+    min-height: 44px;
+}
+
+.notes-field {
+    margin-top: 24px;
+}
+
+.record-site-detail {
+    margin: 6px 0;
+    font-size: 13px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 540px) {
+    .contact-row {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .contact-row button {
+        justify-self: end;
+    }
+
+    .field textarea {
+        font-size: 16px;
+    }
+}
+
 body {
     min-width: 320px;
     margin: 0;
@@ -74,6 +123,7 @@ body {
 
 button,
 input,
+textarea,
 select {
     font: inherit;
 }
@@ -237,6 +287,7 @@ h2 {
 }
 
 .field input,
+.field textarea,
 .field select,
 .rack-count-field input,
 .module-select {
@@ -253,11 +304,19 @@ h2 {
 }
 
 .field input:focus,
+.field textarea:focus,
 .field select:focus,
 .rack-count-field input:focus,
 .module-select:focus {
     border-color: #7894ed;
     box-shadow: 0 0 0 3px rgb(61 101 216 / 12%);
+}
+
+.field textarea {
+    min-height: 112px;
+    padding: 12px;
+    resize: vertical;
+    line-height: 1.6;
 }
 
 .field input::placeholder {

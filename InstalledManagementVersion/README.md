@@ -22,7 +22,7 @@
 - Apache 2.4 및 Apache에서 실행 가능한 PHP 7.4 이상
 - PHP PDO SQLite 확장 (`pdo_sqlite`)
 
-기존 Apache 가상호스트, 원격제어 서버, 축전지 감시 서버 설정을 변경하지 않고 별도 경로로 추가할 수 있습니다. Apache 설정 변경은 서버 관리자가 검토 후 적용해야 합니다.
+앱은 `/installed-management/` 별도 URL 경로로 연결합니다. 기존 원격제어 서버와 축전지 감시 서버의 설정을 덮어쓰지 않도록 **현재 사용하는 HTTPS 가상호스트 파일 하나에만 Alias와 접근 규칙을 추가**합니다. 설정을 적용하기 전에 해당 파일을 백업하고 Apache 문법 검사에 통과한 뒤 graceful reload를 사용합니다.
 
 ## 설치 및 Apache 연결 예시
 
@@ -44,6 +44,7 @@ sudo apt install git
 아래 예시는 Linux 계정명이 `user`이고 프로젝트를 요청하신 `/home/user/proj/github/work/InstalledManagementVersion` 경로에 설치하는 경우입니다. 실제 계정명이 다르면 명령의 `/home/user`를 해당 계정의 홈 경로로 바꾸세요. Git 저장소 루트는 `/home/user/proj/github/work`이며, 이 경로는 아직 없어야 합니다. 저장소 전체 파일을 작업 트리에 펼치지 않고 `InstalledManagementVersion`만 sparse checkout으로 내려받습니다.
 
 ```bash
+mkdir -p /home/user/proj/github
 git clone --depth 1 --filter=blob:none --sparse --branch main \
   https://github.com/forlovesea/work.git \
   /home/user/proj/github/work
@@ -78,22 +79,100 @@ git -C /home/user/proj/github/work pull --ff-only origin main
 
 이 갱신 절차는 추적되지 않는 `data/installed-management.sqlite` 파일을 덮어쓰거나 삭제하지 않습니다. 배포 전 데이터베이스를 백업하고, 갱신 후 앱을 확인하세요.
 
-### 3. Apache 연결
+### 3. 먼저 Apache 가상호스트와 PHP 구성을 확인
 
-PHP 7.4 이상과 PDO SQLite가 아직 설치되어 있지 않은 경우에만 서버 관리자가 별도로 설치 여부를 검토합니다. 설치된 PHP 핸들러(Apache 모듈 또는 PHP-FPM)에 앱의 `public` 디렉터리를 연결해야 합니다. 예를 들어 기존 가상호스트 설정에 다음 Alias를 추가할 수 있습니다.
+아래 명령은 **조회만** 합니다. 먼저 현재 활성화된 가상호스트와 PHP 모듈/확장을 확인합니다.
 
-```apache
-Alias /installed-management /home/user/proj/github/work/InstalledManagementVersion/public
-<Directory /home/user/proj/github/work/InstalledManagementVersion/public>
-    DirectoryIndex index.php
-    Options -Indexes
-    AllowOverride None
-    # 실제 현장망 또는 VPN 대역으로 바꿔서 사용하세요.
-    Require ip 192.168.0.0/16
-</Directory>
+```bash
+sudo apache2ctl -S
+sudo apache2ctl -M | grep -E 'php|proxy_fcgi'
+sudo grep -R -nE 'SetHandler|proxy:unix:.*php|php_module' \
+  /etc/apache2/sites-enabled /etc/apache2/conf-enabled
+php -v
+php -m | grep -Ei 'PDO|pdo_sqlite'
+ls -l /run/php/
 ```
 
-PHP 핸들러가 이미 구성되어 있어야 하며, 경로를 적용한 뒤 기존 가상호스트와 서비스의 상태를 확인합니다. 접속 주소는 `https://<서버주소>/installed-management/` 형태입니다. 이 앱은 로그인 기능을 포함하지 않으므로 사내망/VPN으로 접근을 제한하고 HTTPS를 사용하세요. 외부 공개가 필요하면 기존 인증 정책에 맞는 Apache 접근 제어를 먼저 적용해야 합니다.
+`apache2ctl -S` 결과에서 서비스에 사용할 실제 고객 접속 도메인의 `*:443` HTTPS 가상호스트 항목을 찾습니다. 출력에 표시된 설정 파일 경로는 보통 `/etc/apache2/sites-enabled/...conf`이며, 이 경로가 가리키는 실제 파일을 아래와 같이 확인합니다.
+
+```bash
+readlink -f /etc/apache2/sites-enabled/<위에서-확인한-파일명>.conf
+```
+
+사이트가 HTTPS 가상호스트를 제공하지 않는 경우 먼저 HTTPS 구성을 준비하세요. HTTP로 이 앱을 외부에 공개하지 마세요. 활성 가상호스트 파일이 어느 것인지 불분명하거나 파일에 다른 서비스의 규칙이 복잡하게 들어 있다면 수정 전에 서버 관리자에게 확인합니다.
+
+PHP CLI에 SQLite 확장이 보인다는 것만으로 Apache에서도 PHP가 실행된다고 단정할 수는 없습니다. PHP가 이미 운영 중인 경우 이 앱을 위해 기존 PHP 모듈이나 PHP-FPM 설정을 다시 설치·전환하지 말고, 해당 HTTPS 가상호스트의 기존 PHP 처리 설정을 그대로 사용합니다. 브라우저에서 PHP 코드가 텍스트로 보이거나 내려받아지는 상태로 서비스를 공개하지 마세요.
+
+#### Apache에서 PHP를 아직 처리하지 않는 경우에만
+
+기존 가상호스트에 이미 `php_module`(mod_php) 또는 PHP-FPM의 `SetHandler`/`proxy_fcgi` 설정이 있는지 확인합니다. 두 방식을 동시에 활성화하지 마세요. 다른 서비스가 이미 사용 중이라면 아래 설치/활성화 명령을 실행하기 전에 관리자와 협의합니다.
+
+Ubuntu 20.04 기본 PHP 7.4 FPM을 새로 구성하기로 승인된 경우, 패키지를 설치하고 Apache의 FastCGI 모듈을 활성화합니다.
+
+```bash
+sudo apt install php7.4-fpm php7.4-sqlite3
+sudo a2enmod proxy_fcgi setenvif
+sudo systemctl enable --now php7.4-fpm
+ls -l /run/php/php7.4-fpm.sock
+```
+
+그 다음 아래 4단계에서 지정한 **앱의 `<Directory>` 블록 안에만** FPM `FilesMatch` 예시를 추가합니다. 이 설정을 `<VirtualHost>`에 전역으로 두지 않아야 다른 PHP 사이트에 영향을 주지 않습니다. FPM 소켓 파일이 다르면 `ls -l /run/php/` 결과에 맞게 경로를 바꾸세요. 이미 mod_php를 사용한다면 이 FPM 설치와 `FilesMatch` 설정은 하지 않습니다.
+
+### 4. 올바른 HTTPS 가상호스트 파일에 앱 경로 추가
+
+앞 단계의 `readlink -f` 결과로 확인한 **기존 HTTPS 사이트 설정 파일**을 백업하고 엽니다. 예를 들어 실제 결과가 `/etc/apache2/sites-available/company-ssl.conf`였다면 다음과 같습니다. 아래 파일명은 서버에서 확인한 값으로 바꿔야 합니다.
+
+```bash
+sudo cp -a /etc/apache2/sites-available/<실제-HTTPS-가상호스트>.conf \
+  /etc/apache2/sites-available/<실제-HTTPS-가상호스트>.conf.bak
+sudo nano /etc/apache2/sites-available/<실제-HTTPS-가상호스트>.conf
+```
+
+파일 안의 해당 도메인 `<VirtualHost *:443>` 블록을 찾습니다. `</VirtualHost>` 바로 위에 다음 설정을 추가합니다. `Require ip`에는 **실제 현장망/VPN에서 서버에 접속할 때 보이는 클라이언트 IP 또는 CIDR**을 적고, 예시 주소는 그대로 사용하지 마세요. 여러 대역이면 `Require ip` 줄을 필요한 만큼 추가합니다.
+
+```apache
+    Alias /installed-management /home/user/proj/github/work/InstalledManagementVersion/public
+
+    <Directory /home/user/proj/github/work/InstalledManagementVersion/public>
+        DirectoryIndex index.php
+        Options -Indexes
+        AllowOverride None
+        Require ip <실제-현장망-CIDR>
+        # 이 앱 전용 PHP-FPM을 새로 구성한 경우에만 아래 블록을 추가합니다.
+        # 이미 동작하는 PHP 핸들러가 있다면 추가하지 마세요.
+        <FilesMatch "\.php$">
+            SetHandler "proxy:unix:/run/php/php7.4-fpm.sock|fcgi://localhost"
+        </FilesMatch>
+    </Directory>
+```
+
+예를 들어 현장망이 `203.0.113.0/24`라고 확인된 경우에만 `Require ip 203.0.113.0/24`와 같이 설정합니다. 스마트폰에서 사용하는 통신/VPN 대역도 접근이 필요한지 네트워크 관리자에게 확인하세요. `Require all granted`로 전체 인터넷에 공개하지 마세요. 이 앱에는 로그인 기능이 없으므로 HTTPS와 네트워크 접근 제한이 필수입니다.
+
+위 예시의 주석 2줄은 FPM을 새로 구성한 경우에만 남기고, 기존 PHP 핸들러를 사용하는 경우 제거합니다. FPM 소켓이 `/run/php/php7.4-fpm.sock`이 아닌 서버에서는 `SetHandler`의 소켓 경로도 실제 경로로 바꿉니다.
+
+### 5. 문법 검사 후 안전하게 반영
+
+먼저 Apache 설정 문법을 검사합니다. `Syntax OK`가 나오지 않으면 reload하지 말고 오류를 수정합니다.
+
+```bash
+sudo apache2ctl configtest
+```
+
+문법 검사가 통과하면 Apache를 중단하지 않는 graceful reload를 실행하고 상태를 확인합니다.
+
+```bash
+sudo systemctl reload apache2
+sudo systemctl --no-pager --full status apache2
+```
+
+스마트폰 또는 허용된 현장망/VPN 기기에서 `https://<서버주소>/installed-management/`에 접속합니다. 화면이 표시되고 기록 목록/API가 동작하는지 확인합니다. 서버에서 로그를 확인하려면 다음을 사용합니다.
+
+```bash
+sudo tail -n 80 /var/log/apache2/error.log
+sudo tail -n 80 /var/log/apache2/access.log
+```
+
+문제가 생기면 마지막에 변경한 가상호스트 파일을 백업본으로 복원하고 `sudo apache2ctl configtest` 후 `sudo systemctl reload apache2`를 실행합니다. PHP 핸들러 또는 SQLite 확장이 부족한 오류는 Apache 로그에 표시됩니다. 기존 가상호스트나 PHP 처리 설정이 불확실하면 설정을 변경하기 전에 서버 관리자에게 확인하세요.
 
 업그레이드 버전 입력란은 Door LCD 요청에 맞춰 `v0.0.0.9`로 미리 채워져 있으며, 다른 장치의 버전을 입력할 때 수정할 수 있습니다.
 

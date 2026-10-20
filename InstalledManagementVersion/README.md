@@ -41,54 +41,50 @@ sudo apt update
 sudo apt install git
 ```
 
-저장소 전체 파일을 작업 트리에 펼치지 않고 `InstalledManagementVersion`만 sparse checkout으로 내려받습니다. 아래 checkout 경로(`/opt/installed-management-version-source`)가 아직 없어야 합니다.
+아래 예시는 Linux 계정명이 `user`이고 프로젝트를 요청하신 `/home/user/proj/github/work/InstalledManagementVersion` 경로에 설치하는 경우입니다. 실제 계정명이 다르면 명령의 `/home/user`를 해당 계정의 홈 경로로 바꾸세요. Git 저장소 루트는 `/home/user/proj/github/work`이며, 이 경로는 아직 없어야 합니다. 저장소 전체 파일을 작업 트리에 펼치지 않고 `InstalledManagementVersion`만 sparse checkout으로 내려받습니다.
 
 ```bash
-sudo git clone --depth 1 --filter=blob:none --sparse --branch main \
+git clone --depth 1 --filter=blob:none --sparse --branch main \
   https://github.com/forlovesea/work.git \
-  /opt/installed-management-version-source
-sudo git -C /opt/installed-management-version-source \
+  /home/user/proj/github/work
+git -C /home/user/proj/github/work \
   sparse-checkout set InstalledManagementVersion
 ```
 
-공개 웹 파일만 Apache 서비스 경로에 복사합니다. SQLite 데이터는 공개 디렉터리 밖에 두기 위해 별도의 쓰기 가능 디렉터리를 만듭니다.
+웹 파일은 저장소의 `public` 디렉터리에서 직접 서비스합니다. Apache가 사용자 홈 경로를 통과하고, 앱의 SQLite 데이터 디렉터리에만 쓸 수 있도록 ACL을 설정합니다. `setfacl` 명령이 없다면 `acl` 패키지를 먼저 설치합니다.
 
 ```bash
-sudo install -d -o root -g root -m 755 /opt/installed-management-version/public
-sudo cp -a \
-  /opt/installed-management-version-source/InstalledManagementVersion/public/. \
-  /opt/installed-management-version/public/
-sudo install -d -o www-data -g www-data -m 770 /opt/installed-management-version/data
-sudo chown -R root:root /opt/installed-management-version/public
-sudo find /opt/installed-management-version/public -type d -exec chmod 755 {} \;
-sudo find /opt/installed-management-version/public -type f -exec chmod 644 {} \;
+sudo apt install acl
+sudo setfacl -m u:www-data:--x /home/user
+sudo setfacl -m u:www-data:--x /home/user/proj
+sudo setfacl -m u:www-data:--x /home/user/proj/github
+sudo setfacl -m u:www-data:--x /home/user/proj/github/work
+sudo setfacl -m u:www-data:rx /home/user/proj/github/work/InstalledManagementVersion
+sudo setfacl -m u:www-data:rwx \
+  /home/user/proj/github/work/InstalledManagementVersion/data
+sudo setfacl -m d:u:www-data:rwx \
+  /home/user/proj/github/work/InstalledManagementVersion/data
 ```
 
-`www-data`에는 `data` 디렉터리 쓰기 권한만 주고 `public`에는 쓰기 권한을 주지 않습니다. 앱의 공개 경로는 `/opt/installed-management-version/public`, SQLite 파일 경로는 `/opt/installed-management-version/data/installed-management.sqlite`입니다.
+이 설정은 `www-data`가 홈 디렉터리 내용을 열람하지 않고 지정한 경로만 통과하게 하며, 앱의 `data` 디렉터리에 SQLite 기록을 생성·갱신할 수 있게 합니다. Apache 공개 경로는 `/home/user/proj/github/work/InstalledManagementVersion/public`, SQLite 파일 경로는 `/home/user/proj/github/work/InstalledManagementVersion/data/installed-management.sqlite`입니다.
 
 ### 2. 이후 최신 버전으로 갱신
 
-서버에 새 코드를 내려받을 때는 sparse checkout 저장소를 fast-forward로 갱신한 뒤 공개 파일만 복사합니다.
+최초 clone을 수행한 Linux 사용자 계정으로 GitHub의 `main` 브랜치를 fast-forward 갱신합니다. 저장소 위치에서 공개 파일을 직접 서비스하므로 별도의 파일 복사는 필요하지 않습니다.
 
 ```bash
-sudo git -C /opt/installed-management-version-source pull --ff-only origin main
-sudo cp -a \
-  /opt/installed-management-version-source/InstalledManagementVersion/public/. \
-  /opt/installed-management-version/public/
-sudo chown -R root:root /opt/installed-management-version/public
-sudo find /opt/installed-management-version/public -type d -exec chmod 755 {} \;
-sudo find /opt/installed-management-version/public -type f -exec chmod 644 {} \;
+git -C /home/user/proj/github/work pull --ff-only origin main
 ```
 
-이 갱신 절차는 `data` 디렉터리와 SQLite 파일을 덮어쓰거나 삭제하지 않습니다. 배포 전 데이터베이스를 백업하고, 갱신 후 앱을 확인하세요.
+이 갱신 절차는 추적되지 않는 `data/installed-management.sqlite` 파일을 덮어쓰거나 삭제하지 않습니다. 배포 전 데이터베이스를 백업하고, 갱신 후 앱을 확인하세요.
 
 ### 3. Apache 연결
 
 PHP 7.4 이상과 PDO SQLite가 아직 설치되어 있지 않은 경우에만 서버 관리자가 별도로 설치 여부를 검토합니다. 설치된 PHP 핸들러(Apache 모듈 또는 PHP-FPM)에 앱의 `public` 디렉터리를 연결해야 합니다. 예를 들어 기존 가상호스트 설정에 다음 Alias를 추가할 수 있습니다.
 
 ```apache
-Alias /installed-management /opt/installed-management-version/public
-<Directory /opt/installed-management-version/public>
+Alias /installed-management /home/user/proj/github/work/InstalledManagementVersion/public
+<Directory /home/user/proj/github/work/InstalledManagementVersion/public>
     DirectoryIndex index.php
     Options -Indexes
     AllowOverride None

@@ -134,14 +134,22 @@ sudo grep -R -nE 'VirtualHost.*:443|ServerName|SSLCertificateFile|SSLCertificate
 
 도메인이나 DNS 레코드는 사용하지 않습니다. 인증서 발급 기관에 `61.105.141.21` IP 주소 자체가 인증서 SAN에 들어가는 인증서를 요청하세요. **도메인 이름만 들어 있는 인증서는 이 IP 주소 접속에 사용할 수 없습니다.** 발급 기관이 공인 IP용 인증서를 제공하는지, 이 IP를 검증할 수 있는지, 갱신 주기와 자동 갱신 방법이 무엇인지 사전에 확인하세요. 인증서가 준비되기 전에는 HTTPS 설정을 적용하지 않습니다.
 
-인증서와 개인 키는 서버에 안전하게 보관하고, 아래 설정 예시에서는 각각 `/etc/ssl/installed-management/fullchain.pem`, `/etc/ssl/installed-management/privkey.pem`에 있다고 가정합니다. 실제 저장 경로가 다르면 설정과 확인 명령의 경로를 함께 바꾸세요. 인증서에 IP SAN이 있는지 확인합니다.
+이 서버에서 확인한 `remotecontrol-ip` 인증서를 재사용할 수 있습니다. 인증서와 짝이 확인된 개인 키는 다음 경로입니다. 파일을 복사하거나 권한을 완화하지 말고 Apache 설정에서 이 경로를 직접 참조합니다.
 
 ```bash
-openssl x509 -in /etc/ssl/installed-management/fullchain.pem \
+sudo openssl x509 -in /etc/letsencrypt/live/remotecontrol-ip/fullchain.pem \
   -noout -ext subjectAltName
+sudo test -s /etc/letsencrypt/live/remotecontrol-ip/privkey.pem
 ```
 
 출력에 `IP Address:61.105.141.21`이 있어야 합니다. 인증서가 이 IP를 포함하지 않거나 스마트폰에서 신뢰되지 않으면 경고를 무시하거나 브라우저 보안을 낮추지 마세요. 자체 서명 인증서를 사용할 경우에는 모든 스마트폰에 해당 인증서를 신뢰하도록 별도로 설치·관리해야 하며, 그 전까지는 정상적인 공개 HTTPS로 사용할 수 없습니다.
+
+인증서 확인 시 만료일이 2026년 10월 26일로 확인되었으며 단기 인증서입니다. Certbot의 `snap.certbot.renew.timer`가 자동 갱신을 예약하고, 다음 명령의 dry-run이 성공하는지 확인했습니다. 갱신 후 Apache도 새 인증서를 읽도록 아래 별도 deploy hook을 설정하세요.
+
+```bash
+sudo systemctl list-timers --all | grep -i certbot
+sudo certbot renew --cert-name remotecontrol-ip --dry-run
+```
 
 `*:443` 기존 HTTPS 가상호스트가 있으면 중복 가상호스트를 만들지 말고, 해당 HTTPS 가상호스트에 앱 `Alias` 및 `<Directory>` 블록을 추가합니다. 기존 443 기본 가상호스트가 OpenProject 또는 다른 서비스를 처리한다면 새 가상호스트가 그 서비스의 HTTPS 응답을 바꾸지 않는지 운영자와 확인하세요.
 
@@ -168,8 +176,8 @@ sudo nano /etc/openproject/addons/apache2/custom/server/installed-management-htt
     DocumentRoot /var/www/html
 
     SSLEngine on
-    SSLCertificateFile /etc/ssl/installed-management/fullchain.pem
-    SSLCertificateKeyFile /etc/ssl/installed-management/privkey.pem
+    SSLCertificateFile /etc/letsencrypt/live/remotecontrol-ip/fullchain.pem
+    SSLCertificateKeyFile /etc/letsencrypt/live/remotecontrol-ip/privkey.pem
     SetEnv HTTPS on
 
     Alias /installed-management /home/jihyun/proj/github/work/InstalledManagementVersion/public
@@ -201,10 +209,10 @@ sudo mv /etc/openproject/addons/apache2/custom/vhost/installed-management.conf \
 먼저 인증서 SAN과 인증서/개인 키 파일, Apache 설정 문법을 확인합니다. IP SAN이 없거나 파일 경로가 실제 파일과 다르면 진행하지 마세요.
 
 ```bash
-openssl x509 -in /etc/ssl/installed-management/fullchain.pem \
+sudo openssl x509 -in /etc/letsencrypt/live/remotecontrol-ip/fullchain.pem \
   -noout -ext subjectAltName
-sudo test -s /etc/ssl/installed-management/fullchain.pem
-sudo test -s /etc/ssl/installed-management/privkey.pem
+sudo test -s /etc/letsencrypt/live/remotecontrol-ip/fullchain.pem
+sudo test -s /etc/letsencrypt/live/remotecontrol-ip/privkey.pem
 sudo apache2ctl configtest
 ```
 
@@ -218,6 +226,36 @@ sudo apache2ctl configtest
 sudo systemctl reload apache2
 sudo systemctl --no-pager --full status apache2
 ```
+
+### 7. Certbot 갱신 후 Apache 자동 reload 설정
+
+Certbot의 `remotecontrol.sh` deploy hook은 `remotecontrol-ip` 인증서를 `/etc/remotecontrol/`에 복사하고 `remotecontrol-relay.service`를 재시작하지만, Apache는 reload하지 않습니다. 기존 hook은 수정하지 말고 Apache 전용 hook을 별도 파일로 추가합니다. 이 hook은 `remotecontrol-ip` 인증서가 실제 갱신되었을 때만 실행됩니다.
+
+```bash
+sudo nano /etc/letsencrypt/renewal-hooks/deploy/installed-management-apache.sh
+```
+
+아래 내용을 저장합니다.
+
+```sh
+#!/bin/sh
+set -eu
+
+[ "${RENEWED_LINEAGE:-}" = "/etc/letsencrypt/live/remotecontrol-ip" ] || exit 0
+
+/usr/sbin/apache2ctl configtest
+/usr/bin/systemctl reload apache2
+```
+
+파일을 root 소유로 설정하고 실행 권한을 부여한 뒤 스크립트 문법을 확인합니다.
+
+```bash
+sudo chown root:root /etc/letsencrypt/renewal-hooks/deploy/installed-management-apache.sh
+sudo chmod 750 /etc/letsencrypt/renewal-hooks/deploy/installed-management-apache.sh
+sudo sh -n /etc/letsencrypt/renewal-hooks/deploy/installed-management-apache.sh
+```
+
+이 hook은 Apache 설정이 유효할 때만 reload합니다. Apache HTTPS 가상호스트를 먼저 설치하고 `sudo apache2ctl configtest`가 `Syntax OK`인지 확인한 다음 hook을 활성화하세요. 기존 `remotecontrol.sh`, Nginx hook, Certbot timer는 수정하지 않습니다. Certbot dry-run은 시험 인증서 갱신이므로 deploy hook이 실행되지 않을 수 있습니다. 실제 갱신을 기다리지 않고 hook을 확인하려고 수동 실행하면 Apache를 reload하게 되므로, 먼저 설정 검사와 앱 접속을 확인하세요.
 
 네트워크 방화벽에서 TCP 443이 허용되어 있는지 확인합니다. 스마트폰 브라우저에서 `https://61.105.141.21/installed-management/`를 열고 인증서 경고가 없는지 확인합니다. 기본 암호 `jjh1234`로 로그인한 뒤 바로 암호 변경 명령을 실행하세요. 화면과 설치 정보 조회를 확인하고 테스트 기록을 저장한 뒤 `data/installed-management.sqlite`가 생성되는지 확인합니다. `http://61.105.141.21:9230/installed-management/`는 더 이상 앱 접속 주소로 사용하지 않습니다.
 

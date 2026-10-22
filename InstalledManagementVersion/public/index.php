@@ -172,6 +172,7 @@ try {
                         <select id="deviceSelect" name="device_name" required>
                             <option value="SMU02C + Door LCD">SMU02C + Door LCD</option>
                             <option value="Door LCD">Door LCD</option>
+                            <option value="iIoT Gateway">iIoT Gateway</option>
                             <option value="SMU02C">SMU02C</option>
                             <option value="__new__">+ 새 장치 추가</option>
                         </select>
@@ -186,7 +187,7 @@ try {
                     <label class="field">
                         <span><span id="existingVersionLabel">기존 설치 버전</span> <span class="required" aria-hidden="true">*</span></span>
                         <input id="existingVersion" name="existing_version" type="text" maxlength="50"
-                               list="existingVersionOptions" placeholder="예: v0.0.0.8" required>
+                               list="existingVersionOptions" value="V100R024C10SPC235" placeholder="예: v0.0.0.8" required>
                         <datalist id="existingVersionOptions"></datalist>
                     </label>
 

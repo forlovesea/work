@@ -100,7 +100,7 @@ function connectDatabase(): PDO
     $database->exec("DELETE FROM activity_log WHERE occurred_at < datetime('now', '-1 year')");
 
     $seedDevice = $database->prepare('INSERT OR IGNORE INTO devices (name) VALUES (?)');
-    foreach (['SMU02C + Door LCD', 'Door LCD', 'SMU02C'] as $deviceName) {
+    foreach (['SMU02C + Door LCD', 'Door LCD', 'iIoT Gateway', 'SMU02C'] as $deviceName) {
         $seedDevice->execute([$deviceName]);
     }
 
@@ -210,7 +210,7 @@ function loadData(PDO $database, array $filters): array
     }
     unset($record);
 
-    $devices = $database->query('SELECT name FROM devices ORDER BY CASE WHEN name = \'SMU02C + Door LCD\' THEN 0 ELSE 1 END, name COLLATE NOCASE')->fetchAll(PDO::FETCH_COLUMN);
+    $devices = $database->query('SELECT name FROM devices ORDER BY CASE name WHEN \'SMU02C + Door LCD\' THEN 0 WHEN \'Door LCD\' THEN 1 WHEN \'iIoT Gateway\' THEN 2 WHEN \'SMU02C\' THEN 3 ELSE 4 END, name COLLATE NOCASE')->fetchAll(PDO::FETCH_COLUMN);
     $currentVersions = $database->query(
         'SELECT DISTINCT upgrade_version FROM records ORDER BY upgrade_version COLLATE NOCASE'
     )->fetchAll(PDO::FETCH_COLUMN);

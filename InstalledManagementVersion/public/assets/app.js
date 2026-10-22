@@ -301,7 +301,8 @@ function fillSelect(select, values, emptyLabel, previousValue = select.value) {
 }
 
 function renderDevices(devices) {
-    devices = ['SMU02C + Door LCD', ...devices.filter((name) => name !== 'SMU02C + Door LCD')];
+    const defaults = ['SMU02C + Door LCD', 'Door LCD', 'iIoT Gateway', 'SMU02C'];
+    devices = [...defaults, ...devices.filter((name) => !defaults.includes(name))];
     const selected = deviceSelect.value;
     deviceSelect.replaceChildren();
 
@@ -321,6 +322,15 @@ function renderDevices(devices) {
         ? selected
         : devices[0];
     updateCustomDeviceField();
+}
+
+function applyDeviceVersionDefault() {
+    const defaults = {
+        'SMU02C + Door LCD': 'V100R024C10SPC235',
+        SMU02C: 'V100R024C10SPC235',
+        'iIoT Gateway': 'V100R024C10SPC265',
+    };
+    existingVersionInput.value = defaults[deviceSelect.value] || '';
 }
 
 function updateCustomDeviceField() {
@@ -647,7 +657,7 @@ function downloadImportTemplate() {
         ['작성 안내', '내용'],
         ['입력 방법', '첫 번째 시트 "설치 정보"의 2행부터 현장별로 한 줄씩 입력하세요.'],
         ['현장방문날짜', 'YYYY-MM-DD 형식으로 입력하세요. 예: 2026-10-20'],
-        ['장비명', 'SMU02C + Door LCD, Door LCD, SMU02C 또는 등록할 장비명을 입력하세요.'],
+        ['장비명', 'SMU02C + Door LCD, Door LCD, iIoT Gateway, SMU02C 또는 등록할 장비명을 입력하세요.'],
         ['버전', '기존 설치 버전과 업그레이드 버전을 입력하세요. SMU02C + Door LCD 선택 시 이 두 열은 SMU02C 버전이며, 끝의 Door LCD 버전 두 열도 입력하세요.'],
         ['축전지 Rack 수', '기본 3개입니다. 필요하면 1~100 사이의 정수로 수정하세요.'],
         ['Rack별 모듈 수', '각 Rack의 모듈 수는 기본 10개입니다. 필요하면 1~10을 선택하세요. 기존 쉼표 구분 열을 사용해도 됩니다. 두 방식은 함께 입력하지 마세요.'],
@@ -1486,6 +1496,7 @@ function resetEntryForm() {
         : deviceSelect.options[0].value;
     rackCountInput.value = '1';
     updateCustomDeviceField();
+    applyDeviceVersionDefault();
     renderRackModules(1);
     previousRecordSelect.value = '';
     setEditMode();
@@ -1856,7 +1867,10 @@ logoutButton.addEventListener('click', async () => {
     }
 });
 
-deviceSelect.addEventListener('change', updateCustomDeviceField);
+deviceSelect.addEventListener('change', () => {
+    updateCustomDeviceField();
+    applyDeviceVersionDefault();
+});
 previousRecordSelect.addEventListener('change', applyPreviousRecord);
 downloadTemplateButton.addEventListener('click', downloadImportTemplate);
 importFile.addEventListener('change', handleImportFileChange);

@@ -10,11 +10,11 @@ const field = id => {
 const context = vm.createContext({
     document: { querySelector: field, createElement: () => ({}) },
     deviceSelect: { value: '', options: [], replaceChildren() { this.options = []; }, append(option) { this.options.push(option); } },
-    customDeviceField: {}, customDeviceName: {},
+    customDeviceField: {}, customDeviceName: {}, existingVersionInput: {},
     siteNameInput: {}, siteAddressInput: {}, notesInput: {}, workStatusInput: {}, workStatusOtherInput: {},
     updateWorkStatusField() {}, contactList: { replaceChildren() {} }, addContactButton: {}, addContact() {},
 });
-for (const name of ['versionDisplay', 'fillAdditionalFields', 'renderDevices', 'updateCustomDeviceField']) {
+for (const name of ['versionDisplay', 'fillAdditionalFields', 'renderDevices', 'updateCustomDeviceField', 'applyDeviceVersionDefault']) {
     const start = source.indexOf(`function ${name}(`);
     const next = source.indexOf('\nfunction ', start + 1);
     vm.runInContext(source.slice(start, next), context);
@@ -23,6 +23,9 @@ context.renderDevices(['Door LCD', 'SMU02C', 'SMU02C + Door LCD']);
 assert.equal(context.deviceSelect.options[0].value, 'SMU02C + Door LCD');
 assert.equal(context.deviceSelect.options.filter(o => o.value === 'SMU02C + Door LCD').length, 1);
 assert.equal(context.deviceSelect.value, 'SMU02C + Door LCD');
+assert.equal(context.deviceSelect.options[2].value, 'iIoT Gateway');
+context.applyDeviceVersionDefault();
+assert.equal(context.existingVersionInput.value, 'V100R024C10SPC235');
 assert.equal(field('#doorExistingVersion').required, true);
 assert.equal(field('#doorUpgradeVersionField').hidden, false);
 assert.equal(field('#existingVersionLabel').textContent, 'SMU02C 기존 설치 버전');
@@ -44,4 +47,14 @@ assert.equal(field('#doorUpgradeVersion').value, '009');
 context.fillAdditionalFields();
 assert.equal(field('#doorExistingVersion').value, '');
 assert.equal(field('#doorUpgradeVersion').value, 'v0.0.0.9');
-console.log('PASS: combined device ordering, required fields, record loading, display and reset');
+for (const [device, expected] of [['SMU02C', 'V100R024C10SPC235'], ['iIoT Gateway', 'V100R024C10SPC265'], ['Door LCD', ''], ['__new__', '']]) {
+    context.deviceSelect.value = device;
+    context.applyDeviceVersionDefault();
+    assert.equal(context.existingVersionInput.value, expected);
+}
+context.deviceSelect.value = 'iIoT Gateway';
+context.existingVersionInput.value = 'user-edited-version';
+context.renderDevices(['SMU02C', 'iIoT Gateway', 'Door LCD']);
+assert.equal(context.existingVersionInput.value, 'user-edited-version');
+assert.equal(context.deviceSelect.options.filter(o => o.value === 'iIoT Gateway').length, 1);
+console.log('PASS: device ordering, initial versions, preserved edits, required fields, record loading and display');

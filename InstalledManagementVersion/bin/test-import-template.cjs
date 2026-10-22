@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const source = fs.readFileSync(require('node:path').join(__dirname, '../public/assets/app.js'), 'utf8');
 const options = (values) => ({ options: values.map(value => ({ value })) });
 const context = vm.createContext({
-    deviceSelect: options(['SMU02C + Door LCD', 'Door LCD', 'SMU02C', '새 장비 & 테스트', '__new__']),
+    deviceSelect: options(['SMU02C + Door LCD', 'Door LCD', 'iIoT Gateway', 'SMU02C', '새 장비 & 테스트', '__new__']),
     workStatusInput: options(['방문예정', '작업완료', '작업실패', '작업보류', '기타']),
     document: { querySelector: () => options(['v0.0.0.8']) },
     createZip: files => files,

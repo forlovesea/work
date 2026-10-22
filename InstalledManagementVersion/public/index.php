@@ -50,7 +50,7 @@ try {
             <div>
                 <p class="eyebrow">FIELD SERVICE · VERSION LOG</p>
                 <h1>현장 설치 버전관리</h1>
-                <p class="subtitle">현장 장비의 설치 버전과 랙 구성을 기록합니다.</p>
+                <p class="subtitle">현장 장비의 설치 버전과 Rack 구성을 기록합니다.</p>
             </div>
             <button id="logoutButton" class="secondary-button logout-button" type="button">로그아웃</button>
         </header>
@@ -109,7 +109,7 @@ try {
                                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
                     </label>
                     <p class="bulk-import-hint">
-                        날짜는 YYYY-MM-DD로 입력하고, 각 랙의 모듈 수는 드롭다운에서 선택하세요.
+                        날짜는 YYYY-MM-DD로 입력하고, 각 Rack의 모듈 수는 드롭다운에서 선택하세요.
                         쉼표 구분 입력도 지원합니다. 설치장소·담당자·작업상태 등 전체 항목을 작성할 수 있으며,
                         한 번에 최대 100개 현장을 등록할 수 있습니다.
                     </p>
@@ -170,6 +170,7 @@ try {
                     <label class="field">
                         <span>장비명 <span class="required" aria-hidden="true">*</span></span>
                         <select id="deviceSelect" name="device_name" required>
+                            <option value="SMU02C + Door LCD">SMU02C + Door LCD</option>
                             <option value="Door LCD">Door LCD</option>
                             <option value="SMU02C">SMU02C</option>
                             <option value="__new__">+ 새 장치 추가</option>
@@ -183,28 +184,36 @@ try {
                     </label>
 
                     <label class="field">
-                        <span>기존 설치 버전 <span class="required" aria-hidden="true">*</span></span>
+                        <span><span id="existingVersionLabel">기존 설치 버전</span> <span class="required" aria-hidden="true">*</span></span>
                         <input id="existingVersion" name="existing_version" type="text" maxlength="50"
                                list="existingVersionOptions" placeholder="예: v0.0.0.8" required>
                         <datalist id="existingVersionOptions"></datalist>
                     </label>
 
                     <label class="field">
-                        <span>업그레이드 버전 <span class="required" aria-hidden="true">*</span></span>
+                        <span><span id="upgradeVersionLabel">업그레이드 버전</span> <span class="required" aria-hidden="true">*</span></span>
                         <input id="upgradeVersion" name="upgrade_version" type="text" maxlength="50"
                                list="upgradeVersionOptions" value="v0.0.0.9" placeholder="예: v0.0.0.9" required>
                         <datalist id="upgradeVersionOptions"></datalist>
+                    </label>
+                    <label class="field" id="doorExistingVersionField" hidden>
+                        <span>Door LCD 기존 설치 버전 <span class="required" aria-hidden="true">*</span></span>
+                        <input id="doorExistingVersion" name="door_existing_version" type="text" maxlength="50" placeholder="예: v0.0.0.8" disabled>
+                    </label>
+                    <label class="field" id="doorUpgradeVersionField" hidden>
+                        <span>Door LCD 업그레이드 버전 <span class="required" aria-hidden="true">*</span></span>
+                        <input id="doorUpgradeVersion" name="door_upgrade_version" type="text" maxlength="50" value="v0.0.0.9" placeholder="예: v0.0.0.9" disabled>
                     </label>
                 </div>
 
                 <section class="rack-section" aria-labelledby="rack-title">
                     <div class="rack-heading">
                         <div>
-                            <h3 id="rack-title">축전지 랙 구성</h3>
-                            <p>랙 이름을 수정하고 설치 모듈 수를 선택하세요. 이름을 비우면 기본 이름이 사용됩니다. 모듈은 랙마다 1~10대입니다.</p>
+                            <h3 id="rack-title">Rack 축전지 모듈 구성</h3>
+                            <p>Rack 이름을 수정하고 설치 모듈 수를 선택하세요. 이름을 비우면 기본 이름이 사용됩니다. 모듈은 Rack마다 1~10대입니다.</p>
                         </div>
                         <label class="rack-count-field">
-                            <span>랙 수</span>
+                            <span>Rack 수</span>
                             <input id="rackCount" name="rack_count" type="number" min="1" max="100"
                                    step="1" value="1" required>
                         </label>

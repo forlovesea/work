@@ -58,6 +58,8 @@ function addContact(contact = {}) {
 }
 
 function fillAdditionalFields(record = {}) {
+    document.querySelector('#doorExistingVersion').value = record.door_existing_version || '';
+    document.querySelector('#doorUpgradeVersion').value = record.door_upgrade_version || (record.id ? '' : 'v0.0.0.9');
     siteNameInput.value = record.site_name || '';
     siteAddressInput.value = record.address || '';
     notesInput.value = record.notes || '';
@@ -70,8 +72,17 @@ function fillAdditionalFields(record = {}) {
     (contacts.length ? contacts : [{}]).forEach(addContact);
 }
 
+function versionDisplay(record, key) {
+    if (record.device_name !== 'SMU02C + Door LCD') return record[key];
+    return `SMU02C: ${record[key]} / Door LCD: ${record[`door_${key}`] || ''}`;
+}
+
 function additionalRecordDetails(record) {
     return [
+        ['SMU02C 기존 설치 버전', record.device_name === 'SMU02C + Door LCD' ? record.existing_version : ''],
+        ['SMU02C 업그레이드 버전', record.device_name === 'SMU02C + Door LCD' ? record.upgrade_version : ''],
+        ['Door LCD 기존 설치 버전', record.door_existing_version],
+        ['Door LCD 업그레이드 버전', record.door_upgrade_version],
         ['설치장소(국소)', record.site_name],
         ['주소', record.address],
         ['담당자 정보', (record.contacts || []).map((contact) => `${contact.name} (${contact.phone})`).join(', ')],
@@ -224,7 +235,7 @@ function currentModuleCounts() {
 }
 
 function defaultRackName(index) {
-    return `랙 ${String(index + 1).padStart(2, '0')}`;
+    return `Rack ${String(index + 1).padStart(2, '0')}`;
 }
 
 function currentRackNames() {
@@ -249,11 +260,11 @@ function renderRackModules(count, selectedCounts = [], selectedNames = []) {
         rackName.maxLength = 100;
         rackName.value = selectedNames[index] ?? defaultRackName(index);
         rackName.placeholder = defaultRackName(index);
-        rackName.setAttribute('aria-label', `${index + 1}번째 랙 이름`);
+        rackName.setAttribute('aria-label', `${index + 1}번째 Rack 이름`);
 
         const select = document.createElement('select');
         select.className = 'module-select';
-        select.setAttribute('aria-label', `랙 ${index + 1} 모듈 수`);
+        select.setAttribute('aria-label', `Rack ${index + 1} 모듈 수`);
         rackName.addEventListener('input', () => {
             select.setAttribute('aria-label', `${rackName.value.trim() || defaultRackName(index)} 모듈 수`);
         });
@@ -290,6 +301,7 @@ function fillSelect(select, values, emptyLabel, previousValue = select.value) {
 }
 
 function renderDevices(devices) {
+    devices = ['SMU02C + Door LCD', ...devices.filter((name) => name !== 'SMU02C + Door LCD')];
     const selected = deviceSelect.value;
     deviceSelect.replaceChildren();
 
@@ -307,11 +319,19 @@ function renderDevices(devices) {
 
     deviceSelect.value = devices.includes(selected) || selected === '__new__'
         ? selected
-        : (devices.includes('Door LCD') ? 'Door LCD' : devices[0]);
+        : devices[0];
     updateCustomDeviceField();
 }
 
 function updateCustomDeviceField() {
+    const combined = deviceSelect.value === 'SMU02C + Door LCD';
+    document.querySelector('#existingVersionLabel').textContent = combined ? 'SMU02C 기존 설치 버전' : '기존 설치 버전';
+    document.querySelector('#upgradeVersionLabel').textContent = combined ? 'SMU02C 업그레이드 버전' : '업그레이드 버전';
+    for (const id of ['doorExistingVersion', 'doorUpgradeVersion']) {
+        document.querySelector(`#${id}Field`).hidden = !combined;
+        document.querySelector(`#${id}`).disabled = !combined;
+        document.querySelector(`#${id}`).required = combined;
+    }
     const isCustom = deviceSelect.value === '__new__';
     customDeviceField.hidden = !isCustom;
     customDeviceName.required = isCustom;
@@ -333,7 +353,7 @@ function renderInputHistory(records, existingVersions, upgradeVersions) {
     for (const record of records) {
         const option = document.createElement('option');
         option.value = String(record.id);
-        option.textContent = `${record.visit_date} · ${record.device_name} · ${record.existing_version} → ${record.upgrade_version}`;
+        option.textContent = `${record.visit_date} · ${record.device_name} · ${versionDisplay(record, 'existing_version')} → ${versionDisplay(record, 'upgrade_version')}`;
         previousRecordSelect.append(option);
     }
     previousRecordSelect.value = records.some((record) => String(record.id) === selectedId)
@@ -442,13 +462,13 @@ function csvCell(value) {
 
 function exportRows() {
     return [
-        ['현장방문날짜', '장비명', '기존 설치 버전', '현재 설치 버전', '축전지 랙 수', '랙별 모듈 수',
+        ['현장방문날짜', '장비명', '기존 설치 버전', '현재 설치 버전', '축전지 Rack 수', 'Rack별 모듈 수',
             '설치장소(국소)', '주소', '담당자 정보', '작업상태', '비고'],
         ...displayedRecords.map((record) => [
             record.visit_date,
             record.device_name,
-            record.existing_version,
-            record.upgrade_version,
+            versionDisplay(record, 'existing_version'),
+            versionDisplay(record, 'upgrade_version'),
             record.rack_count,
             moduleSummary(record),
             record.site_name || '',
@@ -576,17 +596,18 @@ function createTemplateCell(reference, value, style = '') {
     return `<c r="${reference}" t="inlineStr"${styleAttribute}><is><t xml:space="preserve">${xmlEscape(value)}</t></is></c>`;
 }
 
-function importTemplateHeaders() {
+function importTemplateHeaders(contactCount = 2, rackCount = 3, componentVersions = true) {
     return [
         '현장방문날짜',
         '장비명',
         '기존 설치 버전',
         '업그레이드 버전',
-        '축전지 랙 수',
-        '랙별 모듈 수 (쉼표 구분)',
+        '축전지 Rack 수',
+        'Rack별 모듈 수 (쉼표 구분)',
         '설치장소(국소)', '주소', '작업상태', '기타 작업상태', '비고',
-        ...Array.from({ length: 20 }, (_, i) => [`담당자 ${i + 1} 이름`, `담당자 ${i + 1} 연락처`]).flat(),
-        ...Array.from({ length: 100 }, (_, i) => [`랙 ${i + 1} 이름`, `랙 ${i + 1} 모듈 수`]).flat(),
+        ...Array.from({ length: contactCount }, (_, i) => [`담당자 ${i + 1} 이름`, `담당자 ${i + 1} 연락처`]).flat(),
+        ...Array.from({ length: rackCount }, (_, i) => [`Rack ${i + 1} 이름`, `Rack ${i + 1} 모듈 수`]).flat(),
+        ...(componentVersions ? ['Door LCD 기존 설치 버전', 'Door LCD 업그레이드 버전'] : []),
     ];
 }
 
@@ -606,8 +627,8 @@ function downloadImportTemplate() {
         if (choices.length) listValidation(`${['B', 'C', 'D', 'I'][i]}2:${['B', 'C', 'D', 'I'][i]}101`, `TemplateChoices${i}`, i === 3);
     });
     validations.push('<dataValidation type="whole" operator="between" allowBlank="1" showErrorMessage="1" error="1~100 사이 정수를 입력하세요." sqref="E2:E101"><formula1>1</formula1><formula2>100</formula2></dataValidation>');
-    for (let i = 0; i < 100; i += 1) {
-        const col = columnName(52 + i * 2);
+    for (let i = 0; i < 3; i += 1) {
+        const col = columnName(16 + i * 2);
         listValidation(`${col}2:${col}101`, '"1,2,3,4,5,6,7,8,9,10"');
     }
     const dataRows = [
@@ -617,7 +638,7 @@ function downloadImportTemplate() {
         ...Array.from({ length: 100 }, (_, rowIndex) => {
             const rowNumber = rowIndex + 2;
             const cells = headers.map((_, columnIndex) => (
-                createTemplateCell(`${columnName(columnIndex)}${rowNumber}`, '', '2')
+                createTemplateCell(`${columnName(columnIndex)}${rowNumber}`, columnIndex === 4 ? '3' : ([16, 18, 20].includes(columnIndex) ? '10' : ''), '2')
             )).join('');
             return `<row r="${rowNumber}" ht="24" customHeight="1">${cells}</row>`;
         }),
@@ -626,14 +647,14 @@ function downloadImportTemplate() {
         ['작성 안내', '내용'],
         ['입력 방법', '첫 번째 시트 "설치 정보"의 2행부터 현장별로 한 줄씩 입력하세요.'],
         ['현장방문날짜', 'YYYY-MM-DD 형식으로 입력하세요. 예: 2026-10-20'],
-        ['장비명', 'Door LCD, SMU02C 또는 등록할 장비명을 입력하세요.'],
-        ['버전', '기존 설치 버전과 업그레이드 버전을 빠짐없이 입력하세요.'],
-        ['축전지 랙 수', '1~100 사이의 정수로 입력하세요.'],
-        ['랙별 모듈 수', '각 랙의 모듈 수 열에서 1~10을 선택하세요. 기존 쉼표 구분 열을 사용해도 됩니다. 두 방식은 함께 입력하지 마세요.'],
+        ['장비명', 'SMU02C + Door LCD, Door LCD, SMU02C 또는 등록할 장비명을 입력하세요.'],
+        ['버전', '기존 설치 버전과 업그레이드 버전을 입력하세요. SMU02C + Door LCD 선택 시 이 두 열은 SMU02C 버전이며, 끝의 Door LCD 버전 두 열도 입력하세요.'],
+        ['축전지 Rack 수', '기본 3개입니다. 필요하면 1~100 사이의 정수로 수정하세요.'],
+        ['Rack별 모듈 수', '각 Rack의 모듈 수는 기본 10개입니다. 필요하면 1~10을 선택하세요. 기존 쉼표 구분 열을 사용해도 됩니다. 두 방식은 함께 입력하지 마세요.'],
         ['설치 정보', '설치장소(국소), 주소, 비고를 입력하세요. 작업상태가 비어 있으면 방문예정으로 등록합니다.'],
         ['작업상태', '목록에서 선택하세요. 기타를 선택하면 기타 작업상태를 반드시 입력하세요.'],
         ['담당자', '최대 20명까지 이름과 연락처를 한 쌍으로 입력하세요. 연락처는 앞자리 0을 유지하는 텍스트 형식입니다.'],
-        ['랙 이름', '랙 수만큼 순서대로 입력하세요. 빈 이름은 랙 01 등의 기본 이름을 사용합니다. 최대 100개입니다.'],
+        ['Rack 이름', 'Rack 수만큼 순서대로 입력하세요. 빈 이름은 Rack 01 등의 기본 이름을 사용합니다. 기본 3개이며 추가 시 Door LCD 버전 열 앞에 번호 순서대로 이름/모듈 수 열을 삽입하세요(최대 100개).'],
         ['선택 항목', '장비명과 버전은 목록에서 선택하거나 새 값을 직접 입력할 수 있습니다.'],
         ['등록 제한', '한 번 업로드할 때 최대 100개 현장을 등록합니다. 빈 행은 무시합니다.'],
         ['주의', '열 제목을 수정하거나 삭제하지 마세요. 업로드 전에 화면에서 모든 행의 검증 결과를 확인합니다.'],
@@ -670,7 +691,7 @@ function downloadImportTemplate() {
         },
         {
             name: 'xl/worksheets/sheet1.xml',
-            content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols><col min="1" max="1" width="18" customWidth="1"/><col min="2" max="4" width="22" customWidth="1"/><col min="5" max="5" width="16" customWidth="1"/><col min="6" max="6" width="34" customWidth="1"/><col min="7" max="251" width="22" customWidth="1"/></cols><sheetData>${dataRows}</sheetData><autoFilter ref="A1:${columnName(headers.length - 1)}101"/><dataValidations count="${validations.length}">${validations.join('')}</dataValidations></worksheet>`,
+            content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols><col min="1" max="1" width="18" customWidth="1"/><col min="2" max="4" width="22" customWidth="1"/><col min="5" max="5" width="16" customWidth="1"/><col min="6" max="6" width="34" customWidth="1"/><col min="7" max="23" width="22" customWidth="1"/></cols><sheetData>${dataRows}</sheetData><autoFilter ref="A1:${columnName(headers.length - 1)}101"/><dataValidations count="${validations.length}">${validations.join('')}</dataValidations></worksheet>`,
         },
         {
             name: 'xl/worksheets/sheet2.xml',
@@ -879,11 +900,17 @@ function parseImportRows(sheetXml, sharedStrings) {
     for (const cell of rows[0].getElementsByTagNameNS('*', 'c')) {
         const column = columnIndexFromReference(cell.getAttribute('r') || '');
         if (column >= 0) {
-            headerValues[column] = getCellValue(cell, sharedStrings).trim();
+            headerValues[column] = getCellValue(cell, sharedStrings).trim().replaceAll('랙', 'Rack');
         }
     }
     const legacy = headerValues.filter(Boolean).length === 6;
-    const expectedHeaders = legacy ? importTemplateHeaders().slice(0, 6) : importTemplateHeaders();
+    const contactCount = headerValues.filter((header) => /^담당자 \d+ 이름$/.test(header)).length;
+    const templateRackCount = headerValues.filter((header) => /^Rack \d+ 이름$/.test(header)).length;
+    const rackStart = 11 + contactCount * 2;
+    const expectedHeaders = legacy ? importTemplateHeaders().slice(0, 6) : importTemplateHeaders(contactCount, templateRackCount, headerValues.includes('Door LCD 기존 설치 버전'));
+    if (!legacy && (contactCount < 1 || contactCount > 20 || templateRackCount < 1 || templateRackCount > 100)) {
+        throw new Error('담당자는 1~20명, Rack은 1~100개의 열을 사용하세요.');
+    }
     const missingHeaders = expectedHeaders.filter((header) => !headerValues.includes(header));
     if (missingHeaders.length > 0 || expectedHeaders.some((header, index) => headerValues[index] !== header)) {
         throw new Error('열 제목이 템플릿과 다릅니다. 열 제목을 바꾸지 말고 새 템플릿을 내려받아 주세요.');
@@ -904,7 +931,10 @@ function parseImportRows(sheetXml, sharedStrings) {
                 values[column] = getCellValue(cell, sharedStrings).trim();
             }
         }
-        if (!values.some((value) => value)) {
+        const onlyDefaults = !legacy && values.every((value, index) => !value ||
+            (index === 4 && value === '3') ||
+            (index >= rackStart && (index - rackStart) % 2 === 1 && index < rackStart + 6 && value === '10'));
+        if (!values.some((value) => value) || onlyDefaults) {
             continue;
         }
         if (records.length >= 100) {
@@ -916,13 +946,23 @@ function parseImportRows(sheetXml, sharedStrings) {
         const rackCount = /^\d+$/.test(rackCountText || '') ? Number(rackCountText) : NaN;
         const extra = { site_name: values[6] || '', address: values[7] || '', work_status: values[8] || '방문예정', work_status_other: values[9] || '', notes: values[10] || '', contacts: [] };
         const fail = (message) => errors.push({ row: rowNumber, message });
+        const doorColumn = headerValues.indexOf('Door LCD 기존 설치 버전');
+        extra.door_existing_version = doorColumn >= 0 ? (values[doorColumn] || '') : '';
+        extra.door_upgrade_version = doorColumn >= 0 ? (values[doorColumn + 1] || '') : '';
+        if (deviceName === 'SMU02C + Door LCD') {
+            for (const [key, label] of [['door_existing_version', 'Door LCD 기존 설치 버전'], ['door_upgrade_version', 'Door LCD 업그레이드 버전']]) {
+                if (!extra[key] || [...extra[key]].length > 50) fail(`${label}을(를) 50자 이내로 입력하세요.`);
+            }
+        } else {
+            if (extra.door_existing_version || extra.door_upgrade_version) fail('Door LCD 전용 버전 열은 SMU02C + Door LCD 선택 시에만 입력하세요.');
+        }
         for (const [key, label, limit] of [['site_name', '설치장소', 100], ['address', '주소', 300], ['work_status_other', '기타 작업상태', 100], ['notes', '비고', 2000]]) {
             if ([...extra[key]].length > limit) fail(`${label}은(는) ${limit}자 이내로 입력하세요.`);
         }
         if (!['방문예정', '작업완료', '작업실패', '작업보류', '기타'].includes(extra.work_status)) fail('작업상태를 목록에서 선택하세요.');
         if (extra.work_status === '기타' && !extra.work_status_other) fail('기타 작업상태를 입력하세요.');
         if (extra.work_status !== '기타') extra.work_status_other = '';
-        for (let i = 0; i < 20; i += 1) {
+        for (let i = 0; i < contactCount; i += 1) {
             const name = values[11 + i * 2] || '';
             const phone = values[12 + i * 2] || '';
             if (!name && !phone) continue;
@@ -932,17 +972,17 @@ function parseImportRows(sheetXml, sharedStrings) {
         if (!legacy) {
             extra.rack_names = [];
             const selectedModules = [];
-            for (let i = 0; i < 100; i += 1) {
-                const name = values[51 + i * 2] || '';
-                const count = values[52 + i * 2] || '';
+            for (let i = 0; i < Math.max(Math.min(rackCount || 0, 100), templateRackCount); i += 1) {
+                const name = i < templateRackCount ? (values[rackStart + i * 2] || '') : '';
+                const count = i < templateRackCount ? (values[rackStart + 1 + i * 2] || '') : '';
                 if (i < rackCount) {
                     extra.rack_names.push(name || defaultRackName(i));
                     selectedModules.push(count);
-                    if ([...name].length > 100) fail(`랙 ${i + 1} 이름은 100자 이내로 입력하세요.`);
-                } else if (name || count) fail(`랙 ${i + 1}: 입력한 랙 수를 초과한 값이 있습니다.`);
+                    if ([...name].length > 100) fail(`Rack ${i + 1} 이름은 100자 이내로 입력하세요.`);
+                } else if (name || count) fail(`Rack ${i + 1}: 입력한 Rack 수를 초과한 값이 있습니다.`);
             }
             if (selectedModules.some(Boolean)) {
-                if (moduleCountsText) fail('쉼표 구분 모듈 수와 개별 랙 모듈 수 중 한 방식만 입력하세요.');
+                if (moduleCountsText) fail('쉼표 구분 모듈 수와 개별 Rack 모듈 수 중 한 방식만 입력하세요.');
                 moduleCountsText = selectedModules.join(',');
             }
         }
@@ -966,12 +1006,12 @@ function parseImportRows(sheetXml, sharedStrings) {
             }
         }
         if (!Number.isInteger(rackCount) || rackCount < 1 || rackCount > 100) {
-            errors.push({ row: rowNumber, message: '축전지 랙 수는 1~100 사이의 정수여야 합니다.' });
+            errors.push({ row: rowNumber, message: '축전지 Rack 수는 1~100 사이의 정수여야 합니다.' });
         }
         if (!moduleCountsText || !moduleCounts.every((count) => Number.isInteger(count) && count >= 1 && count <= 10)) {
-            errors.push({ row: rowNumber, message: '랙별 모듈 수는 쉼표로 구분한 1~10 사이의 정수여야 합니다.' });
+            errors.push({ row: rowNumber, message: 'Rack별 모듈 수는 쉼표로 구분한 1~10 사이의 정수여야 합니다.' });
         } else if (moduleCounts.length !== rackCount) {
-            errors.push({ row: rowNumber, message: '랙 수와 쉼표로 구분한 모듈 수의 개수가 일치해야 합니다.' });
+            errors.push({ row: rowNumber, message: 'Rack 수와 쉼표로 구분한 모듈 수의 개수가 일치해야 합니다.' });
         }
         records.push({
             visit_date: visitDate || '',
@@ -1049,7 +1089,7 @@ function renderImportPreview(records, errors) {
         const heading = document.createElement('strong');
         heading.textContent = `${record.source_row}행 · ${record.visit_date} · ${record.device_name}`;
         const detail = document.createElement('span');
-        detail.textContent = `${record.existing_version} → ${record.upgrade_version} · 랙 ${record.rack_count}개 · 모듈 ${moduleSummary(record)}`;
+        detail.textContent = `${versionDisplay(record, 'existing_version')} → ${versionDisplay(record, 'upgrade_version')} · Rack ${record.rack_count}개 · 모듈 ${moduleSummary(record)}`;
         row.append(heading, detail);
         importRows.append(row);
     }
@@ -1228,7 +1268,7 @@ function buildPrintableReport(isCustomerReport) {
         for (const [value, label] of [
             [displayedRecords.length, '조회된 설치 기록'],
             [devices.length, '대상 장비 종류'],
-            [rackCount, '대상 랙 합계'],
+            [rackCount, '대상 Rack 합계'],
             [moduleCount, '모듈 합계'],
         ]) {
             const card = addReportElement(summary, 'div', 'print-summary-card');
@@ -1237,7 +1277,7 @@ function buildPrintableReport(isCustomerReport) {
         }
 
         const versions = [...new Set(
-            displayedRecords.map((record) => `${record.existing_version} → ${record.upgrade_version}`),
+            displayedRecords.map((record) => `${versionDisplay(record, 'existing_version')} → ${versionDisplay(record, 'upgrade_version')}`),
         )];
         addReportElement(
             printReport,
@@ -1257,7 +1297,7 @@ function buildPrintableReport(isCustomerReport) {
         const table = addReportElement(printReport, 'table', 'print-record-table');
         const thead = addReportElement(table, 'thead');
         const header = addReportElement(thead, 'tr');
-        for (const heading of ['방문 날짜', '장비명', '기존 버전', '업그레이드 버전', '랙 수', '랙별 모듈 수']) {
+        for (const heading of ['방문 날짜', '장비명', '기존 버전', '업그레이드 버전', 'Rack 수', 'Rack별 모듈 수']) {
             addReportElement(header, 'th', '', heading);
         }
         const tbody = addReportElement(table, 'tbody');
@@ -1266,8 +1306,8 @@ function buildPrintableReport(isCustomerReport) {
             for (const value of [
                 record.visit_date,
                 record.device_name,
-                record.existing_version,
-                record.upgrade_version,
+                versionDisplay(record, 'existing_version'),
+                versionDisplay(record, 'upgrade_version'),
                 `${record.rack_count}개`,
                 moduleSummary(record),
             ]) {
@@ -1291,7 +1331,7 @@ function buildPrintableReport(isCustomerReport) {
             'p',
             '',
             '본 문서는 설치 정보 관리 시스템에 등록된 현장 방문 기록을 기준으로 작성되었습니다. ' +
-            '설치 버전 및 랙별 모듈 구성은 현장에서 확인·입력된 기록을 나타냅니다.',
+            '설치 버전 및 Rack별 모듈 구성은 현장에서 확인·입력된 기록을 나타냅니다.',
         );
     }
 
@@ -1358,9 +1398,9 @@ function createRecordCard(record) {
     const versions = document.createElement('p');
     versions.className = 'record-versions';
     versions.append(
-        document.createTextNode(record.existing_version),
+        document.createTextNode(versionDisplay(record, 'existing_version')),
         document.createTextNode('  →  '),
-        document.createTextNode(record.upgrade_version),
+        document.createTextNode(versionDisplay(record, 'upgrade_version')),
     );
     main.append(titleRow, versions);
     for (const [label, value] of additionalRecordDetails(record)) {
@@ -1374,7 +1414,7 @@ function createRecordCard(record) {
     rackSummary.className = 'record-racks';
     const rackLabel = document.createElement('span');
     rackLabel.className = 'rack-total';
-    rackLabel.textContent = `랙 ${record.rack_count}개`;
+    rackLabel.textContent = `Rack ${record.rack_count}개`;
     const moduleSummary = document.createElement('span');
     moduleSummary.className = 'module-summary';
     moduleSummary.textContent = record.module_counts
@@ -1441,8 +1481,8 @@ function resetEntryForm() {
     recordForm.reset();
     fillAdditionalFields();
     visitDateInput.value = today();
-    deviceSelect.value = [...deviceSelect.options].some((option) => option.value === 'Door LCD')
-        ? 'Door LCD'
+    deviceSelect.value = [...deviceSelect.options].some((option) => option.value === 'SMU02C + Door LCD')
+        ? 'SMU02C + Door LCD'
         : deviceSelect.options[0].value;
     rackCountInput.value = '1';
     updateCustomDeviceField();
@@ -1604,7 +1644,7 @@ function createActivityCard(activity) {
         }
     } else if (details.record) {
         const record = details.record;
-        detailLines.push(`랙 ${record.rack_count}개 · 모듈 ${moduleSummary(record)}`);
+        detailLines.push(`Rack ${record.rack_count}개 · 모듈 ${moduleSummary(record)}`);
     }
     if (detailLines.length > 0) {
         const detailList = document.createElement('div');
@@ -1913,6 +1953,8 @@ recordForm.addEventListener('submit', async (event) => {
             device_name: deviceName,
             existing_version: existingVersionInput.value,
             upgrade_version: upgradeVersionInput.value,
+            door_existing_version: deviceName === 'SMU02C + Door LCD' ? document.querySelector('#doorExistingVersion').value : '',
+            door_upgrade_version: deviceName === 'SMU02C + Door LCD' ? document.querySelector('#doorUpgradeVersion').value : '',
             rack_count: Number(rackCountInput.value),
             module_counts: currentModuleCounts(),
             rack_names: currentRackNames(),

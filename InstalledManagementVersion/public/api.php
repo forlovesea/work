@@ -69,6 +69,8 @@ function connectDatabase(): PDO
     $recordColumns = $database->query('PRAGMA table_info(records)')->fetchAll();
     $existingColumns = array_column($recordColumns, 'name');
     $additionalColumns = [
+        'door_existing_version' => "TEXT NOT NULL DEFAULT ''",
+        'door_upgrade_version' => "TEXT NOT NULL DEFAULT ''",
         'rack_names' => "TEXT NOT NULL DEFAULT '[]'",
         'site_name' => "TEXT NOT NULL DEFAULT ''",
         'address' => "TEXT NOT NULL DEFAULT ''",
@@ -98,7 +100,7 @@ function connectDatabase(): PDO
     $database->exec("DELETE FROM activity_log WHERE occurred_at < datetime('now', '-1 year')");
 
     $seedDevice = $database->prepare('INSERT OR IGNORE INTO devices (name) VALUES (?)');
-    foreach (['Door LCD', 'SMU02C'] as $deviceName) {
+    foreach (['SMU02C + Door LCD', 'Door LCD', 'SMU02C'] as $deviceName) {
         $seedDevice->execute([$deviceName]);
     }
 
@@ -124,7 +126,7 @@ function decodedRackNames(array $record): array
     }
     $result = [];
     for ($index = 0; $index < (int) $record['rack_count']; $index++) {
-        $result[] = $names[$index] ?? sprintf('랙 %02d', $index + 1);
+        $result[] = $names[$index] ?? sprintf('Rack %02d', $index + 1);
     }
     return $result;
 }
@@ -145,6 +147,8 @@ function activityRecordData(array $record): array
         'device_name' => $record['device_name'],
         'existing_version' => $record['existing_version'],
         'upgrade_version' => $record['upgrade_version'],
+        'door_existing_version' => $record['door_existing_version'] ?? '',
+        'door_upgrade_version' => $record['door_upgrade_version'] ?? '',
         'rack_count' => (int) $record['rack_count'],
         'module_counts' => array_values($moduleCounts),
         'rack_names' => decodedRackNames($record),
@@ -183,7 +187,7 @@ function loadData(PDO $database, array $filters): array
 {
     [$conditions, $parameters] = filterConditions($filters);
 
-    $sql = 'SELECT id, visit_date, device_name, existing_version, upgrade_version,
+    $sql = 'SELECT id, visit_date, device_name, existing_version, upgrade_version, door_existing_version, door_upgrade_version,
                    rack_count, module_counts, rack_names, site_name, address, contacts_json, notes,
                    work_status, work_status_other, created_at
             FROM records';
@@ -206,7 +210,7 @@ function loadData(PDO $database, array $filters): array
     }
     unset($record);
 
-    $devices = $database->query('SELECT name FROM devices ORDER BY name COLLATE NOCASE')->fetchAll(PDO::FETCH_COLUMN);
+    $devices = $database->query('SELECT name FROM devices ORDER BY CASE WHEN name = \'SMU02C + Door LCD\' THEN 0 ELSE 1 END, name COLLATE NOCASE')->fetchAll(PDO::FETCH_COLUMN);
     $currentVersions = $database->query(
         'SELECT DISTINCT upgrade_version FROM records ORDER BY upgrade_version COLLATE NOCASE'
     )->fetchAll(PDO::FETCH_COLUMN);
@@ -215,7 +219,7 @@ function loadData(PDO $database, array $filters): array
     )->fetchAll(PDO::FETCH_COLUMN);
     $upgradeVersions = $currentVersions;
     $inputHistory = $database->query(
-        'SELECT id, visit_date, device_name, existing_version, upgrade_version,
+        'SELECT id, visit_date, device_name, existing_version, upgrade_version, door_existing_version, door_upgrade_version,
                 rack_count, module_counts, rack_names, site_name, address, contacts_json, notes,
                 work_status, work_status_other
          FROM records
@@ -331,23 +335,25 @@ function validateAdditionalFields(array $input): array
     $normalizedNames = [];
     if ($rackNames !== null &&
         (!is_array($rackNames) || !isListArray($rackNames) || count($rackNames) !== $rackCount)) {
-        $errors[] = '랙 이름은 랙 수와 같은 개수로 입력해 주세요.';
+        $errors[] = 'Rack 이름은 Rack 수와 같은 개수로 입력해 주세요.';
     } elseif (is_int($rackCount) && $rackCount >= 1 && $rackCount <= 100) {
         for ($index = 0; $index < $rackCount; $index++) {
             $name = $rackNames[$index] ?? '';
             if (!is_string($name)) {
-                $errors[] = '랙 이름은 문자로 입력해 주세요.';
+                $errors[] = 'Rack 이름은 문자로 입력해 주세요.';
                 continue;
             }
             $name = trim($name);
             $length = preg_match_all('/./us', $name);
             if ($length === false || $length > 100) {
-                $errors[] = '랙 이름은 100자 이내로 입력해 주세요.';
+                $errors[] = 'Rack 이름은 100자 이내로 입력해 주세요.';
             }
-            $normalizedNames[] = $name === '' ? sprintf('랙 %02d', $index + 1) : $name;
+            $normalizedNames[] = $name === '' ? sprintf('Rack %02d', $index + 1) : $name;
         }
     }
     $fields = [
+        'door_existing_version' => ['Door LCD 기존 설치 버전', 50],
+        'door_upgrade_version' => ['Door LCD 업그레이드 버전', 50],
         'site_name' => ['설치장소(국소)', 100],
         'address' => ['주소', 300],
         'notes' => ['비고', 2000],
@@ -367,6 +373,14 @@ function validateAdditionalFields(array $input): array
             $errors[] = $label . '은(는) ' . $maxLength . '자 이내로 입력해 주세요.';
         }
         $record[$key] = $value;
+    }
+
+    foreach (['door_existing_version', 'door_upgrade_version'] as $key) {
+        if (($input['device_name'] ?? '') === 'SMU02C + Door LCD') {
+            if ($record[$key] === '') $errors[] = $fields[$key][0] . '을(를) 입력해 주세요.';
+        } else {
+            $record[$key] = '';
+        }
     }
 
     $workStatus = $input['work_status'] ?? '방문예정';
@@ -458,22 +472,22 @@ function validateBulkRecord($input): array
     $rackCount = $input['rack_count'] ?? null;
     $moduleCounts = $input['module_counts'] ?? null;
     if (!is_int($rackCount) || $rackCount < 1 || $rackCount > 100) {
-        $errors[] = '랙 수는 1~100 사이의 정수여야 합니다.';
+        $errors[] = 'Rack 수는 1~100 사이의 정수여야 합니다.';
     }
     if (!is_array($moduleCounts)) {
-        $errors[] = '랙별 모듈 수 목록을 확인해 주세요.';
+        $errors[] = 'Rack별 모듈 수 목록을 확인해 주세요.';
         $moduleCounts = [];
     } else {
         if (!isListArray($moduleCounts)) {
-            $errors[] = '랙별 모듈 수는 랙 순서대로 입력해야 합니다.';
+            $errors[] = 'Rack별 모듈 수는 Rack 순서대로 입력해야 합니다.';
         }
         if (is_int($rackCount) && count($moduleCounts) !== $rackCount) {
-            $errors[] = '랙 수와 랙별 모듈 수의 개수가 일치해야 합니다.';
+            $errors[] = 'Rack 수와 Rack별 모듈 수의 개수가 일치해야 합니다.';
         }
     }
     foreach ($moduleCounts as $moduleCount) {
         if (!is_int($moduleCount) || $moduleCount < 1 || $moduleCount > 10) {
-            $errors[] = '각 랙의 모듈 수는 1~10 사이의 정수여야 합니다.';
+            $errors[] = '각 Rack의 모듈 수는 1~10 사이의 정수여야 합니다.';
             break;
         }
     }
@@ -567,7 +581,7 @@ try {
 
         $database->beginTransaction();
         $exists = $database->prepare(
-            'SELECT visit_date, device_name, existing_version, upgrade_version, rack_count, module_counts, rack_names,
+            'SELECT visit_date, device_name, existing_version, upgrade_version, door_existing_version, door_upgrade_version, rack_count, module_counts, rack_names,
                     site_name, address, contacts_json, notes, work_status, work_status_other
              FROM records WHERE id = ?'
         );
@@ -584,9 +598,11 @@ try {
             'device_name' => '장비명',
             'existing_version' => '기존 설치 버전',
             'upgrade_version' => '업그레이드 버전',
-            'rack_count' => '축전지 랙 수',
-            'module_counts' => '랙별 모듈 수',
-            'rack_names' => '랙 이름',
+            'door_existing_version' => 'Door LCD 기존 설치 버전',
+            'door_upgrade_version' => 'Door LCD 업그레이드 버전',
+            'rack_count' => '축전지 Rack 수',
+            'module_counts' => 'Rack별 모듈 수',
+            'rack_names' => 'Rack 이름',
             'site_name' => '설치장소(국소)',
             'address' => '주소',
             'contacts' => '담당자 정보',
@@ -618,7 +634,7 @@ try {
         $deviceInsert->execute([$validated['record']['device_name']]);
         $recordUpdate = $database->prepare(
             'UPDATE records
-             SET visit_date = ?, device_name = ?, existing_version = ?, upgrade_version = ?,
+             SET visit_date = ?, device_name = ?, existing_version = ?, upgrade_version = ?, door_existing_version = ?, door_upgrade_version = ?,
                  rack_count = ?, module_counts = ?, rack_names = ?, site_name = ?, address = ?, contacts_json = ?,
                  notes = ?, work_status = ?, work_status_other = ?
              WHERE id = ?'
@@ -628,6 +644,8 @@ try {
             $validated['record']['device_name'],
             $validated['record']['existing_version'],
             $validated['record']['upgrade_version'],
+            $validated['record']['door_existing_version'],
+            $validated['record']['door_upgrade_version'],
             $validated['record']['rack_count'],
             json_encode(array_values($validated['record']['module_counts']), JSON_THROW_ON_ERROR),
             json_encode($validated['record']['rack_names'], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
@@ -664,7 +682,7 @@ try {
         foreach (array_chunk($recordIds, 500) as $idChunk) {
             $placeholders = implode(',', array_fill(0, count($idChunk), '?'));
             $recordsQuery = $database->prepare(
-                'SELECT id, visit_date, device_name, existing_version, upgrade_version,
+                'SELECT id, visit_date, device_name, existing_version, upgrade_version, door_existing_version, door_upgrade_version,
                         rack_count, module_counts, rack_names, site_name, address, contacts_json, notes,
                         work_status, work_status_other
                  FROM records WHERE id IN (' . $placeholders . ')'
@@ -690,7 +708,7 @@ try {
         $filters = validatedFilters($input['filters']);
         [$conditions, $parameters] = filterConditions($filters);
         $sql = 'DELETE FROM records';
-        $selectSql = 'SELECT id, visit_date, device_name, existing_version, upgrade_version,
+        $selectSql = 'SELECT id, visit_date, device_name, existing_version, upgrade_version, door_existing_version, door_upgrade_version,
                              rack_count, module_counts, rack_names, site_name, address, contacts_json, notes,
                              work_status, work_status_other FROM records';
         if ($conditions !== []) {
@@ -746,9 +764,9 @@ try {
         $deviceInsert = $database->prepare('INSERT OR IGNORE INTO devices (name) VALUES (?)');
         $recordInsert = $database->prepare(
             'INSERT INTO records (
-                visit_date, device_name, existing_version, upgrade_version, rack_count, module_counts, rack_names,
+                visit_date, device_name, existing_version, upgrade_version, door_existing_version, door_upgrade_version, rack_count, module_counts, rack_names,
                 site_name, address, contacts_json, notes, work_status, work_status_other
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         foreach ($validatedRecords as $record) {
             $deviceInsert->execute([$record['device_name']]);
@@ -757,6 +775,8 @@ try {
                 $record['device_name'],
                 $record['existing_version'],
                 $record['upgrade_version'],
+                $record['door_existing_version'],
+                $record['door_upgrade_version'],
                 $record['rack_count'],
                 json_encode(array_values($record['module_counts']), JSON_THROW_ON_ERROR),
                 json_encode($record['rack_names'], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
@@ -792,11 +812,11 @@ try {
 
     if (!is_int($rackCount) || $rackCount < 1 || $rackCount > 100 ||
         !is_array($moduleCounts) || count($moduleCounts) !== $rackCount) {
-        respond(422, ['error' => '랙 수는 1~100개로 설정하고 각 랙의 모듈 수를 선택해 주세요.']);
+        respond(422, ['error' => 'Rack 수는 1~100개로 설정하고 각 Rack의 모듈 수를 선택해 주세요.']);
     }
     foreach ($moduleCounts as $moduleCount) {
         if (!is_int($moduleCount) || $moduleCount < 1 || $moduleCount > 10) {
-            respond(422, ['error' => '각 랙의 모듈 수는 1~10대여야 합니다.']);
+            respond(422, ['error' => '각 Rack의 모듈 수는 1~10대여야 합니다.']);
         }
     }
 
@@ -809,6 +829,8 @@ try {
         'device_name' => $deviceName,
         'existing_version' => $existingVersion,
         'upgrade_version' => $upgradeVersion,
+        'door_existing_version' => $additional['record']['door_existing_version'],
+        'door_upgrade_version' => $additional['record']['door_upgrade_version'],
         'rack_count' => $rackCount,
         'module_counts' => $moduleCounts,
     ], $additional['record']);
@@ -819,15 +841,17 @@ try {
 
     $recordInsert = $database->prepare(
         'INSERT INTO records (
-            visit_date, device_name, existing_version, upgrade_version, rack_count, module_counts, rack_names,
+            visit_date, device_name, existing_version, upgrade_version, door_existing_version, door_upgrade_version, rack_count, module_counts, rack_names,
             site_name, address, contacts_json, notes, work_status, work_status_other
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
     $recordInsert->execute([
         $visitDate,
         $deviceName,
         $existingVersion,
         $upgradeVersion,
+        $record['door_existing_version'],
+        $record['door_upgrade_version'],
         $rackCount,
         json_encode(array_values($moduleCounts), JSON_THROW_ON_ERROR),
         json_encode($record['rack_names'], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
@@ -844,6 +868,8 @@ try {
         'device_name' => $deviceName,
         'existing_version' => $existingVersion,
         'upgrade_version' => $upgradeVersion,
+        'door_existing_version' => $additional['record']['door_existing_version'],
+        'door_upgrade_version' => $additional['record']['door_upgrade_version'],
         'rack_count' => $rackCount,
         'module_counts' => $moduleCounts,
         'site_name' => $record['site_name'],

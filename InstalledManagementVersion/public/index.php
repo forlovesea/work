@@ -109,8 +109,9 @@ try {
                                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
                     </label>
                     <p class="bulk-import-hint">
-                        날짜는 YYYY-MM-DD, 랙별 모듈 수는 쉼표로 구분해 입력합니다.
-                        예: 랙 수 3, 모듈 수 4,5,3. 한 번에 최대 100개 현장을 등록할 수 있습니다.
+                        날짜는 YYYY-MM-DD로 입력하고, 각 랙의 모듈 수는 드롭다운에서 선택하세요.
+                        쉼표 구분 입력도 지원합니다. 설치장소·담당자·작업상태 등 전체 항목을 작성할 수 있으며,
+                        한 번에 최대 100개 현장을 등록할 수 있습니다.
                     </p>
                 </div>
 

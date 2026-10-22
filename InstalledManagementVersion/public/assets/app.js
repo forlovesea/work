@@ -576,15 +576,40 @@ function createTemplateCell(reference, value, style = '') {
     return `<c r="${reference}" t="inlineStr"${styleAttribute}><is><t xml:space="preserve">${xmlEscape(value)}</t></is></c>`;
 }
 
-function downloadImportTemplate() {
-    const headers = [
+function importTemplateHeaders() {
+    return [
         '현장방문날짜',
         '장비명',
         '기존 설치 버전',
         '업그레이드 버전',
         '축전지 랙 수',
         '랙별 모듈 수 (쉼표 구분)',
+        '설치장소(국소)', '주소', '작업상태', '기타 작업상태', '비고',
+        ...Array.from({ length: 20 }, (_, i) => [`담당자 ${i + 1} 이름`, `담당자 ${i + 1} 연락처`]).flat(),
+        ...Array.from({ length: 100 }, (_, i) => [`랙 ${i + 1} 이름`, `랙 ${i + 1} 모듈 수`]).flat(),
     ];
+}
+
+function downloadImportTemplate() {
+    const headers = importTemplateHeaders();
+    const choiceLists = [
+        [...deviceSelect.options].map((option) => option.value).filter((value) => value && value !== '__new__'),
+        [...document.querySelector('#existingVersionOptions').options].map((option) => option.value),
+        [...new Set(['v0.0.0.9', ...[...document.querySelector('#upgradeVersionOptions').options].map((option) => option.value)])],
+        [...workStatusInput.options].map((option) => option.value),
+    ];
+    const validations = [];
+    const listValidation = (range, formula, strict = true) => {
+        validations.push(`<dataValidation type="list" allowBlank="1" showDropDown="0" showErrorMessage="${strict ? 1 : 0}" errorTitle="선택값 확인" error="목록에서 값을 선택하세요." sqref="${range}"><formula1>${xmlEscape(formula)}</formula1></dataValidation>`);
+    };
+    choiceLists.forEach((choices, i) => {
+        if (choices.length) listValidation(`${['B', 'C', 'D', 'I'][i]}2:${['B', 'C', 'D', 'I'][i]}101`, `TemplateChoices${i}`, i === 3);
+    });
+    validations.push('<dataValidation type="whole" operator="between" allowBlank="1" showErrorMessage="1" error="1~100 사이 정수를 입력하세요." sqref="E2:E101"><formula1>1</formula1><formula2>100</formula2></dataValidation>');
+    for (let i = 0; i < 100; i += 1) {
+        const col = columnName(52 + i * 2);
+        listValidation(`${col}2:${col}101`, '"1,2,3,4,5,6,7,8,9,10"');
+    }
     const dataRows = [
         `<row r="1" ht="30" customHeight="1">${headers.map((value, index) => (
             createTemplateCell(`${columnName(index)}1`, value, '1')
@@ -604,7 +629,12 @@ function downloadImportTemplate() {
         ['장비명', 'Door LCD, SMU02C 또는 등록할 장비명을 입력하세요.'],
         ['버전', '기존 설치 버전과 업그레이드 버전을 빠짐없이 입력하세요.'],
         ['축전지 랙 수', '1~100 사이의 정수로 입력하세요.'],
-        ['랙별 모듈 수', '랙 순서대로 1~10 사이 숫자를 쉼표로 구분하세요. 예: 랙 수 3, 값 4,5,3'],
+        ['랙별 모듈 수', '각 랙의 모듈 수 열에서 1~10을 선택하세요. 기존 쉼표 구분 열을 사용해도 됩니다. 두 방식은 함께 입력하지 마세요.'],
+        ['설치 정보', '설치장소(국소), 주소, 비고를 입력하세요. 작업상태가 비어 있으면 방문예정으로 등록합니다.'],
+        ['작업상태', '목록에서 선택하세요. 기타를 선택하면 기타 작업상태를 반드시 입력하세요.'],
+        ['담당자', '최대 20명까지 이름과 연락처를 한 쌍으로 입력하세요. 연락처는 앞자리 0을 유지하는 텍스트 형식입니다.'],
+        ['랙 이름', '랙 수만큼 순서대로 입력하세요. 빈 이름은 랙 01 등의 기본 이름을 사용합니다. 최대 100개입니다.'],
+        ['선택 항목', '장비명과 버전은 목록에서 선택하거나 새 값을 직접 입력할 수 있습니다.'],
         ['등록 제한', '한 번 업로드할 때 최대 100개 현장을 등록합니다. 빈 행은 무시합니다.'],
         ['주의', '열 제목을 수정하거나 삭제하지 마세요. 업로드 전에 화면에서 모든 행의 검증 결과를 확인합니다.'],
     ];
@@ -620,7 +650,7 @@ function downloadImportTemplate() {
     const files = [
         {
             name: '[Content_Types].xml',
-            content: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>',
+            content: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/xl/worksheets/sheet3.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>',
         },
         {
             name: '_rels/.rels',
@@ -628,11 +658,11 @@ function downloadImportTemplate() {
         },
         {
             name: 'xl/workbook.xml',
-            content: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><bookViews><workbookView xWindow="0" yWindow="0" windowWidth="24000" windowHeight="12000" activeTab="0"/></bookViews><sheets><sheet name="설치 정보" sheetId="1" r:id="rId1"/><sheet name="작성 안내" sheetId="2" r:id="rId2"/></sheets></workbook>',
+            content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><bookViews><workbookView xWindow="0" yWindow="0" windowWidth="24000" windowHeight="12000" activeTab="0"/></bookViews><sheets><sheet name="설치 정보" sheetId="1" r:id="rId1"/><sheet name="작성 안내" sheetId="2" r:id="rId2"/><sheet name="선택 목록" sheetId="3" state="hidden" r:id="rId4"/></sheets><definedNames>${choiceLists.map((choices, i) => choices.length ? `<definedName name="TemplateChoices${i}">'선택 목록'!$${columnName(i)}$1:$${columnName(i)}$${choices.length}</definedName>` : "").join("")}</definedNames></workbook>`,
         },
         {
             name: 'xl/_rels/workbook.xml.rels',
-            content: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>',
+            content: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet3.xml"/></Relationships>',
         },
         {
             name: 'xl/styles.xml',
@@ -640,13 +670,17 @@ function downloadImportTemplate() {
         },
         {
             name: 'xl/worksheets/sheet1.xml',
-            content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols><col min="1" max="1" width="18" customWidth="1"/><col min="2" max="4" width="22" customWidth="1"/><col min="5" max="5" width="16" customWidth="1"/><col min="6" max="6" width="34" customWidth="1"/></cols><sheetData>${dataRows}</sheetData><autoFilter ref="A1:F101"/></worksheet>`,
+            content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols><col min="1" max="1" width="18" customWidth="1"/><col min="2" max="4" width="22" customWidth="1"/><col min="5" max="5" width="16" customWidth="1"/><col min="6" max="6" width="34" customWidth="1"/><col min="7" max="251" width="22" customWidth="1"/></cols><sheetData>${dataRows}</sheetData><autoFilter ref="A1:${columnName(headers.length - 1)}101"/><dataValidations count="${validations.length}">${validations.join('')}</dataValidations></worksheet>`,
         },
         {
             name: 'xl/worksheets/sheet2.xml',
             content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><cols><col min="1" max="1" width="22" customWidth="1"/><col min="2" max="2" width="82" customWidth="1"/></cols><sheetData>${guidanceRows}</sheetData></worksheet>`,
         },
     ];
+    files.push({
+        name: 'xl/worksheets/sheet3.xml',
+        content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${Array.from({ length: Math.max(...choiceLists.map((list) => list.length)) }, (_, r) => `<row r="${r + 1}">${choiceLists.map((list, c) => createTemplateCell(`${columnName(c)}${r + 1}`, list[r] || '')).join('')}</row>`).join('')}</sheetData></worksheet>`,
+    });
     downloadBlob(createZip(files), '설치정보_일괄등록_템플릿.xlsx');
 }
 
@@ -841,14 +875,6 @@ function parseImportRows(sheetXml, sharedStrings) {
     if (rows.length === 0 || Number(rows[0].getAttribute('r') || 1) !== 1) {
         throw new Error('첫 번째 행에는 템플릿의 열 제목이 있어야 합니다.');
     }
-    const expectedHeaders = [
-        '현장방문날짜',
-        '장비명',
-        '기존 설치 버전',
-        '업그레이드 버전',
-        '축전지 랙 수',
-        '랙별 모듈 수 (쉼표 구분)',
-    ];
     const headerValues = [];
     for (const cell of rows[0].getElementsByTagNameNS('*', 'c')) {
         const column = columnIndexFromReference(cell.getAttribute('r') || '');
@@ -856,6 +882,8 @@ function parseImportRows(sheetXml, sharedStrings) {
             headerValues[column] = getCellValue(cell, sharedStrings).trim();
         }
     }
+    const legacy = headerValues.filter(Boolean).length === 6;
+    const expectedHeaders = legacy ? importTemplateHeaders().slice(0, 6) : importTemplateHeaders();
     const missingHeaders = expectedHeaders.filter((header) => !headerValues.includes(header));
     if (missingHeaders.length > 0 || expectedHeaders.some((header, index) => headerValues[index] !== header)) {
         throw new Error('열 제목이 템플릿과 다릅니다. 열 제목을 바꾸지 말고 새 템플릿을 내려받아 주세요.');
@@ -884,8 +912,40 @@ function parseImportRows(sheetXml, sharedStrings) {
             continue;
         }
 
-        const [visitDate, deviceName, existingVersion, upgradeVersion, rackCountText, moduleCountsText] = values;
+        let [visitDate, deviceName, existingVersion, upgradeVersion, rackCountText, moduleCountsText] = values;
         const rackCount = /^\d+$/.test(rackCountText || '') ? Number(rackCountText) : NaN;
+        const extra = { site_name: values[6] || '', address: values[7] || '', work_status: values[8] || '방문예정', work_status_other: values[9] || '', notes: values[10] || '', contacts: [] };
+        const fail = (message) => errors.push({ row: rowNumber, message });
+        for (const [key, label, limit] of [['site_name', '설치장소', 100], ['address', '주소', 300], ['work_status_other', '기타 작업상태', 100], ['notes', '비고', 2000]]) {
+            if ([...extra[key]].length > limit) fail(`${label}은(는) ${limit}자 이내로 입력하세요.`);
+        }
+        if (!['방문예정', '작업완료', '작업실패', '작업보류', '기타'].includes(extra.work_status)) fail('작업상태를 목록에서 선택하세요.');
+        if (extra.work_status === '기타' && !extra.work_status_other) fail('기타 작업상태를 입력하세요.');
+        if (extra.work_status !== '기타') extra.work_status_other = '';
+        for (let i = 0; i < 20; i += 1) {
+            const name = values[11 + i * 2] || '';
+            const phone = values[12 + i * 2] || '';
+            if (!name && !phone) continue;
+            if (!name || !phone || [...name].length > 100 || [...phone].length > 50) fail(`담당자 ${i + 1}: 이름(100자 이내)과 연락처(50자 이내)를 함께 입력하세요.`);
+            extra.contacts.push({ name, phone });
+        }
+        if (!legacy) {
+            extra.rack_names = [];
+            const selectedModules = [];
+            for (let i = 0; i < 100; i += 1) {
+                const name = values[51 + i * 2] || '';
+                const count = values[52 + i * 2] || '';
+                if (i < rackCount) {
+                    extra.rack_names.push(name || defaultRackName(i));
+                    selectedModules.push(count);
+                    if ([...name].length > 100) fail(`랙 ${i + 1} 이름은 100자 이내로 입력하세요.`);
+                } else if (name || count) fail(`랙 ${i + 1}: 입력한 랙 수를 초과한 값이 있습니다.`);
+            }
+            if (selectedModules.some(Boolean)) {
+                if (moduleCountsText) fail('쉼표 구분 모듈 수와 개별 랙 모듈 수 중 한 방식만 입력하세요.');
+                moduleCountsText = selectedModules.join(',');
+            }
+        }
         const moduleCounts = (moduleCountsText || '').split(',').map((value) => (
             /^\d+$/.test(value.trim()) ? Number(value.trim()) : NaN
         ));
@@ -920,6 +980,7 @@ function parseImportRows(sheetXml, sharedStrings) {
             upgrade_version: upgradeVersion || '',
             rack_count: rackCount,
             module_counts: moduleCounts,
+            ...extra,
             source_row: rowNumber,
         });
     }

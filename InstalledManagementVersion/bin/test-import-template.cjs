@@ -12,20 +12,20 @@ const context = vm.createContext({
     downloadBlob: files => { context.files = files; },
     getCellValue: cell => cell.value,
 });
-for (const name of ['xmlEscape', 'columnName', 'createTemplateCell', 'importTemplateHeaders', 'downloadImportTemplate', 'columnIndexFromReference', 'defaultRackName', 'parseImportRows']) {
+for (const name of ['xmlEscape', 'columnName', 'createTemplateCell', 'importTemplateHeaders', 'legacyImportTemplateHeaders', 'downloadImportTemplate', 'columnIndexFromReference', 'defaultRackName', 'parseImportRows']) {
     const start = source.indexOf(`function ${name}(`);
     const next = source.indexOf('\nfunction ', start + 1);
     vm.runInContext(source.slice(start, next), context);
 }
 vm.runInContext('downloadImportTemplate()', context);
-const headers = context.importTemplateHeaders();
+const headers = context.legacyImportTemplateHeaders();
 assert.equal(headers.length, 23);
 assert.equal(headers[21], 'Door LCD 기존 설치 버전');
 assert.equal(headers[22], 'Door LCD 업그레이드 버전');
 const sheet = context.files.find(file => file.name === 'xl/worksheets/sheet1.xml').content;
 assert.match(sheet, /dataValidations count="8"/);
-assert.match(sheet, /sqref="Q2:Q101"/);
-assert.match(sheet, /sqref="U2:U101"/);
+assert.match(sheet, /sqref="R2:R101"/);
+assert.match(sheet, /sqref="V2:V101"/);
 assert.match(sheet, /showDropDown="0"/);
 assert.match(context.files.find(f => f.name === 'xl/workbook.xml').content, /definedName name="TemplateChoices0"/);
 function parse(values, legacy = false, customHeaders = headers) {
@@ -51,19 +51,19 @@ assert.match(parse(defaults).errors[0].message, /등록할 현장 정보가 없�
 Object.assign(defaults, { 0: '2026-10-22', 1: 'Door LCD', 2: '001', 3: '002' });
 assert.equal(parse(defaults).errors.length, 0);
 assert.equal(parse(defaults).records[0].module_counts.join(','), '10,10,10');
-for (const [cell, value] of [['E2', '3'], ['Q2', '10'], ['S2', '10'], ['U2', '10'], ['U101', '10']]) {
+for (const [cell, value] of [['P2', '3'], ['R2', '10'], ['T2', '10'], ['V2', '10'], ['V101', '10']]) {
     assert.ok(sheet.includes(`<c r="${cell}" t="inlineStr" s="2"><is><t xml:space="preserve">${value}</t></is></c>`));
 }
-const oldHeaders = context.importTemplateHeaders(20, 100, false).map(header => header.replaceAll('Rack', '랙'));
+const oldHeaders = context.legacyImportTemplateHeaders(20, 100, false).map(header => header.replaceAll('Rack', '랙'));
 const oldValues = Array(251).fill('');
 Object.assign(oldValues, { 0: '2026-10-22', 1: 'Door LCD', 2: '001', 3: '002', 4: '1', 52: '10' });
 assert.equal(parse(oldValues, false, oldHeaders).errors.length, 0);
-const extendedHeaders = context.importTemplateHeaders(3, 4);
+const extendedHeaders = context.legacyImportTemplateHeaders(3, 4);
 const extendedValues = Array(25).fill('');
 Object.assign(extendedValues, { 0: '2026-10-22', 1: 'Door LCD', 2: '001', 3: '002', 4: '4', 15: '담당자', 16: '01012345678', 18: '10', 20: '10', 22: '10', 24: '5' });
 assert.equal(parse(extendedValues, false, extendedHeaders).errors.length, 0);
 assert.equal(parse(extendedValues, false, extendedHeaders).records[0].module_counts.join(','), '10,10,10,5');
-assert.equal(parse(values, false, context.importTemplateHeaders(2, 3, false)).errors.length, 0);
+assert.equal(parse(values, false, context.legacyImportTemplateHeaders(2, 3, false)).errors.length, 0);
 const combined = Object.assign([...defaults], { 1: 'SMU02C + Door LCD', 21: '0008', 22: '0009' });
 const combinedResult = parse(combined);
 assert.equal(combinedResult.errors.length, 0);
@@ -74,5 +74,31 @@ assert.equal(combinedResult.records[0].door_upgrade_version, '0009');
 for (const changes of [{ 21: '' }, { 22: '' }, { 22: 'x'.repeat(51) }, { 1: 'Door LCD' }]) {
     assert.ok(parse(Object.assign([...combined], changes)).errors.length > 0);
 }
+const screenHeaders = context.importTemplateHeaders();
+assert.equal(screenHeaders.join('|'), '설치장소(국소)|주소|작업상태|기타 작업상태|담당자 1 이름|담당자 1 연락처|담당자 2 이름|담당자 2 연락처|현장방문날짜|장비명|새 장치명|기존 설치 버전|업그레이드 버전|Door LCD 기존 설치 버전|Door LCD 업그레이드 버전|Rack 수|Rack 1 이름|Rack 1 모듈 수|Rack 2 이름|Rack 2 모듈 수|Rack 3 이름|Rack 3 모듈 수|비고');
+const toScreen = (row, targetHeaders = screenHeaders, sourceHeaders = headers) => targetHeaders.map(header => row[sourceHeaders.indexOf(header === 'Rack 수' ? '축전지 Rack 수' : header)] || '');
+const screenRow = toScreen(combined);
+Object.assign(screenRow, { 0: '국소', 1: '주소', 2: '기타', 3: '점검 중', 4: '담당자1', 5: '01001234567', 6: '담당자2', 7: '01011112222', 22: '비고' });
+const parsedScreen = parse(screenRow, false, screenHeaders);
+assert.equal(parsedScreen.errors.length, 0);
+assert.equal(parsedScreen.records[0].site_name, '국소');
+assert.equal(parsedScreen.records[0].contacts[1].phone, '01011112222');
+assert.equal(parsedScreen.records[0].door_upgrade_version, '0009');
+assert.equal(parsedScreen.records[0].notes, '비고');
+assert.equal(parsedScreen.records[0].module_counts.join(','), '10,10,10');
+const custom = toScreen(defaults);
+Object.assign(custom, { 9: '+ 새 장치 추가', 10: 'Custom Device' });
+assert.equal(parse(custom, false, screenHeaders).records[0].device_name, 'Custom Device');
+assert.equal(parse(custom, false, screenHeaders).errors.length, 0);
+assert.ok(parse(Object.assign([...custom], { 10: '' }), false, screenHeaders).errors.length);
+assert.ok(parse(Object.assign([...custom], { 9: 'Door LCD' }), false, screenHeaders).errors.length);
+const blankScreen = Array(23).fill('');
+Object.assign(blankScreen, { 15: '3', 17: '10', 19: '10', 21: '10' });
+assert.equal(parse(blankScreen, false, screenHeaders).records.length, 0);
+const extendedScreenHeaders = context.importTemplateHeaders(3, 4);
+assert.equal(parse(toScreen(extendedValues, extendedScreenHeaders, extendedHeaders), false, extendedScreenHeaders).errors.length, 0);
+assert.match(sheet, /sqref="J2:J101"/);
+assert.match(sheet, /sqref="C2:C101"/);
+assert.match(sheet, /sqref="P2:P101"/);
 if (process.argv[2]) fs.writeFileSync(process.argv[2], JSON.stringify(context.files));
 console.log('PASS: template choices, new/legacy imports, contact/rack/status validation');

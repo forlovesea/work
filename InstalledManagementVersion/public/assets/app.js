@@ -606,9 +606,9 @@ function createTemplateCell(reference, value, style = '') {
     return `<c r="${reference}" t="inlineStr"${styleAttribute}><is><t xml:space="preserve">${xmlEscape(value)}</t></is></c>`;
 }
 
-function importTemplateHeaders(contactCount = 2, rackCount = 3) {
+function importTemplateHeaders(contactCount = 1, rackCount = 1, includeOtherStatus = false) {
     return [
-        '설치장소(국소)', '주소', '작업상태', '기타 작업상태',
+        '설치장소(국소)', '주소', '작업상태', ...(includeOtherStatus ? ['기타 작업상태'] : []),
         ...Array.from({ length: contactCount }, (_, i) => [`담당자 ${i + 1} 이름`, `담당자 ${i + 1} 연락처`]).flat(),
         '현장방문날짜', '장비명', '새 장치명', '기존 설치 버전', '업그레이드 버전',
         'Door LCD 기존 설치 버전', 'Door LCD 업그레이드 버전', 'Rack 수',
@@ -650,7 +650,7 @@ function downloadImportTemplate() {
         if (choices.length) listValidation(`${col}2:${col}101`, `TemplateChoices${i}`, i === 3);
     });
     validations.push(`<dataValidation type="whole" operator="between" allowBlank="1" showErrorMessage="1" error="1~100 사이 정수를 입력하세요." sqref="${columnFor('Rack 수')}2:${columnFor('Rack 수')}101"><formula1>1</formula1><formula2>100</formula2></dataValidation>`);
-    for (let i = 0; i < 3; i += 1) {
+    for (let i = 0; i < 1; i += 1) {
         const col = columnFor(`Rack ${i + 1} 모듈 수`);
         listValidation(`${col}2:${col}101`, '"1,2,3,4,5,6,7,8,9,10"');
     }
@@ -660,9 +660,15 @@ function downloadImportTemplate() {
         )).join('')}</row>`,
         ...Array.from({ length: 100 }, (_, rowIndex) => {
             const rowNumber = rowIndex + 2;
-            const cells = headers.map((_, columnIndex) => (
-                createTemplateCell(`${columnName(columnIndex)}${rowNumber}`, headers[columnIndex] === 'Rack 수' ? '3' : (/^Rack \d+ 모듈 수$/.test(headers[columnIndex]) ? '10' : ''), '2')
-            )).join('');
+            const cells = headers.map((header, columnIndex) => {
+                const reference = `${columnName(columnIndex)}${rowNumber}`;
+                if (header === '기존 설치 버전') {
+                    const device = `${columnFor('장비명')}${rowNumber}`;
+                    const formula = `IF(OR(${device}="SMU02C + Door LCD",${device}="SMU02C"),"V100R024C10SPC235",IF(${device}="iIoT Gateway","V100R024C10SPC265",""))`;
+                    return `<c r="${reference}" t="str"><f>${xmlEscape(formula)}</f><v></v></c>`;
+                }
+                return createTemplateCell(reference, header === 'Rack 수' ? '1' : (/^Rack \d+ 모듈 수$/.test(header) ? '10' : ''), '2');
+            }).join('');
             return `<row r="${rowNumber}" ht="24" customHeight="1">${cells}</row>`;
         }),
     ].join('');
@@ -673,11 +679,13 @@ function downloadImportTemplate() {
         ['장비명', 'SMU02C + Door LCD, Door LCD, iIoT Gateway, SMU02C 또는 등록할 장비명을 입력하세요.'],
         ['새 장치명', '장비명에서 + 새 장치 추가를 선택한 경우에만 입력하세요.'],
         ['버전', '기존 설치 버전과 업그레이드 버전을 입력하세요. 통합 장비의 앞 두 버전은 SMU02C용이며 바로 옆의 Door LCD 버전 두 열도 필수입니다. 단일 장비는 Door LCD 전용 열을 비워 두세요.'],
-        ['Rack 수', '기본 3개입니다. 필요하면 1~100 사이의 정수로 수정하세요.'],
+        ['Rack 수', '기본 1개입니다. 필요하면 1~100 사이의 정수로 수정하세요.'],
         ['Rack별 모듈 수', '각 Rack의 모듈 수는 기본 10개입니다. 필요하면 1~10을 선택하세요. Rack 수를 줄이면 사용하지 않는 Rack의 이름과 모듈 수를 비워 주세요.'],
         ['설치 정보', '설치장소(국소), 주소, 비고를 입력하세요. 작업상태가 비어 있으면 방문예정으로 등록합니다.'],
-        ['작업상태', '목록에서 선택하세요. 기타를 선택하면 기타 작업상태를 반드시 입력하세요.'],
-        ['담당자', '기본 2인입니다. 추가 시 현장방문날짜 열 앞에 번호 순서대로 이름/연락처 열을 삽입하세요(최대 20명). 연락처는 앞자리 0을 유지합니다.'],
+        ['작업상태', '목록에서 선택하세요. 기타 작업상태 열은 사용하지 않습니다. 필요한 설명은 비고에 적어 주세요.'],
+        ['담당자', '기본 1인입니다. 추가 시 현장방문날짜 열 앞에 번호 순서대로 이름/연락처 열을 삽입하세요(최대 20명). 연락처는 앞자리 0을 유지합니다.'],
+        ['버전 기본값', '장비 선택 시 SMU02C(통합 포함)는 V100R024C10SPC235, iIoT Gateway는 V100R024C10SPC265로 자동 표시합니다. 직접 덮어써서 수정할 수 있습니다. 업그레이드 버전은 직접 입력하세요.'],
+        ['조건부 입력', '통합 장비일 때만 Door LCD 버전 두 열을 입력하세요. 단일 장비일 때는 회색으로 표시됩니다. 일반 xlsx에서는 행마다 열을 숨길 수 없어 회색 표시로 구분합니다.'],
         ['Rack 이름', 'Rack 수만큼 입력하세요. 빈 이름은 Rack 01 등의 기본 이름을 사용합니다. 추가 시 비고 열 앞에 번호 순서대로 이름/모듈 수 열을 삽입하세요(최대 100개).'],
         ['선택 항목', '장비명과 버전은 목록에서 선택하거나 새 값을 직접 입력할 수 있습니다.'],
         ['등록 제한', '한 번 업로드할 때 최대 100개 현장을 등록합니다. 빈 행과 Rack 기본값만 남은 행은 무시합니다.'],
@@ -726,6 +734,18 @@ function downloadImportTemplate() {
         name: 'xl/worksheets/sheet3.xml',
         content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${Array.from({ length: Math.max(...choiceLists.map((list) => list.length)) }, (_, r) => `<row r="${r + 1}">${choiceLists.map((list, c) => createTemplateCell(`${columnName(c)}${r + 1}`, list[r] || '')).join('')}</row>`).join('')}</sheetData></worksheet>`,
     });
+    const workbookFile = files.find(file => file.name === 'xl/workbook.xml');
+    workbookFile.content = workbookFile.content.replace('</workbook>', '<calcPr calcId="191029" fullCalcOnLoad="1" forceFullCalc="1" calcMode="auto"/></workbook>');
+    const stylesFile = files.find(file => file.name === 'xl/styles.xml');
+    stylesFile.content = stylesFile.content.replace('</styleSheet>', '<dxfs count="1"><dxf><font><color rgb="FF929AA6"/></font><fill><patternFill patternType="solid"><fgColor rgb="FFE9EDF2"/><bgColor indexed="64"/></patternFill></fill></dxf></dxfs></styleSheet>');
+    const inputFile = files.find(file => file.name === 'xl/worksheets/sheet1.xml');
+    inputFile.content = inputFile.content.replace(/<cols>.*?<\/cols>/, `<cols><col min="1" max="${headers.length}" width="28" customWidth="1"/></cols>`);
+    const deviceColumn = columnFor('장비명');
+    const doorRange = `${columnFor('Door LCD 기존 설치 버전')}2:${columnFor('Door LCD 업그레이드 버전')}101`;
+    const customRange = `${columnFor('새 장치명')}2:${columnFor('새 장치명')}101`;
+    const conditions = `<conditionalFormatting sqref="${doorRange}"><cfRule type="expression" dxfId="0" priority="1"><formula>${xmlEscape(`$${deviceColumn}2<>"SMU02C + Door LCD"`)}</formula></cfRule></conditionalFormatting>`
+        + `<conditionalFormatting sqref="${customRange}"><cfRule type="expression" dxfId="0" priority="2"><formula>${xmlEscape(`$${deviceColumn}2<>"+ 새 장치 추가"`)}</formula></cfRule></conditionalFormatting>`;
+    inputFile.content = inputFile.content.replace('<dataValidations ', `${conditions}<dataValidations `);
     downloadBlob(createZip(files), '설치정보_일괄등록_템플릿.xlsx');
 }
 
@@ -933,7 +953,7 @@ function parseImportRows(sheetXml, sharedStrings) {
     const contactCount = headerValues.filter((header) => /^담당자 \d+ 이름$/.test(header)).length;
     const templateRackCount = headerValues.filter((header) => /^Rack \d+ 이름$/.test(header)).length;
     const rackStart = 11 + contactCount * 2;
-    const expectedHeaders = screenLayout ? importTemplateHeaders(contactCount, templateRackCount)
+    const expectedHeaders = screenLayout ? importTemplateHeaders(contactCount, templateRackCount, headerValues.includes('기타 작업상태'))
         : (legacy ? legacyImportTemplateHeaders().slice(0, 6) : legacyImportTemplateHeaders(contactCount, templateRackCount, headerValues.includes('Door LCD 기존 설치 버전')));
     if (!legacy && (contactCount < 1 || contactCount > 20 || templateRackCount < 1 || templateRackCount > 100)) {
         throw new Error('담당자는 1~20명, Rack은 1~100개의 열을 사용하세요.');
@@ -965,7 +985,7 @@ function parseImportRows(sheetXml, sharedStrings) {
             values = headerValues.map(header => original[fileHeaders.indexOf(header === '축전지 Rack 수' ? 'Rack 수' : header)] || '');
         }
         const onlyDefaults = !customDevice && !legacy && values.every((value, index) => !value ||
-            (index === 4 && value === '3') ||
+            (index === 4 && value === (screenLayout && !fileHeaders.includes('기타 작업상태') ? '1' : '3')) ||
             (index >= rackStart && (index - rackStart) % 2 === 1 && index < rackStart + 6 && value === '10'));
         if ((!customDevice && !values.some((value) => value)) || onlyDefaults) {
             continue;
@@ -976,6 +996,15 @@ function parseImportRows(sheetXml, sharedStrings) {
         }
 
         let [visitDate, deviceName, existingVersion, upgradeVersion, rackCountText, moduleCountsText] = values;
+        // Excel may omit a cached formula result; recover this template's default only.
+        if (screenLayout && !existingVersion) {
+            const versionIndex = fileHeaders.indexOf('기존 설치 버전');
+            const versionCell = [...row.getElementsByTagNameNS('*', 'c')].find(cell => columnIndexFromReference(cell.getAttribute('r') || '') === versionIndex);
+            const formula = versionCell?.getElementsByTagNameNS?.('*', 'f')?.[0]?.textContent;
+            const deviceRef = `${columnName(fileHeaders.indexOf('장비명'))}${rowNumber}`;
+            const expectedFormula = `IF(OR(${deviceRef}="SMU02C + Door LCD",${deviceRef}="SMU02C"),"V100R024C10SPC235",IF(${deviceRef}="iIoT Gateway","V100R024C10SPC265",""))`;
+            if (formula === expectedFormula) existingVersion = deviceName === 'iIoT Gateway' ? 'V100R024C10SPC265' : (['SMU02C', 'SMU02C + Door LCD'].includes(deviceName) ? 'V100R024C10SPC235' : '');
+        }
         const rackCount = /^\d+$/.test(rackCountText || '') ? Number(rackCountText) : NaN;
         const extra = { site_name: values[6] || '', address: values[7] || '', work_status: values[8] || '방문예정', work_status_other: values[9] || '', notes: values[10] || '', contacts: [] };
         const fail = (message) => errors.push({ row: rowNumber, message });
@@ -999,7 +1028,7 @@ function parseImportRows(sheetXml, sharedStrings) {
             if ([...extra[key]].length > limit) fail(`${label}은(는) ${limit}자 이내로 입력하세요.`);
         }
         if (!['방문예정', '작업완료', '작업실패', '작업보류', '기타'].includes(extra.work_status)) fail('작업상태를 목록에서 선택하세요.');
-        if (extra.work_status === '기타' && !extra.work_status_other) fail('기타 작업상태를 입력하세요.');
+        if (fileHeaders.includes('기타 작업상태') && extra.work_status === '기타' && !extra.work_status_other) fail('기타 작업상태를 입력하세요.');
         if (extra.work_status !== '기타') extra.work_status_other = '';
         for (let i = 0; i < contactCount; i += 1) {
             const name = values[11 + i * 2] || '';

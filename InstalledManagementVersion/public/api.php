@@ -394,9 +394,6 @@ function validateAdditionalFields(array $input): array
         $errors[] = '작업상태를 목록에서 선택해 주세요.';
         $workStatus = '방문예정';
     }
-    if ($workStatus === '기타' && $record['work_status_other'] === '') {
-        $errors[] = '기타 작업상태 내용을 입력해 주세요.';
-    }
     if ($workStatus !== '기타') {
         $record['work_status_other'] = '';
     }

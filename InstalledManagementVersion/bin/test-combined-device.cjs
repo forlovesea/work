@@ -46,7 +46,7 @@ context.updateCustomDeviceField();
 assert.equal(field('#doorUpgradeVersion').value, '009');
 context.fillAdditionalFields();
 assert.equal(field('#doorExistingVersion').value, '');
-assert.equal(field('#doorUpgradeVersion').value, 'v0.0.0.9');
+assert.equal(field('#doorUpgradeVersion').value, '');
 for (const [device, expected] of [['SMU02C', 'V100R024C10SPC235'], ['iIoT Gateway', 'V100R024C10SPC265'], ['Door LCD', ''], ['__new__', '']]) {
     context.deviceSelect.value = device;
     context.applyDeviceVersionDefault();

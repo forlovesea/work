@@ -21,6 +21,7 @@ try {
     <meta name="theme-color" content="#f4f7fb">
     <title>현장 설치 버전관리</title>
     <link rel="stylesheet" href="assets/styles.css">
+    <script src="assets/dashboard.js" defer></script>
     <script src="assets/app.js" defer></script>
 </head>
 <body>
@@ -52,8 +53,26 @@ try {
                 <h1>현장 설치 버전관리</h1>
                 <p class="subtitle">현장 장비의 설치 버전과 Rack 구성을 기록합니다.</p>
             </div>
+            <section class="completion-summary" aria-label="전체 설치 완료율">
+                <div id="completionRing" class="completion-ring" role="img" aria-label="설치 현황을 불러오는 중">
+                    <div class="completion-ring-face" aria-hidden="true"></div>
+                    <div class="completion-ring-label"><strong id="completionPercent">—</strong><span>설치 완료</span></div>
+                </div>
+                <div class="completion-copy"><strong>전체 설치 현황</strong><p id="completionCounts">불러오는 중…</p><span>작업완료 기준 · 전체 기간</span></div>
+            </section>
             <button id="logoutButton" class="secondary-button logout-button" type="button">로그아웃</button>
         </header>
+
+        <section class="panel status-dashboard" aria-labelledby="statusDashboardTitle">
+            <div class="status-dashboard-heading">
+                <div><p class="eyebrow">INSTALLATION STATUS</p><h2 id="statusDashboardTitle">장치별 작업 현황</h2><p>전체 등록 기록 기준 · 장치별 작업상태 비율</p></div>
+                <span id="dashboardTotal" class="dashboard-total">— 건</span>
+            </div>
+            <div id="statusLegend" class="status-legend" aria-label="작업상태 범례"></div>
+            <p id="dashboardMessage" class="dashboard-message" role="status">설치 현황을 불러오는 중입니다.</p>
+            <div id="deviceStatusChart" class="device-chart-scroll" hidden></div>
+            <details id="statusDetails" class="status-details" hidden><summary>장치별 수치 상세 보기</summary><div id="statusTable" class="status-table-scroll"></div></details>
+        </section>
 
         <nav class="main-tabs" role="tablist" aria-label="설치 정보 메뉴">
             <button id="entryTab" class="main-tab is-active" type="button" role="tab"
@@ -194,7 +213,7 @@ try {
                     <label class="field">
                         <span><span id="upgradeVersionLabel">업그레이드 버전</span> <span class="required" aria-hidden="true">*</span></span>
                         <input id="upgradeVersion" name="upgrade_version" type="text" maxlength="50"
-                               list="upgradeVersionOptions" value="v0.0.0.9" placeholder="예: v0.0.0.9" required>
+                               list="upgradeVersionOptions" placeholder="업그레이드 버전을 입력하세요" required>
                         <datalist id="upgradeVersionOptions"></datalist>
                     </label>
                     <label class="field" id="doorExistingVersionField" hidden>
@@ -203,7 +222,7 @@ try {
                     </label>
                     <label class="field" id="doorUpgradeVersionField" hidden>
                         <span>Door LCD 업그레이드 버전 <span class="required" aria-hidden="true">*</span></span>
-                        <input id="doorUpgradeVersion" name="door_upgrade_version" type="text" maxlength="50" value="v0.0.0.9" placeholder="예: v0.0.0.9" disabled>
+                        <input id="doorUpgradeVersion" name="door_upgrade_version" type="text" maxlength="50" placeholder="업그레이드 버전을 입력하세요" disabled>
                     </label>
                 </div>
 

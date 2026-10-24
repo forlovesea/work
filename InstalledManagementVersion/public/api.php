@@ -218,6 +218,10 @@ function loadData(PDO $database, array $filters): array
         'SELECT DISTINCT existing_version FROM records ORDER BY existing_version COLLATE NOCASE'
     )->fetchAll(PDO::FETCH_COLUMN);
     $upgradeVersions = $currentVersions;
+    $installationSummary = $database->query(
+        'SELECT device_name, work_status, COUNT(*) AS record_count
+         FROM records GROUP BY device_name, work_status'
+    )->fetchAll();
     $inputHistory = $database->query(
         'SELECT id, visit_date, device_name, existing_version, upgrade_version, door_existing_version, door_upgrade_version,
                 rack_count, module_counts, rack_names, site_name, address, contacts_json, notes,
@@ -244,6 +248,7 @@ function loadData(PDO $database, array $filters): array
         'existing_versions' => $existingVersions,
         'upgrade_versions' => $upgradeVersions,
         'input_history' => $inputHistory,
+        'installation_summary' => $installationSummary,
     ];
 }
 

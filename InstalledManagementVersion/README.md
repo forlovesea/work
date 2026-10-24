@@ -288,7 +288,9 @@ sudo tail -n 80 /var/log/apache2/access.log
 
 문제가 생기면 `/etc/openproject/addons/apache2/custom/server/installed-management-https.conf` 파일을 확인하거나 비활성화하고, `sudo apache2ctl configtest`가 `Syntax OK`인지 확인한 뒤 `sudo systemctl reload apache2`를 실행합니다. OpenProject의 `openproject.conf`와 기존 서비스 설정은 수정하지 않습니다. PHP-FPM 또는 SQLite 오류는 Apache 오류 로그와 `sudo systemctl status php7.4-fpm`에서 확인합니다.
 
-업그레이드 버전 입력란은 Door LCD 요청에 맞춰 `v0.0.0.9`로 미리 채워져 있으며, 다른 장치의 버전을 입력할 때 수정할 수 있습니다.
+모든 장비의 업그레이드 버전 입력란은 기본적으로 비어 있으며, 실제 업그레이드할 버전을 직접 입력합니다. 통합 장비의 Door LCD 업그레이드 버전도 빈칸으로 시작합니다. 저장된 기록을 수정하거나 불러올 때는 저장된 버전을 유지합니다.
+
+상단 원형 차트는 전체 기간의 모든 등록 기록 중 `작업완료` 비율을 표시합니다. 나머지 작업상태는 미완료로 집계합니다. 장치별 누적 세로 막대는 작업완료·방문예정·작업보류·작업실패·기타 비율을 표시하며, 조회 필터와 무관하게 전체 현황을 유지합니다. 막대 아래 상세 표에서 모든 상태의 건수와 비율을 확인할 수 있습니다. 기록이 없는 장치는 ‘기록 없음’으로 표시하며, 기록 등록·수정·삭제 후 현황이 갱신됩니다.
 
 입력 화면에서 SMU02C(통합 장비 포함)의 기존 설치 버전 기본값은 `V100R024C10SPC235`, iIoT Gateway는 `V100R024C10SPC265`입니다. 장치 선택 시 자동 입력되며 직접 수정할 수 있습니다. 저장된 기록을 수정하거나 불러올 때는 저장된 버전을 유지합니다.
 

@@ -59,7 +59,7 @@ function addContact(contact = {}) {
 
 function fillAdditionalFields(record = {}) {
     document.querySelector('#doorExistingVersion').value = record.door_existing_version || '';
-    document.querySelector('#doorUpgradeVersion').value = record.door_upgrade_version || (record.id ? '' : 'v0.0.0.9');
+    document.querySelector('#doorUpgradeVersion').value = record.door_upgrade_version || '';
     siteNameInput.value = record.site_name || '';
     siteAddressInput.value = record.address || '';
     notesInput.value = record.notes || '';
@@ -626,7 +626,7 @@ function downloadImportTemplate() {
     const choiceLists = [
         [...deviceSelect.options].map((option) => option.value).filter((value) => value && value !== '__new__'),
         [...document.querySelector('#existingVersionOptions').options].map((option) => option.value),
-        [...new Set(['v0.0.0.9', ...[...document.querySelector('#upgradeVersionOptions').options].map((option) => option.value)])],
+        [...document.querySelector('#upgradeVersionOptions').options].map((option) => option.value),
         [...workStatusInput.options].map((option) => option.value),
     ];
     const validations = [];
@@ -1557,6 +1557,7 @@ async function loadData() {
         }
 
         renderDevices(data.devices);
+        renderInstallationDashboard(data.installation_summary, data.devices);
         renderInputHistory(data.input_history, data.existing_versions, data.upgrade_versions);
         fillSelect(deviceFilter, data.devices, '전체 장비');
         fillSelect(versionFilter, data.current_versions, '전체 버전');
@@ -1584,6 +1585,7 @@ async function loadData() {
             return;
         }
         recordCount.textContent = '기록을 불러오지 못했습니다.';
+        renderInstallationDashboard(null);
         displayedRecords = [];
         selectedRecordIds.clear();
         exportButton.disabled = true;

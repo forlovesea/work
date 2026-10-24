@@ -337,6 +337,17 @@ try {
                             <option value="">전체 버전</option>
                         </select>
                     </label>
+                    <label class="field">
+                        <span>작업 상태</span>
+                        <select id="workStatusFilter">
+                            <option value="">전체 상태</option>
+                            <option>방문예정</option>
+                            <option>작업완료</option>
+                            <option>작업실패</option>
+                            <option>작업보류</option>
+                            <option>기타</option>
+                        </select>
+                    </label>
                 </div>
                 <p id="filterMessage" class="filter-message" role="status" aria-live="polite"></p>
             </div>

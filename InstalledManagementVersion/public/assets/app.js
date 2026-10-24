@@ -140,6 +140,7 @@ const filterStartDate = document.querySelector('#filterStartDate');
 const filterEndDate = document.querySelector('#filterEndDate');
 const deviceFilter = document.querySelector('#deviceFilter');
 const versionFilter = document.querySelector('#versionFilter');
+const workStatusFilter = document.querySelector('#workStatusFilter');
 const filterMessage = document.querySelector('#filterMessage');
 const refreshButton = document.querySelector('#refreshButton');
 const historyList = document.querySelector('#historyList');
@@ -430,6 +431,7 @@ function currentFilterSummary() {
         date: dateLabel,
         device: deviceFilter.value || '전체 장비',
         version: versionFilter.value || '전체 버전',
+        workStatus: workStatusFilter.value || '전체 상태',
     };
 }
 
@@ -459,6 +461,7 @@ function exportBaseName() {
     if (versionFilter.value) {
         parts.push(filters.version);
     }
+    if (workStatusFilter.value) parts.push(filters.workStatus);
     return safeFileName(parts.join('_'));
 }
 
@@ -1379,6 +1382,7 @@ function buildPrintableReport(isCustomerReport) {
         ['조회 기간', filters.date],
         ['장비명', filters.device],
         ['현재 설치 버전', filters.version],
+        ['작업 상태', filters.workStatus],
         ['작성일', reportDate],
     ]) {
         const item = addReportElement(meta, 'div', 'print-meta-item');
@@ -1645,6 +1649,9 @@ function buildQueryString() {
     }
     if (versionFilter.value) {
         params.set('version', versionFilter.value);
+    }
+    if (workStatusFilter.value) {
+        params.set('work_status', workStatusFilter.value);
     }
     return params;
 }
@@ -2054,7 +2061,7 @@ for (const input of dateModeInputs) {
         scheduleFilterLoad();
     });
 }
-for (const input of [filterDate, filterStartDate, filterEndDate, deviceFilter, versionFilter]) {
+for (const input of [filterDate, filterStartDate, filterEndDate, deviceFilter, versionFilter, workStatusFilter]) {
     input.addEventListener('change', scheduleFilterLoad);
 }
 

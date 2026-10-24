@@ -266,6 +266,7 @@ function validatedFilters(array $source): array
         'end_date' => '',
         'device' => $source['device'] ?? '',
         'version' => $source['version'] ?? '',
+        'work_status' => $source['work_status'] ?? '',
     ];
     if ($dateMode === 'day') {
         $filters['date'] = $source['date'] ?? '';
@@ -285,6 +286,9 @@ function validatedFilters(array $source): array
     }
 
     $deviceLength = is_string($filters['device']) ? preg_match_all('/./us', $filters['device']) : false;
+    if (!is_string($filters['work_status']) || !in_array($filters['work_status'], ['', '방문예정', '작업완료', '작업실패', '작업보류', '기타'], true)) {
+        respond(422, ['error' => '작업 상태 필터를 확인해 주세요.']);
+    }
     $versionLength = is_string($filters['version']) ? preg_match_all('/./us', $filters['version']) : false;
     if ($deviceLength === false || $deviceLength > 100 ||
         $versionLength === false || $versionLength > 50) {
@@ -312,6 +316,10 @@ function filterConditions(array $filters): array
     if ($filters['version'] !== '') {
         $conditions[] = 'upgrade_version = ?';
         $parameters[] = $filters['version'];
+    }
+    if (($filters['work_status'] ?? '') !== '') {
+        $conditions[] = 'work_status = ?';
+        $parameters[] = $filters['work_status'];
     }
     return [$conditions, $parameters];
 }

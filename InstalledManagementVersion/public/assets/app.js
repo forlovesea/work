@@ -632,10 +632,15 @@ function legacyImportTemplateHeaders(contactCount = 2, rackCount = 3, componentV
     ];
 }
 
-function downloadImportTemplate() {
-    const headers = importTemplateHeaders();
+function basicImportHeaders() {
+    return ['설치장소(국소)', '주소', '작업상태', '담당자 이름', '담당자 연락처', '현장방문날짜', '장비명'];
+}
+
+function downloadImportTemplate(extended = false) {
+    extended = extended === true;
+    const headers = extended ? importTemplateHeaders() : basicImportHeaders();
     const choiceLists = [
-        [...deviceSelect.options].map((option) => option.value === '__new__' ? '+ 새 장치 추가' : option.value).filter(Boolean),
+        [...deviceSelect.options].map((option) => option.value === '__new__' ? (extended ? '+ 새 장치 추가' : '') : option.value).filter(Boolean),
         [...document.querySelector('#existingVersionOptions').options].map((option) => option.value),
         [...document.querySelector('#upgradeVersionOptions').options].map((option) => option.value),
         [...workStatusInput.options].map((option) => option.value),
@@ -646,11 +651,13 @@ function downloadImportTemplate() {
         validations.push(`<dataValidation type="list" allowBlank="1" showDropDown="0" showErrorMessage="${strict ? 1 : 0}" errorTitle="선택값 확인" error="목록에서 값을 선택하세요." sqref="${range}"><formula1>${xmlEscape(formula)}</formula1></dataValidation>`);
     };
     choiceLists.forEach((choices, i) => {
-        const col = columnFor(['장비명', '기존 설치 버전', '업그레이드 버전', '작업상태'][i]);
+        const header = ['장비명', '기존 설치 버전', '업그레이드 버전', '작업상태'][i];
+        if (!headers.includes(header)) return;
+        const col = columnFor(header);
         if (choices.length) listValidation(`${col}2:${col}101`, `TemplateChoices${i}`, i === 3);
     });
-    validations.push(`<dataValidation type="whole" operator="between" allowBlank="1" showErrorMessage="1" error="1~100 사이 정수를 입력하세요." sqref="${columnFor('Rack 수')}2:${columnFor('Rack 수')}101"><formula1>1</formula1><formula2>100</formula2></dataValidation>`);
-    for (let i = 0; i < 1; i += 1) {
+    if (extended) validations.push(`<dataValidation type="whole" operator="between" allowBlank="1" showErrorMessage="1" error="1~100 사이 정수를 입력하세요." sqref="${columnFor('Rack 수')}2:${columnFor('Rack 수')}101"><formula1>1</formula1><formula2>100</formula2></dataValidation>`);
+    for (let i = 0; i < (extended ? 1 : 0); i += 1) {
         const col = columnFor(`Rack ${i + 1} 모듈 수`);
         listValidation(`${col}2:${col}101`, '"1,2,3,4,5,6,7,8,9,10"');
     }
@@ -672,7 +679,16 @@ function downloadImportTemplate() {
             return `<row r="${rowNumber}" ht="24" customHeight="1">${cells}</row>`;
         }),
     ].join('');
-    const instructionRows = [
+    const instructionRows = !extended ? [
+        ['작성 안내', '내용'],
+        ['입력 방법', '설치 정보 시트의 2행부터 현장별로 한 줄씩 입력하세요. 기본 항목 7개만 사용합니다.'],
+        ['작업상태', '목록에서 선택하세요. 빈 값은 방문예정으로 등록합니다.'],
+        ['담당자', '담당자 이름과 연락처를 함께 입력하세요. 연락처는 앞자리 0을 유지합니다.'],
+        ['현장방문날짜', 'YYYY-MM-DD 형식의 실제 날짜를 입력하세요.'],
+        ['장비명', '목록에서 선택하거나 새 장비명을 직접 입력하세요.'],
+        ['추가 정보', 'Rack 1개·모듈 10개로 등록합니다. 기존 버전은 장비별 기본값을 사용하며 업그레이드 버전은 빈칸입니다. 등록 후 웹에서 수정하세요.'],
+        ['등록 제한', '최대 100개 현장을 등록합니다. 빈 행은 무시합니다. 열 제목은 변경하지 마세요.'],
+    ] : [
         ['작성 안내', '내용'],
         ['입력 방법', '화면과 같은 항목 순서입니다. 첫 번째 시트 "설치 정보"의 2행부터 현장별로 한 줄씩 입력하세요.'],
         ['현장방문날짜', 'YYYY-MM-DD 형식으로 입력하세요. 예: 2026-10-20'],
@@ -745,7 +761,7 @@ function downloadImportTemplate() {
     const customRange = `${columnFor('새 장치명')}2:${columnFor('새 장치명')}101`;
     const conditions = `<conditionalFormatting sqref="${doorRange}"><cfRule type="expression" dxfId="0" priority="1"><formula>${xmlEscape(`$${deviceColumn}2<>"SMU02C + Door LCD"`)}</formula></cfRule></conditionalFormatting>`
         + `<conditionalFormatting sqref="${customRange}"><cfRule type="expression" dxfId="0" priority="2"><formula>${xmlEscape(`$${deviceColumn}2<>"+ 새 장치 추가"`)}</formula></cfRule></conditionalFormatting>`;
-    inputFile.content = inputFile.content.replace('<dataValidations ', `${conditions}<dataValidations `);
+    if (extended) inputFile.content = inputFile.content.replace('<dataValidations ', `${conditions}<dataValidations `);
     downloadBlob(createZip(files), '설치정보_일괄등록_템플릿.xlsx');
 }
 
@@ -935,6 +951,43 @@ function columnIndexFromReference(reference) {
     return index - 1;
 }
 
+function parseBasicImportRows(rows, sharedStrings) {
+    const records = [];
+    const errors = [];
+    for (const [index, row] of rows.slice(1).entries()) {
+        const sourceRow = Number(row.getAttribute('r')) || index + 2;
+        const values = [];
+        for (const cell of row.getElementsByTagNameNS('*', 'c')) {
+            const col = columnIndexFromReference(cell.getAttribute('r') || '');
+            const value = getCellValue(cell, sharedStrings).trim();
+            if (col >= 7 && value) errors.push({ row: sourceRow, message: '기본 템플릿에 없는 열에 값이 있습니다.' });
+            else if (col >= 0) values[col] = value;
+        }
+        if (!values.some(Boolean)) continue;
+        const fail = message => errors.push({ row: sourceRow, message });
+        if (records.length >= 100) { fail('한 번에 최대 100개 현장까지만 등록할 수 있습니다.'); continue; }
+        const [site = '', address = '', status = '', name = '', phone = '', date = '', device = ''] = values;
+        for (const [value, label, limit] of [[site, '설치장소(국소)', 100], [address, '주소', 300], [name, '담당자 이름', 100], [phone, '담당자 연락처', 50], [device, '장비명', 100]]) {
+            if ([...value].length > limit) fail(`${label}은(는) ${limit}자 이내로 입력하세요.`);
+        }
+        if (Boolean(name) !== Boolean(phone)) fail('담당자 이름과 연락처를 함께 입력하세요.');
+        if (!device || ['__new__', '+ 새 장치 추가'].includes(device)) fail('실제 장비명을 입력하세요.');
+        if (!['', '방문예정', '작업완료', '작업실패', '작업보류', '기타'].includes(status)) fail('작업상태를 목록에서 선택하세요.');
+        const parsed = /^\d{4}-\d{2}-\d{2}$/.test(date) ? new Date(`${date}T00:00:00Z`) : null;
+        if (!parsed || Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) fail('현장방문날짜는 YYYY-MM-DD 형식의 실제 날짜여야 합니다.');
+        records.push({
+            import_layout: 'basic', source_row: sourceRow, site_name: site, address,
+            work_status: status || '방문예정', work_status_other: '',
+            contacts: name || phone ? [{ name, phone }] : [], visit_date: date, device_name: device,
+            existing_version: device === 'iIoT Gateway' ? 'V100R024C10SPC265' : (['SMU02C', 'SMU02C + Door LCD'].includes(device) ? 'V100R024C10SPC235' : ''),
+            upgrade_version: '', door_existing_version: '', door_upgrade_version: '',
+            rack_count: 1, module_counts: [10], rack_names: [defaultRackName(0)], notes: '',
+        });
+    }
+    if (!records.length && !errors.length) errors.push({ row: null, message: '등록할 현장 정보가 없습니다. 두 번째 행부터 값을 입력하세요.' });
+    return { records, errors };
+}
+
 function parseImportRows(sheetXml, sharedStrings) {
     const rows = [...sheetXml.getElementsByTagNameNS('*', 'row')];
     if (rows.length === 0 || Number(rows[0].getAttribute('r') || 1) !== 1) {
@@ -946,6 +999,9 @@ function parseImportRows(sheetXml, sharedStrings) {
         if (column >= 0) {
             headerValues[column] = getCellValue(cell, sharedStrings).trim().replaceAll('랙', 'Rack');
         }
+    }
+    if (headerValues.length === 7 && basicImportHeaders().every((header, index) => headerValues[index] === header)) {
+        return parseBasicImportRows(rows, sharedStrings);
     }
     const screenLayout = headerValues[0] === '설치장소(국소)';
     const fileHeaders = [...headerValues];

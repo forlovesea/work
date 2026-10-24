@@ -332,7 +332,7 @@ function requiredText(array $input, string $key, int $maxLength): string
     return $value;
 }
 
-function validateAdditionalFields(array $input): array
+function validateAdditionalFields(array $input, bool $requireVersions = true): array
 {
     $errors = [];
     $rackNames = $input['rack_names'] ?? null;
@@ -382,7 +382,7 @@ function validateAdditionalFields(array $input): array
 
     foreach (['door_existing_version', 'door_upgrade_version'] as $key) {
         if (($input['device_name'] ?? '') === 'SMU02C + Door LCD') {
-            if ($record[$key] === '') $errors[] = $fields[$key][0] . '을(를) 입력해 주세요.';
+            if ($requireVersions && $record[$key] === '') $errors[] = $fields[$key][0] . '을(를) 입력해 주세요.';
         } else {
             $record[$key] = '';
         }
@@ -437,7 +437,7 @@ function validateAdditionalFields(array $input): array
     return ['record' => $record, 'errors' => $errors];
 }
 
-function validateBulkRecord($input): array
+function validateBulkRecord($input, bool $basic = false): array
 {
     if (!is_array($input)) {
         return ['record' => null, 'errors' => ['행 데이터 형식이 올바르지 않습니다.']];
@@ -461,7 +461,7 @@ function validateBulkRecord($input): array
         }
         $value = trim($value);
         $length = preg_match_all('/./us', $value);
-        if ($value === '' || $length === false || $length > $maxLength) {
+        if (($value === '' && !($basic && in_array($key, ['existing_version', 'upgrade_version'], true))) || $length === false || $length > $maxLength) {
             $errors[] = $label . '이(가) 비어 있거나 허용 길이를 초과했습니다.';
         }
         $record[$key] = $value;
@@ -494,7 +494,7 @@ function validateBulkRecord($input): array
         }
     }
 
-    $additional = validateAdditionalFields($input);
+    $additional = validateAdditionalFields($input, !$basic);
     $errors = array_merge($errors, $additional['errors']);
     $record = array_merge($record, $additional['record']);
     $record['rack_count'] = $rackCount;
@@ -741,7 +741,19 @@ try {
         $validatedRecords = [];
         $rowErrors = [];
         foreach (array_values($records) as $index => $row) {
-            $validated = validateBulkRecord($row);
+            $basic = is_array($row) && ($row['import_layout'] ?? '') === 'basic';
+            if ($basic) {
+                $device = $row['device_name'] ?? '';
+                $row['existing_version'] = $device === 'iIoT Gateway' ? 'V100R024C10SPC265'
+                    : (in_array($device, ['SMU02C', 'SMU02C + Door LCD'], true) ? 'V100R024C10SPC235' : '');
+                $row['upgrade_version'] = '';
+                $row['door_existing_version'] = '';
+                $row['door_upgrade_version'] = '';
+                $row['rack_count'] = 1;
+                $row['module_counts'] = [10];
+                $row['rack_names'] = ['Rack 01'];
+            }
+            $validated = validateBulkRecord($row, $basic);
             if ($validated['errors'] !== []) {
                 $sourceRow = is_array($row) && isset($row['source_row']) &&
                     is_int($row['source_row']) && $row['source_row'] >= 2

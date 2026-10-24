@@ -12,12 +12,12 @@ const context = vm.createContext({
     downloadBlob: files => { context.files = files; },
     getCellValue: cell => cell.value,
 });
-for (const name of ['xmlEscape', 'columnName', 'createTemplateCell', 'importTemplateHeaders', 'legacyImportTemplateHeaders', 'downloadImportTemplate', 'columnIndexFromReference', 'defaultRackName', 'parseImportRows']) {
+for (const name of ['xmlEscape', 'columnName', 'createTemplateCell', 'importTemplateHeaders', 'legacyImportTemplateHeaders', 'basicImportHeaders', 'downloadImportTemplate', 'columnIndexFromReference', 'defaultRackName', 'parseBasicImportRows', 'parseImportRows']) {
     const start = source.indexOf(`function ${name}(`);
     const next = source.indexOf('\nfunction ', start + 1);
     vm.runInContext(source.slice(start, next), context);
 }
-vm.runInContext('downloadImportTemplate()', context);
+vm.runInContext('downloadImportTemplate(true)', context);
 const headers = context.legacyImportTemplateHeaders();
 assert.equal(headers.length, 23);
 assert.equal(headers[21], 'Door LCD 기존 설치 버전');
@@ -127,5 +127,27 @@ for (const [device, expected] of [['SMU02C', 'V100R024C10SPC235'], ['iIoT Gatewa
     const override = parse(Object.assign([...row], { 8: 'manual-version' }), false, compactHeaders);
     assert.equal(override.records[0].existing_version, 'manual-version');
 }
+vm.runInContext('downloadImportTemplate()', context);
+const basicHeaders = context.basicImportHeaders();
+assert.equal(basicHeaders.join(','), '설치장소(국소),주소,작업상태,담당자 이름,담당자 연락처,현장방문날짜,장비명');
+const basicSheet = context.files.find(file => file.name === 'xl/worksheets/sheet1.xml').content;
+assert.match(basicSheet, /autoFilter ref="A1:G101"/);
+assert.match(basicSheet, /dataValidations count="2"/);
+assert.doesNotMatch(basicSheet, /<f>|conditionalFormatting|기존 설치 버전|Rack 수/);
+for (const device of ['SMU02C + Door LCD', 'Door LCD', 'iIoT Gateway', 'SMU02C', '새 장비']) {
+    const row = ['국소', '주소', '방문예정', '담당자', '01001234567', '2026-10-25', device];
+    const result = parse(row, false, basicHeaders);
+    assert.equal(result.errors.length, 0);
+    assert.equal(result.records[0].contacts[0].phone, '01001234567');
+    assert.equal(result.records[0].upgrade_version, '');
+    assert.equal(result.records[0].rack_count, 1);
+    assert.equal(result.records[0].import_layout, 'basic');
+    assert.equal(result.records[0].device_name, device);
+}
+const base = ['국소', '주소', '기타', '담당자', '01001234567', '2026-10-25', 'Door LCD'];
+for (const changes of [{ 4: '' }, { 5: '2026-02-30' }, { 6: '' }, { 2: '알수없음' }, { 7: '추가값' }]) {
+    assert.ok(parse(Object.assign([...base], changes), false, basicHeaders).errors.length);
+}
+assert.equal(parse(Array(7).fill(''), false, basicHeaders).records.length, 0);
 if (process.argv[2]) fs.writeFileSync(process.argv[2], JSON.stringify(context.files));
 console.log('PASS: template choices, new/legacy imports, contact/rack/status validation');

@@ -128,8 +128,8 @@ try {
                                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
                     </label>
                     <p class="bulk-import-hint">
-                        날짜는 YYYY-MM-DD로 입력하고, 각 Rack의 모듈 수는 드롭다운에서 선택하세요.
-                        설치 정보 입력 화면과 같은 순서로 설치장소·담당자·장비·버전·Rack 구성·비고를 작성하며,
+                        설치장소(국소), 주소, 작업상태, 담당자 이름, 담당자 연락처, 현장방문날짜, 장비명을 입력하세요.
+                        날짜는 YYYY-MM-DD 형식이며, 버전과 Rack 구성은 등록 후 웹에서 수정할 수 있습니다.
                         한 번에 최대 100개 현장을 등록할 수 있습니다.
                     </p>
                 </div>

@@ -17,10 +17,10 @@ try {
 <html lang="ko">
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="theme-color" content="#f4f7fb">
     <title>현장 설치 버전관리</title>
-    <link rel="stylesheet" href="assets/styles.css">
+    <link rel="stylesheet" href="assets/styles.css?v=<?php echo filemtime(__DIR__ . '/assets/styles.css'); ?>">
     <script src="assets/dashboard.js" defer></script>
     <script src="assets/app.js" defer></script>
 </head>
@@ -70,7 +70,7 @@ try {
             </div>
             <div id="statusLegend" class="status-legend" aria-label="작업상태 범례"></div>
             <p id="dashboardMessage" class="dashboard-message" role="status">설치 현황을 불러오는 중입니다.</p>
-            <div id="deviceStatusChart" class="device-chart-scroll" hidden></div>
+            <div id="deviceStatusChart" class="device-chart-scroll" tabindex="0" role="region" aria-label="장치별 작업상태 그래프, 좌우로 스크롤하여 확인" hidden></div>
             <details id="statusDetails" class="status-details" hidden><summary>장치별 수치 상세 보기</summary><div id="statusTable" class="status-table-scroll"></div></details>
         </section>
 

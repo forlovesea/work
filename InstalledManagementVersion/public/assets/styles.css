@@ -1387,6 +1387,117 @@ h2 {
     }
 }
 
+/* Screen layouts follow available space, including tablets and rotated phones. */
+@media screen {
+    .page-shell { width: min(100% - 48px, 1160px); }
+    .page-header > div:nth-child(2), .completion-copy { min-width: 0; }
+    .page-header h1 { overflow-wrap: anywhere; }
+    .filter-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .record-title-row, .activity-title-row { flex-wrap: wrap; }
+    .record-versions, .activity-summary, .import-row, .module-summary { overflow-wrap: anywhere; }
+    .device-chart-scroll, .status-table-scroll { max-width: 100%; overscroll-behavior-x: contain; }
+    .device-chart-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+}
+
+@media screen and (min-width: 768px) and (max-width: 1023px) {
+    .page-shell { width: calc(100% - 40px); }
+    .page-header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; }
+    .completion-summary { grid-column: 1 / -1; grid-row: 2; justify-content: flex-end; }
+    .logout-button { grid-column: 3; grid-row: 1; }
+    .rack-list { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media screen and (max-width: 767px) {
+    html { scroll-padding-top: 76px; }
+    body { min-width: 0; }
+    .page-shell {
+        width: 100%;
+        padding: max(16px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+    }
+    .page-header { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; gap: 10px; margin-bottom: 16px; }
+    .page-header .brand-mark { width: 36px; height: 36px; border-radius: 12px; font-size: 13px; }
+    .page-header h1 { font-size: clamp(17px, 4.4vw, 24px); line-height: 1.35; margin: 0; }
+    .page-header .eyebrow { font-size: 8px; letter-spacing: .04em; }
+    .page-header .subtitle { font-size: 11px; line-height: 1.6; margin-top: 6px; }
+    .logout-button { grid-column: 3; grid-row: 1; align-self: start; min-height: 44px; padding: 8px; font-size: 11px; }
+    .completion-summary {
+        grid-column: 1 / -1; grid-row: 2; justify-content: center; gap: 22px;
+        width: 100%; margin: 6px 0 0; padding: 10px 16px;
+        border: 1px solid var(--line); border-radius: 18px; background: #fff;
+    }
+    .completion-ring { width: 100px; height: 106px; flex-basis: 100px; }
+    .completion-ring-face::after { inset: 15px; background: #fff; }
+    .completion-copy p { white-space: normal; line-height: 1.6; font-size: 12px; }
+    .completion-copy > span { font-size: 11px; }
+    .status-dashboard { padding: 20px 14px 14px; margin-bottom: 16px; }
+    .status-dashboard-heading { align-items: flex-start; gap: 8px; }
+    .status-dashboard-heading h2 { font-size: 17px; }
+    .status-dashboard-heading p:not(.eyebrow) { line-height: 1.6; }
+    .dashboard-total { padding: 7px 9px; font-size: 11px; }
+    .status-legend { gap: 10px 14px; margin: 16px 0 22px; }
+    .status-legend-item { font-size: 12px; }
+    .device-chart { min-width: calc(40px + var(--device-count) * 112px); padding-left: 40px; }
+    .chart-grid { left: 40px; height: 180px; }
+    .device-stack { height: 180px; width: 60px; }
+    .device-chart-scroll::after { content: '좌우로 밀어 다른 장치를 확인하세요'; display: block; position: sticky; left: 0; width: 100%; color: #758198; font-size: 11px; padding-top: 10px; }
+    .status-details summary { padding: 12px 0; min-height: 44px; font-size: 12px; }
+    .main-tabs {
+        position: sticky; top: env(safe-area-inset-top, 0px); z-index: 10;
+        padding: 5px; margin-bottom: 16px; background: #eef2f9;
+        box-shadow: 0 5px 16px #17203312;
+    }
+    .main-tab { min-height: 48px; font-size: 12px; gap: 5px; padding: 6px 3px; }
+    .tab-icon { font-size: 16px; }
+    .tab-panel { scroll-margin-top: 80px; }
+    .form-panel, .query-panel, .activity-panel { padding: 20px 14px; }
+    .section-heading, .query-heading, .activity-heading { flex-wrap: wrap; gap: 10px; }
+    .form-grid, .filter-grid, .date-range-row { grid-template-columns: minmax(0, 1fr); }
+    .form-grid { gap: 16px; }
+    .field input, .field select, .field textarea, .rack-name, .module-select, .rack-count-field input {
+        min-height: 48px; max-width: 100%; font-size: 16px;
+    }
+    .field textarea { min-height: 112px; }
+    .field > span { font-size: 13px; }
+    .contact-row { grid-template-columns: minmax(0, 1fr); padding: 14px; border: 1px solid var(--line); border-radius: 12px; }
+    .contact-row button { justify-self: end; min-width: 72px; }
+    .rack-heading { flex-wrap: wrap; align-items: center; gap: 12px; }
+    .rack-section .rack-heading > div { flex: 1 1 200px; min-width: 0; }
+    .rack-count-field { width: 100%; }
+    .rack-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .range-separator { display: none; }
+    .date-mode-option span { min-height: 44px; display: flex; align-items: center; justify-content: center; padding: 10px; }
+    .bulk-import-heading, .import-preview-heading, .form-footer, .record-actions { flex-direction: column; align-items: stretch; gap: 12px; }
+    .bulk-import-controls, .upload-field { width: 100%; min-width: 0; }
+    .upload-field input { width: 100%; font-size: 14px; }
+    .template-button { width: 100%; }
+    .form-actions, .record-action-buttons, .export-controls { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+    .export-format-field, .report-option { width: 100%; min-width: 0; }
+    .primary-button, .secondary-button, .danger-button, .record-edit-button { min-height: 46px; }
+    .form-actions > button, .export-button { width: 100%; }
+    .select-all-field { min-height: 44px; }
+    .record-card { grid-template-columns: minmax(0, 1fr); padding: 16px; gap: 12px; }
+    .record-title-row time { white-space: normal; }
+    .record-versions { line-height: 1.7; }
+    .record-racks { align-items: flex-start; }
+    .activity-item { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+    .activity-time { font-size: 12px; }
+    .login-shell { min-height: 100svh; padding: 16px; }
+    .login-panel input { font-size: 16px; min-height: 48px; }
+}
+
+@media screen and (max-width: 359px) {
+    .page-header { grid-template-columns: minmax(0, 1fr) auto; }
+    .page-header .brand-mark { display: none; }
+    .logout-button { grid-column: 2; }
+    .main-tab { font-size: 11px; }
+    .main-tab .tab-icon { display: none; }
+    .rack-list { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media screen and (pointer: coarse) {
+    button, select, .date-mode-option, .report-option { touch-action: manipulation; }
+}
+
 @page {
     size: A4 portrait;
     margin: 15mm 14mm 17mm;

@@ -517,6 +517,7 @@ try {
         ensurePasswordHash();
         respond(200, [
             'authenticated' => isAppAuthenticated(),
+            'can_delete_activity' => canDeleteActivity(),
             'csrf_token' => isAppAuthenticated() ? csrfToken() : null,
         ]);
     }
@@ -527,14 +528,16 @@ try {
         if ($requestAction === 'login') {
             $password = $requestInput['password'] ?? null;
             $passwordHash = ensurePasswordHash();
+            $secondaryHash = ensurePasswordHash(true);
             if (!is_string($password) || strlen($password) > 72 ||
-                !password_verify($password, $passwordHash)) {
+                (!password_verify($password, $passwordHash) && !password_verify($password, $secondaryHash))) {
                 respond(401, ['error' => '암호가 올바르지 않습니다.']);
             }
             session_regenerate_id(true);
             $_SESSION['app_authenticated'] = true;
+            $_SESSION['can_delete_activity'] = password_verify($password, $passwordHash) && hash_equals(DEFAULT_APP_PASSWORD, $password);
             unset($_SESSION['app_csrf_token']);
-            respond(200, ['csrf_token' => csrfToken()]);
+            respond(200, ['csrf_token' => csrfToken(), 'can_delete_activity' => canDeleteActivity()]);
         }
 
         if (!isAppAuthenticated()) {
@@ -567,7 +570,7 @@ try {
                 $activity['details'] = json_decode($activity['details'], true, 512, JSON_THROW_ON_ERROR);
             }
             unset($activity);
-            respond(200, ['activities' => $activities]);
+            respond(200, ['activities' => $activities, 'can_delete_activity' => canDeleteActivity()]);
         }
         respond(200, loadData($database, validatedFilters($_GET)));
     }
@@ -578,6 +581,27 @@ try {
     }
 
     $input = $requestInput;
+
+    if (in_array($input['action'] ?? '', ['delete_activity_selected', 'delete_activity_all'], true)) {
+        if (!canDeleteActivity()) respond(403, ['error' => '작업이력을 삭제할 권한이 없습니다.']);
+        if (($input['confirmed'] ?? false) !== true) respond(422, ['error' => '작업이력 삭제를 확인해 주세요.']);
+        if ($input['action'] === 'delete_activity_all') {
+            $deleted = $database->exec('DELETE FROM activity_log');
+        } else {
+            $ids = $input['ids'] ?? null;
+            if (!is_array($ids) || !isListArray($ids) || count($ids) < 1 || count($ids) > 500) {
+                respond(422, ['error' => '삭제할 작업이력을 1~500개 선택해 주세요.']);
+            }
+            foreach ($ids as $id) {
+                if (!is_int($id) || $id < 1) respond(422, ['error' => '작업이력 번호가 올바르지 않습니다.']);
+            }
+            $ids = array_values(array_unique($ids));
+            $delete = $database->prepare('DELETE FROM activity_log WHERE id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')');
+            $delete->execute($ids);
+            $deleted = $delete->rowCount();
+        }
+        respond(200, ['deleted_count' => $deleted]);
+    }
 
     if (($input['action'] ?? '') === 'update_record') {
         $recordId = $input['id'] ?? null;

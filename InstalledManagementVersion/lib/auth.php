@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 const DEFAULT_APP_PASSWORD = 'jjh1234';
+const SECONDARY_APP_PASSWORD = 'pantech';
 
 function startAppSession(): void
 {
@@ -31,16 +32,16 @@ function passwordHashPath(): string
     return dirname(__DIR__) . '/data/password.hash';
 }
 
-function ensurePasswordHash(): string
+function ensurePasswordHash(bool $secondary = false): string
 {
-    $path = passwordHashPath();
+    $path = $secondary ? dirname(__DIR__) . '/data/secondary-password.hash' : passwordHashPath();
     $dataDirectory = dirname($path);
     if (!is_dir($dataDirectory) && !@mkdir($dataDirectory, 0770, true) && !is_dir($dataDirectory)) {
         throw new RuntimeException('암호 저장 디렉터리를 만들 수 없습니다.');
     }
 
     if (!is_file($path)) {
-        $defaultHash = password_hash(DEFAULT_APP_PASSWORD, PASSWORD_DEFAULT);
+        $defaultHash = password_hash($secondary ? SECONDARY_APP_PASSWORD : DEFAULT_APP_PASSWORD, PASSWORD_DEFAULT);
         $handle = @fopen($path, 'x');
         if ($handle !== false) {
             $contents = $defaultHash . PHP_EOL;
@@ -73,6 +74,11 @@ function ensurePasswordHash(): string
 function isAppAuthenticated(): bool
 {
     return isset($_SESSION['app_authenticated']) && $_SESSION['app_authenticated'] === true;
+}
+
+function canDeleteActivity(): bool
+{
+    return isAppAuthenticated() && ($_SESSION['can_delete_activity'] ?? false) === true;
 }
 
 function csrfToken(): string

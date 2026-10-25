@@ -396,6 +396,13 @@ try {
                 </button>
             </div>
             <p class="activity-description">최근 1년간 등록·수정·삭제된 설치 정보와 작업 시간을 확인할 수 있습니다.</p>
+            <div id="activityDeleteControls" class="record-actions" hidden>
+                <label class="select-all-field"><input id="selectAllActivity" type="checkbox"> 전체 선택</label>
+                <div class="record-action-buttons">
+                    <button id="deleteSelectedActivity" class="danger-button" type="button" disabled>선택 삭제</button>
+                    <button id="deleteAllActivity" class="danger-button" type="button" disabled>전체 삭제</button>
+                </div>
+            </div>
             <p id="activityMessage" class="activity-message" role="status" aria-live="polite"></p>
             <div id="activityList" class="activity-list" aria-live="polite">
                 <p class="empty-state">작업 이력을 불러오는 중입니다.</p>

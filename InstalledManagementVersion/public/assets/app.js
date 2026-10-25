@@ -173,8 +173,55 @@ let isLoadingRecords = false;
 let isMutatingRecords = false;
 let editingRecordId = null;
 let csrfToken = '';
+let canDeleteActivity = false;
+let deletingActivity = false;
+let activityIds = [];
+const selectedActivityIds = new Set();
+
+function setActivityPermission(allowed) {
+    canDeleteActivity = allowed === true;
+    selectedActivityIds.clear();
+    document.querySelector('#activityDeleteControls').hidden = !canDeleteActivity;
+    updateActivityDeleteControls();
+}
+
+function updateActivityDeleteControls() {
+    const all = document.querySelector('#selectAllActivity');
+    all.disabled = !canDeleteActivity || deletingActivity || !activityIds.length;
+    all.checked = activityIds.length > 0 && selectedActivityIds.size === activityIds.length;
+    all.indeterminate = selectedActivityIds.size > 0 && !all.checked;
+    document.querySelector('#deleteSelectedActivity').disabled = !canDeleteActivity || deletingActivity || !selectedActivityIds.size;
+    document.querySelector('#deleteAllActivity').disabled = !canDeleteActivity || deletingActivity || !activityIds.length;
+    activityList.querySelectorAll('.activity-selection').forEach(input => { input.disabled = deletingActivity; });
+}
+
+async function deleteActivityLog(all = false) {
+    if (!canDeleteActivity || deletingActivity) return;
+    const ids = [...selectedActivityIds];
+    if (!all && !ids.length) return;
+    if (!all && ids.length > 500) { activityMessage.textContent = '선택 삭제는 한 번에 500개까지 가능합니다.'; return; }
+    if (!window.confirm(`${all ? '전체' : ids.length + '건의'} 작업이력을 삭제하시겠습니까? 복구할 수 없습니다. 설치 정보 원본은 유지됩니다.`)) return;
+    deletingActivity = true;
+    updateActivityDeleteControls();
+    refreshActivityButton.disabled = true;
+    try {
+        const response = await authenticatedFetch('api.php', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ action: all ? 'delete_activity_all' : 'delete_activity_selected', ids, confirmed: true }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || '작업이력을 삭제하지 못했습니다.');
+        await loadActivityLog();
+        activityMessage.textContent = `${result.deleted_count}건의 작업이력을 삭제했습니다.`;
+    } catch (error) { activityMessage.textContent = error.message; }
+    finally { deletingActivity = false; updateActivityDeleteControls(); refreshActivityButton.disabled = false; }
+}
 
 function showLogin(message = '', isError = false) {
+    activityRequestSequence += 1;
+    activityIds = [];
+    setActivityPermission(false);
+    activityList.replaceChildren();
     csrfToken = '';
     appShell.hidden = true;
     loginPanel.hidden = false;
@@ -212,6 +259,7 @@ async function bootstrapSession() {
             return;
         }
         csrfToken = result.csrf_token;
+        setActivityPermission(result.can_delete_activity);
         loginPanel.hidden = true;
         appShell.hidden = false;
         loadData();
@@ -1768,6 +1816,18 @@ function createActivityCard(activity) {
     summary.className = 'activity-summary';
     summary.textContent = activity.summary;
     titleRow.append(badge, summary);
+    if (canDeleteActivity) {
+        const select = document.createElement('input');
+        select.type = 'checkbox';
+        select.className = 'activity-selection record-selection';
+        select.setAttribute('aria-label', `${activity.summary} 작업이력 선택`);
+        select.addEventListener('change', () => {
+            if (select.checked) selectedActivityIds.add(activity.id);
+            else selectedActivityIds.delete(activity.id);
+            updateActivityDeleteControls();
+        });
+        titleRow.prepend(select);
+    }
     content.append(titleRow);
 
     const details = activity.details ?? {};
@@ -1796,6 +1856,9 @@ function createActivityCard(activity) {
 }
 
 async function loadActivityLog() {
+    activityIds = [];
+    selectedActivityIds.clear();
+    updateActivityDeleteControls();
     const requestId = ++activityRequestSequence;
     refreshActivityButton.disabled = true;
     activityMessage.textContent = '';
@@ -1811,10 +1874,12 @@ async function loadActivityLog() {
             return;
         }
         const activities = data.activities;
+        setActivityPermission(data.can_delete_activity);
         if (!Array.isArray(activities)) {
             throw new Error('작업 이력 응답 형식이 올바르지 않습니다.');
         }
         activityCount.textContent = `최근 1년 · 총 ${activities.length}건`;
+        activityIds = activities.map(activity => activity.id);
         activityList.replaceChildren();
         if (activities.length === 0) {
             const empty = document.createElement('p');
@@ -1839,7 +1904,8 @@ async function loadActivityLog() {
         activityMessage.textContent = error.message;
     } finally {
         if (requestId === activityRequestSequence) {
-            refreshActivityButton.disabled = false;
+            refreshActivityButton.disabled = deletingActivity;
+            updateActivityDeleteControls();
         }
     }
 }
@@ -1951,6 +2017,7 @@ loginForm.addEventListener('submit', async (event) => {
             throw new Error(result.error || '로그인하지 못했습니다.');
         }
         csrfToken = result.csrf_token;
+        setActivityPermission(result.can_delete_activity);
         loginPasswordInput.value = '';
         loginMessage.textContent = '';
         loginPanel.hidden = true;
@@ -2001,6 +2068,14 @@ applyImportButton.addEventListener('click', applyImport);
 entryTab.addEventListener('click', () => setActiveTab('entry'));
 queryTab.addEventListener('click', () => setActiveTab('query'));
 activityTab.addEventListener('click', () => setActiveTab('activity'));
+document.querySelector('#deleteSelectedActivity').addEventListener('click', () => deleteActivityLog(false));
+document.querySelector('#deleteAllActivity').addEventListener('click', () => deleteActivityLog(true));
+document.querySelector('#selectAllActivity').addEventListener('change', event => {
+    selectedActivityIds.clear();
+    if (event.target.checked) activityIds.forEach(id => selectedActivityIds.add(id));
+    activityList.querySelectorAll('.activity-selection').forEach(input => { input.checked = event.target.checked; });
+    updateActivityDeleteControls();
+});
 refreshButton.addEventListener('click', loadData);
 refreshActivityButton.addEventListener('click', loadActivityLog);
 selectAllRecords.addEventListener('change', () => {

@@ -559,9 +559,16 @@ try {
         if (($_GET['action'] ?? '') === 'dashboard_records') {
             $filters = validatedFilters($_GET);
             if ($filters['device'] === '' || $filters['work_status'] === '') respond(422, ['error' => '장비와 작업상태를 선택해 주세요.']);
-            $query = $database->prepare('SELECT device_name, site_name, work_status FROM records WHERE device_name = ? AND work_status = ? ORDER BY visit_date DESC, id DESC');
+            $query = $database->prepare('SELECT device_name, site_name, work_status, rack_count, rack_names, module_counts FROM records WHERE device_name = ? AND work_status = ? ORDER BY visit_date DESC, id DESC');
             $query->execute([$filters['device'], $filters['work_status']]);
-            respond(200, ['records' => $query->fetchAll()]);
+            $records = $query->fetchAll();
+            foreach ($records as &$record) {
+                $record['rack_count'] = (int) $record['rack_count'];
+                $record['rack_names'] = decodedRackNames($record);
+                $record['module_counts'] = json_decode($record['module_counts'], true, 512, JSON_THROW_ON_ERROR);
+            }
+            unset($record);
+            respond(200, ['records' => $records]);
         }
         if (($_GET['action'] ?? '') === 'activity') {
             $activityQuery = $database->query(

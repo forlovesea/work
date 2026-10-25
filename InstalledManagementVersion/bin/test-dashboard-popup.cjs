@@ -10,6 +10,7 @@ class Node {
     addEventListener(name, fn) { this[name] = fn; }
     querySelector(selector) { if (!fields.has(selector)) fields.set(selector, new Node()); return fields.get(selector); }
     showModal() { this.open = true; }
+    focus() { this.focused = true; }
 }
 const dialog = new Node();
 dialog.close = () => { dialog.open = false; };
@@ -26,11 +27,26 @@ const reply = (request, records, ok = true) => request.resolve({ ok, json: async
     const query = new URL(pending[0].url, 'https://example.test').searchParams;
     assert.equal(query.get('device'), 'SMU02C + Door LCD');
     assert.equal(query.get('work_status'), '작업완료');
-    reply(pending[0], [{ device_name: '<장비>', site_name: '', work_status: '작업완료' }]);
+    reply(pending[0], [{ device_name: '<장비>', site_name: '', work_status: '작업완료', rack_count: 2, rack_names: ['메인 Rack', '보조 Rack'], module_counts: [10, 4] }]);
     await first;
     assert.equal(fields.get('tbody').children[0].children.length, 3);
     assert.equal(fields.get('tbody').children[0].children[0].textContent, '<장비>');
     assert.equal(fields.get('tbody').children[0].children[1].textContent, '미입력');
+    const rackButton = fields.get('tbody').children[0].children[1].children[0];
+    assert.equal(rackButton.textContent, 'Rack 2식');
+    dialog.scrollTop = 125;
+    rackButton.click();
+    assert.equal(fields.get('.popup-table-wrap').hidden, true);
+    const rackDetail = fields.get('.popup-rack-detail');
+    assert.equal(rackDetail.hidden, false);
+    assert.equal(rackDetail.children[2].children.length, 2);
+    assert.equal(rackDetail.children[2].children[0].children[0].textContent, '메인 Rack');
+    assert.equal(rackDetail.children[2].children[1].children[1].textContent, '모듈 4개');
+    rackDetail.children[0].click();
+    assert.equal(fields.get('.popup-table-wrap').hidden, false);
+    assert.equal(rackDetail.hidden, true);
+    assert.equal(dialog.scrollTop, 125);
+    assert.equal(rackButton.focused, true);
     const stale = context.openInstallationPopup('A', '작업실패');
     const latest = context.openInstallationPopup('B', '방문예정');
     reply(pending[2], []); await latest;

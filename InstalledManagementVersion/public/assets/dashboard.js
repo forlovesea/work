@@ -149,6 +149,47 @@ function closeInstallationPopup() {
     const dialog = document.getElementById('installationPopup');
     if (dialog?.open) dialog.close();
     dialog?.querySelector('tbody')?.replaceChildren();
+    dialog?.querySelector('.popup-rack-detail')?.replaceChildren();
+}
+
+function showInstallationRacks(dialog, record, trigger) {
+    const tableWrap = dialog.querySelector('.popup-table-wrap');
+    const detail = dialog.querySelector('.popup-rack-detail');
+    const message = dialog.querySelector('.popup-message');
+    const previousMessage = message.textContent;
+    const previousScroll = dialog.scrollTop;
+    tableWrap.hidden = true;
+    detail.hidden = false;
+    detail.replaceChildren();
+    const back = document.createElement('button');
+    back.type = 'button';
+    back.className = 'popup-rack-back';
+    back.textContent = '← 목록으로';
+    back.addEventListener('click', () => {
+        detail.hidden = true;
+        detail.replaceChildren();
+        tableWrap.hidden = false;
+        message.textContent = previousMessage;
+        trigger.focus({ preventScroll: true });
+        dialog.scrollTop = previousScroll;
+    });
+    const heading = document.createElement('h3');
+    heading.textContent = record.site_name || '설치장소 미입력';
+    const list = document.createElement('dl');
+    list.className = 'popup-rack-list';
+    for (let index = 0; index < record.rack_count; index += 1) {
+        const card = document.createElement('div');
+        const name = document.createElement('dt');
+        name.textContent = record.rack_names?.[index] || `Rack ${String(index + 1).padStart(2, '0')}`;
+        const count = document.createElement('dd');
+        count.textContent = `모듈 ${record.module_counts?.[index] ?? '미입력'}개`;
+        card.append(name, count);
+        list.append(card);
+    }
+    message.textContent = `Rack ${record.rack_count}식 · Rack별 모듈 구성`;
+    detail.append(back, heading, list);
+    dialog.scrollTop = 0;
+    back.focus({ preventScroll: true });
 }
 
 async function openInstallationPopup(device, statusName) {
@@ -160,11 +201,17 @@ async function openInstallationPopup(device, statusName) {
         dialog.setAttribute('aria-labelledby', 'installationPopupTitle');
         dialog.innerHTML = '<header class="popup-heading"><div><p class="eyebrow">INSTALLATION LIST</p><h2 id="installationPopupTitle"></h2><p class="popup-subtitle"></p></div><button class="popup-close" type="button" aria-label="목록 닫기" autofocus>×</button></header><p class="popup-message" role="status" aria-live="polite"></p><div class="popup-table-wrap"><table><thead><tr><th scope="col">장비명</th><th scope="col">설치장소(국소)</th><th scope="col">작업상태</th></tr></thead><tbody></tbody></table></div>';
         document.body.append(dialog);
+        const rackDetail = document.createElement('section');
+        rackDetail.className = 'popup-rack-detail';
+        rackDetail.setAttribute('aria-label', 'Rack별 이름과 모듈 수');
+        rackDetail.hidden = true;
+        dialog.append(rackDetail);
         dialog.querySelector('.popup-close').addEventListener('click', closeInstallationPopup);
         dialog.addEventListener('close', () => {
             installationPopupSequence += 1;
             document.body.classList.remove('installation-popup-open');
             dialog.querySelector('tbody').replaceChildren();
+            dialog.querySelector('.popup-rack-detail').replaceChildren();
         });
         dialog.addEventListener('click', event => {
             if (event.target !== dialog) return;
@@ -181,6 +228,9 @@ async function openInstallationPopup(device, statusName) {
     const message = dialog.querySelector('.popup-message');
     const table = dialog.querySelector('table');
     const body = dialog.querySelector('tbody');
+    dialog.querySelector('.popup-table-wrap').hidden = false;
+    dialog.querySelector('.popup-rack-detail').hidden = true;
+    dialog.querySelector('.popup-rack-detail').replaceChildren();
     body.replaceChildren();
     table.hidden = true;
     message.textContent = '목록을 불러오는 중입니다…';
@@ -202,6 +252,15 @@ async function openInstallationPopup(device, statusName) {
                     badge.textContent = value;
                     cell.append(badge);
                 } else cell.textContent = value;
+                if (index === 1) {
+                    const rackButton = document.createElement('button');
+                    rackButton.type = 'button';
+                    rackButton.className = 'popup-rack-button';
+                    rackButton.textContent = `Rack ${record.rack_count}식`;
+                    rackButton.setAttribute('aria-label', `${record.device_name} ${record.site_name || '설치장소 미입력'} Rack ${record.rack_count}식 상세 보기`);
+                    rackButton.addEventListener('click', () => showInstallationRacks(dialog, record, rackButton));
+                    cell.append(rackButton);
+                }
                 row.append(cell);
             }
             body.append(row);

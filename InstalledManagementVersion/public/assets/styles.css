@@ -1535,6 +1535,24 @@ h2 {
     .popup-status { padding: 4px 6px; font-size: 10px; }
 }
 
+.popup-rack-button { display: block; width: fit-content; margin-top: 8px; min-height: 40px; padding: 7px 12px; border: 1px solid #d4dfef; border-radius: 12px; background: #fff; color: #46628b; font-size: 12px; font-weight: 600; box-shadow: 0 2px 5px #24395108; }
+.popup-rack-button:hover { background: #e8effb; }
+.popup-rack-button:focus-visible, .popup-rack-back:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.popup-rack-detail { padding: 0 24px 24px; }
+.popup-rack-back { min-height: 44px; padding: 8px 14px; border: 1px solid #e0e6f0; border-radius: 12px; background: #f5f7fc; color: #476386; font-size: 13px; }
+.popup-rack-detail h3 { margin: 20px 0 14px; font-size: 17px; overflow-wrap: anywhere; }
+.popup-rack-list { display: grid; gap: 10px; margin: 0; }
+.popup-rack-list > div { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px; border-radius: 14px; background: #eef5fb; }
+.popup-rack-list > div:nth-child(even) { background: #f2effa; }
+.popup-rack-list > div:nth-child(3n) { background: #edf7f1; }
+.popup-rack-list dt { min-width: 0; font-weight: 600; font-size: 14px; overflow-wrap: anywhere; }
+.popup-rack-list dd { flex-shrink: 0; margin: 0; padding: 6px 10px; border-radius: 20px; background: #ffffffbf; color: #52657b; font-size: 12px; }
+@media screen and (max-width: 767px) {
+    .popup-rack-button { min-height: 44px; padding: 8px 10px; }
+    .popup-rack-detail { padding: 0 16px 20px; }
+    .popup-rack-list > div { padding: 14px; gap: 10px; }
+}
+
 @page {
     size: A4 portrait;
     margin: 15mm 14mm 17mm;

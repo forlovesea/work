@@ -556,6 +556,13 @@ try {
     $database = connectDatabase();
 
     if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+        if (($_GET['action'] ?? '') === 'dashboard_records') {
+            $filters = validatedFilters($_GET);
+            if ($filters['device'] === '' || $filters['work_status'] === '') respond(422, ['error' => '장비와 작업상태를 선택해 주세요.']);
+            $query = $database->prepare('SELECT device_name, site_name, work_status FROM records WHERE device_name = ? AND work_status = ? ORDER BY visit_date DESC, id DESC');
+            $query->execute([$filters['device'], $filters['work_status']]);
+            respond(200, ['records' => $query->fetchAll()]);
+        }
         if (($_GET['action'] ?? '') === 'activity') {
             $activityQuery = $database->query(
                 "SELECT id, record_id, action, summary, details, occurred_at

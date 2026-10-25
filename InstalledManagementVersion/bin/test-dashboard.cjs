@@ -30,6 +30,7 @@ class Node {
     prepend(node) { this.children.unshift(node); }
     replaceChildren(...nodes) { this.children = nodes; }
     setAttribute(key, value) { this[key] = value; }
+    addEventListener(event, callback) { this[event] = callback; }
 }
 const nodes = new Map();
 context.document = {

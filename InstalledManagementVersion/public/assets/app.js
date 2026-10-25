@@ -218,6 +218,7 @@ async function deleteActivityLog(all = false) {
 }
 
 function showLogin(message = '', isError = false) {
+    closeInstallationPopup();
     activityRequestSequence += 1;
     activityIds = [];
     setActivityPermission(false);

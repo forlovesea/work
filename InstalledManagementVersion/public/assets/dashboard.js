@@ -81,7 +81,7 @@ function renderInstallationDashboard(rows, devices = []) {
     for (const group of summary.groups) {
         const column = element('div', 'device-column');
         const stack = element('div', 'device-stack');
-        stack.setAttribute('role', 'img');
+        stack.setAttribute('role', 'group');
         const description = group.counts.map((count, i) => `${installationStatuses[i].name} ${count}건 (${format(group.percentages[i])})`).join(', ');
         stack.setAttribute('aria-label', `${group.name}: ${group.total ? description : '등록 기록 없음'}`);
         stack.title = `${group.name} · ${group.total}건\n${description}`;
@@ -89,12 +89,15 @@ function renderInstallationDashboard(rows, devices = []) {
         group.counts.forEach((count, index) => {
             if (!count) return;
             const status = installationStatuses[index];
-            const segment = element('div', 'status-segment');
+            const segment = element('button', 'status-segment');
+            segment.type = 'button';
             segment.style.height = `${count / group.total * 100}%`;
             segment.style.background = status.color;
             segment.style.color = status.ink;
             segment.title = `${group.name} · ${status.name}: ${count}건 (${format(group.percentages[index])})`;
-            segment.setAttribute('aria-hidden', 'true');
+            segment.setAttribute('aria-label', `${group.name} ${status.name} ${count}건 목록 보기`);
+            segment.setAttribute('aria-haspopup', 'dialog');
+            segment.addEventListener('click', () => openInstallationPopup(group.name, status.name));
             if (group.percentages[index] >= 8) segment.append(element('strong', '', format(group.percentages[index])));
             stack.append(segment);
         });
@@ -102,7 +105,10 @@ function renderInstallationDashboard(rows, devices = []) {
         label.append(element('strong', '', group.name), element('span', '', `${group.total.toLocaleString()}건`));
         group.counts.forEach((count, index) => {
             if (!count || group.percentages[index] >= 8) return;
-            const small = element('span', 'small-status-label', `${installationStatuses[index].name} ${format(group.percentages[index])}`);
+            const small = element('button', 'small-status-label', `${installationStatuses[index].name} ${format(group.percentages[index])}`);
+            small.type = 'button';
+            small.setAttribute('aria-haspopup', 'dialog');
+            small.addEventListener('click', () => openInstallationPopup(group.name, installationStatuses[index].name));
             small.style.color = installationStatuses[index].ink;
             label.append(small);
         });
@@ -134,4 +140,75 @@ function renderInstallationDashboard(rows, devices = []) {
     }
     table.append(body);
     get('statusTable').append(table);
+}
+
+let installationPopupSequence = 0;
+
+function closeInstallationPopup() {
+    installationPopupSequence += 1;
+    const dialog = document.getElementById('installationPopup');
+    if (dialog?.open) dialog.close();
+    dialog?.querySelector('tbody')?.replaceChildren();
+}
+
+async function openInstallationPopup(device, statusName) {
+    let dialog = document.getElementById('installationPopup');
+    if (!dialog) {
+        dialog = document.createElement('dialog');
+        dialog.id = 'installationPopup';
+        dialog.className = 'installation-popup';
+        dialog.setAttribute('aria-labelledby', 'installationPopupTitle');
+        dialog.innerHTML = '<header class="popup-heading"><div><p class="eyebrow">INSTALLATION LIST</p><h2 id="installationPopupTitle"></h2><p class="popup-subtitle"></p></div><button class="popup-close" type="button" aria-label="목록 닫기" autofocus>×</button></header><p class="popup-message" role="status" aria-live="polite"></p><div class="popup-table-wrap"><table><thead><tr><th scope="col">장비명</th><th scope="col">설치장소(국소)</th><th scope="col">작업상태</th></tr></thead><tbody></tbody></table></div>';
+        document.body.append(dialog);
+        dialog.querySelector('.popup-close').addEventListener('click', closeInstallationPopup);
+        dialog.addEventListener('close', () => {
+            installationPopupSequence += 1;
+            document.body.classList.remove('installation-popup-open');
+            dialog.querySelector('tbody').replaceChildren();
+        });
+        dialog.addEventListener('click', event => {
+            if (event.target !== dialog) return;
+            const bounds = dialog.getBoundingClientRect();
+            if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) closeInstallationPopup();
+        });
+    }
+    const request = ++installationPopupSequence;
+    const status = installationStatuses.find(item => item.name === statusName);
+    dialog.style.setProperty('--popup-color', status?.color || '#d5c7ed');
+    dialog.style.setProperty('--popup-ink', status?.ink || '#594379');
+    dialog.querySelector('h2').textContent = device;
+    dialog.querySelector('.popup-subtitle').textContent = `${statusName} · 전체 기간`;
+    const message = dialog.querySelector('.popup-message');
+    const table = dialog.querySelector('table');
+    const body = dialog.querySelector('tbody');
+    body.replaceChildren();
+    table.hidden = true;
+    message.textContent = '목록을 불러오는 중입니다…';
+    if (!dialog.open) dialog.showModal();
+    document.body.classList.add('installation-popup-open');
+    try {
+        const params = new URLSearchParams({ action: 'dashboard_records', device, work_status: statusName });
+        const response = await authenticatedFetch(`api.php?${params}`, { headers: { Accept: 'application/json' } });
+        const data = await response.json();
+        if (request !== installationPopupSequence || !dialog.open) return;
+        if (!response.ok || !Array.isArray(data.records)) throw new Error(data.error || '목록을 불러오지 못했습니다.');
+        for (const record of data.records) {
+            const row = document.createElement('tr');
+            for (const [index, value] of [record.device_name, record.site_name || '미입력', record.work_status].entries()) {
+                const cell = document.createElement('td');
+                if (index === 2) {
+                    const badge = document.createElement('span');
+                    badge.className = 'popup-status';
+                    badge.textContent = value;
+                    cell.append(badge);
+                } else cell.textContent = value;
+                row.append(cell);
+            }
+            body.append(row);
+        }
+        table.hidden = !data.records.length;
+        message.textContent = data.records.length ? `총 ${data.records.length.toLocaleString()}건` : '해당 장비와 작업상태의 설치 정보가 없습니다.';
+    } catch (error) {
+        if (request === installationPopupSequence && dialog.open) message.textContent = error.message;
+    }
 }

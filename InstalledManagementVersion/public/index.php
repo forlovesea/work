@@ -21,8 +21,8 @@ try {
     <meta name="theme-color" content="#f4f7fb">
     <title>현장 설치 버전관리</title>
     <link rel="stylesheet" href="assets/styles.css?v=<?php echo filemtime(__DIR__ . '/assets/styles.css'); ?>">
-    <script src="assets/dashboard.js" defer></script>
-    <script src="assets/app.js" defer></script>
+    <script src="assets/dashboard.js?v=<?php echo filemtime(__DIR__ . '/assets/dashboard.js'); ?>" defer></script>
+    <script src="assets/app.js?v=<?php echo filemtime(__DIR__ . '/assets/app.js'); ?>" defer></script>
 </head>
 <body>
     <main id="loginPanel" class="login-shell"<?php echo $isAuthenticated && $authSetupError === '' ? ' hidden' : ''; ?>>

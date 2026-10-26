@@ -51,6 +51,7 @@ public sealed class ChargeDischargeRecordService
     private ActiveEvent? _charge, _discharge;
     private DateTime? _lastTime;
     private bool _hasSample, _chargeBlocked;
+    private bool _initializeChargeThreshold = true;
     public bool IsMonitoring { get; private set; } = true;
     public ChargeDischargeRecordOptions Options { get; private set; } = new();
     public string Status { get; private set; } = "충방전 이벤트 기본 사용 · 장비 데이터 수신 대기";
@@ -88,6 +89,8 @@ public sealed class ChargeDischargeRecordService
             throw new ArgumentException("충전 임계값이 총용량 × 충전전류제한(C) 상한을 초과합니다.");
         lock (_gate)
         {
+            // Explicit settings take precedence over first-connection defaults.
+            _initializeChargeThreshold = false;
             if (options == Options) return;
             Interrupt("설정 변경", DateTime.Now);
             Options = options; _lastTime = null;
@@ -123,6 +126,12 @@ public sealed class ChargeDischargeRecordService
                 if (_lastTime is { } previous && sample.Time <= previous) return;
                 _lastTime = sample.Time;
                 _hasSample = true;
+                if (_initializeChargeThreshold && sample.ChargeMaximumAmps >= 0.1m)
+                {
+                    // The initial 50A must be reachable within the device's C-rate cap.
+                    Options = Options with { ChargeThresholdAmps = Math.Min(Options.ChargeThresholdAmps, sample.ChargeMaximumAmps) };
+                    _initializeChargeThreshold = false;
+                }
                 if (_charge is not null && sample.CurrentAmps <= 0) Finish(ref _charge, sample);
                 if (_discharge is not null && sample.CurrentAmps >= 0) Finish(ref _discharge, sample);
                 var chargeAllowed = Options.ChargeEnabled && Options.ChargeThresholdAmps <= sample.ChargeMaximumAmps;

@@ -210,11 +210,18 @@ button {
     flex: 0 0 auto;
     place-items: center;
     border-radius: 16px;
-    background: #e6ecff;
+    background: transparent;
     color: var(--accent);
     font-size: 17px;
     font-weight: 800;
     letter-spacing: -.05em;
+}
+
+.brand-mark img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
 }
 
 .eyebrow {

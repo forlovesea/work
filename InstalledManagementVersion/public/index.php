@@ -27,7 +27,7 @@ try {
 <body>
     <main id="loginPanel" class="login-shell"<?php echo $isAuthenticated && $authSetupError === '' ? ' hidden' : ''; ?>>
         <section class="login-panel panel" aria-labelledby="loginTitle">
-            <div class="brand-mark" aria-hidden="true">IM</div>
+            <div class="brand-mark"><img src="assets/pantech.png" alt="PANTECH C&amp;I Engineering"></div>
             <p class="eyebrow">SECURE FIELD SERVICE</p>
             <h1 id="loginTitle">현장 설치 버전관리</h1>
             <p class="login-description">계속하려면 암호를 입력하세요.</p>
@@ -47,7 +47,7 @@ try {
 
     <main id="appShell" class="page-shell"<?php echo $isAuthenticated && $authSetupError === '' ? '' : ' hidden'; ?>>
         <header class="page-header">
-            <div class="brand-mark" aria-hidden="true">IM</div>
+            <div class="brand-mark"><img src="assets/pantech.png" alt="PANTECH C&amp;I Engineering"></div>
             <div>
                 <p class="eyebrow">FIELD SERVICE · VERSION LOG</p>
                 <h1>현장 설치 버전관리</h1>

@@ -99,6 +99,7 @@ internal static class Program
         if (args.Contains("--ui"))
         {
             ApplicationConfiguration.Initialize();
+            CheckTrafficLeds(folder);
             var operation = new OperationRecordService(folder);
             var uiRecorder = new ChargeDischargeRecordService(Path.Combine(folder, "ui"));
             using var dialog = new OperationRecordDialog(operation, () => snapshot, uiRecorder);
@@ -158,5 +159,35 @@ internal static class Program
             Check(noDataControls.OfType<ComboBox>().Where(c => c.Items.Count == 6).All(c => c.Enabled), "Default intervals editable without telemetry");
         }
         Console.WriteLine($"PASS: {_checks} event recording checks. Artifacts: {folder}");
+    }
+
+    private static void CheckTrafficLeds(string folder)
+    {
+        var type = typeof(OperationRecordDialog).Assembly.GetType("TBC1000B.WinForms.Views.TrafficLed")!;
+        using var sheet = new Bitmap(660, 300);
+        using var graphics = Graphics.FromImage(sheet); graphics.Clear(Color.White);
+        var index = 0;
+        foreach (var fontSize in new[] { 9f, 12f, 16f })
+        foreach (var active in new[] { false, true })
+        foreach (var text in new[] { "TX", "RX" })
+        {
+            using var led = (Control)Activator.CreateInstance(type)!;
+            using var font = new Font("맑은 고딕", fontSize);
+            led.BackColor = Color.White; led.Font = font; led.Text = text;
+            type.GetProperty("IsActive")!.SetValue(led, active);
+            led.CreateControl();
+            Check(led.Width == led.GetPreferredSize(Size.Empty).Width, "LED preferred width follows font/DPI");
+            // Also exercise a parent constraining the preferred width.
+            if (text == "RX") { led.AutoSize = false; led.Width -= 8; }
+            using var rendered = new Bitmap(led.Width, led.Height);
+            led.DrawToBitmap(rendered, new Rectangle(Point.Empty, rendered.Size));
+            Check(Enumerable.Range(0, rendered.Height).All(y => rendered.GetPixel(rendered.Width - 1, y).ToArgb() == Color.White.ToArgb()), "LED border remains inside right edge");
+            Check(Enumerable.Range(0, rendered.Width).Any(x => rendered.GetPixel(x, rendered.Height / 2).ToArgb() != Color.White.ToArgb()), "LED paints visible content");
+            var x = index % 3 * 220; var y = index / 3 * 75;
+            graphics.DrawString($"{text} {fontSize}pt {(active ? "ON" : "OFF")} / {led.DeviceDpi} DPI", SystemFonts.DefaultFont, Brushes.Black, x + 4, y + 2);
+            graphics.DrawImageUnscaled(rendered, x + 4, y + 22); index++;
+        }
+        sheet.Save(Path.Combine(folder, "traffic-leds.png"));
+        Console.WriteLine("LED image: " + Path.Combine(folder, "traffic-leds.png"));
     }
 }

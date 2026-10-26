@@ -17,6 +17,7 @@ public sealed class MainForm : Form
     private readonly Profile _profile;
     private readonly ProfileStore _profileStore;
     private readonly OperationRecordService _operationRecorder;
+    private readonly ChargeDischargeRecordService _eventRecorder;
     private readonly TrapLogService _trapLogger;
     private readonly SlaveCoordinator _slaveCoordinator = new();
     private readonly CancellationTokenSource _lifetime = new();
@@ -81,6 +82,8 @@ public sealed class MainForm : Form
         _profileStore = new ProfileStore(Path.GetDirectoryName(profile.FilePath)!);
         _masterMarkerPath = Path.Combine(Path.GetDirectoryName(profile.FilePath)!, "master_profile.txt");
         _operationRecorder = new OperationRecordService(Path.Combine(Environment.CurrentDirectory, "Operation data record"));
+        _eventRecorder = new ChargeDischargeRecordService(_operationRecorder.OutputDirectory);
+        _eventRecorder.Error += (_, message) => { if (!IsDisposed && !Disposing && IsHandleCreated) BeginInvoke(() => MessageBox.Show(this, message, "충방전 이벤트 기록 오류", MessageBoxButtons.OK, MessageBoxIcon.Error)); };
         _trapLogger = new TrapLogService(Path.Combine(Environment.CurrentDirectory, "Trap logs"), profile.FilePath);
         var alarmPath = Path.Combine(TBC1000B.WinForms.Services.AssetPaths.DirectoryPath, "alarm.wav"); if (File.Exists(alarmPath)) _alarmPlayer = new SoundPlayer(alarmPath);
         _operationRecorder.Error += (_, message) => BeginInvoke(() => MessageBox.Show(this, message, "운전 데이터 기록 오류", MessageBoxButtons.OK, MessageBoxIcon.Error));
@@ -281,7 +284,7 @@ public sealed class MainForm : Form
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 80)); root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20)); group.Controls.Add(root);
         var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(0, 2, 0, 2), WrapContents = false, Margin = Padding.Empty };
         var reset = UiTheme.Button("상태 초기화", Color.FromArgb(232, 84, 77)); reset.Width = 118; reset.MinimumSize = new Size(118, 32); reset.Click += (_, _) => ResetModuleState(); actions.Controls.Add(reset);
-        var record = UiTheme.Button("운전 데이타 기록", Color.FromArgb(41, 111, 215)); record.Width = 165; record.MinimumSize = new Size(165, 32); record.Click += (_, _) => new OperationRecordDialog(_operationRecorder, () => _latestSnapshot).ShowDialog(this); actions.Controls.Add(record);
+        var record = UiTheme.Button("운전 데이타 기록", Color.FromArgb(41, 111, 215)); record.Width = 165; record.MinimumSize = new Size(165, 32); record.Click += (_, _) => new OperationRecordDialog(_operationRecorder, () => _latestSnapshot, _eventRecorder).ShowDialog(this); actions.Controls.Add(record);
         var all = UiTheme.Button("전체모듈정보", Color.Teal); all.Width = 142; all.MinimumSize = new Size(142, 32); all.Click += (_, _) => new AllModulesDialog(() => _modules).Show(this); actions.Controls.Add(all);
         foreach (var button in actions.Controls.OfType<Button>()) button.MinimumSize = Size.Empty;
         reset.Width = 105; record.Width = 145; all.Width = 125;
@@ -658,6 +661,7 @@ public sealed class MainForm : Form
 
     private void QueueSnapshotChanged(object? sender, MonitorSnapshot snapshot)
     {
+        _eventRecorder.Observe(snapshot);
         // Never let a modal UI warning block the polling loop, even on the UI context.
         if (IsDisposed || Disposing || !IsHandleCreated) return;
         BeginInvoke(() => { if (!IsDisposed && !Disposing) OnSnapshotChanged(sender, snapshot); });
@@ -944,6 +948,7 @@ public sealed class MainForm : Form
     {
         RemoveOwnedMasterMarker();
         _service.SnapshotChanged -= QueueSnapshotChanged;
+        _eventRecorder.Stop();
         _service.PacketSent -= OnPacketSent;
         _service.PacketReceived -= OnPacketReceived;
         _trafficTimer.Stop(); _trafficTimer.Dispose();

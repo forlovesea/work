@@ -39,7 +39,7 @@ public sealed class SnmpMonitorService : IMonitorService
     public async Task ConnectAsync(ConnectionOptions options, CancellationToken cancellationToken)
     {
         await DisconnectAsync();
-        _snapshot.SystemName = ""; _snapshot.ModulesUpdatedAt = null; _snapshot.UpdatedAt = null;
+        _snapshot.SystemName = ""; _snapshot.RackUpdatedAt = null; _snapshot.ModulesUpdatedAt = null; _snapshot.UpdatedAt = null;
         _snapshot.RawValues.Clear(); SnmpDataMapper.Apply(_snapshot, _snapshot.RawValues);
         _snapshot.ConsecutiveFailures = 0;
         _options = options; _snapshot.Connection = ConnectionState.Connecting; _snapshot.LastError = null; RaiseSnapshot();
@@ -125,7 +125,7 @@ public sealed class SnmpMonitorService : IMonitorService
                 // 실제 TBC1000B에서 30개 응답은 UDP 단편화/유실로 timeout이 발생했다.
                 // 10개 단위는 동일 장비의 577개 OID를 누락 없이 안정적으로 수집했다.
                 foreach (var oid in BaseOids) { var values = await _client.WalkBulkAsync(options.Address, options.Port, options.GetCommunity, oid, 10, token); foreach (var value in values) cycle[value.Oid] = value.DisplayValue; await Task.Delay(10, token); }
-                lock (_snapshot) { _snapshot.RawValues.Clear(); foreach (var item in cycle) _snapshot.RawValues[item.Key] = item.Value; _snapshot.UpdatedAt = DateTime.Now; _snapshot.LastError = null; _snapshot.ConsecutiveFailures = 0; }
+                lock (_snapshot) { _snapshot.RawValues.Clear(); foreach (var item in cycle) _snapshot.RawValues[item.Key] = item.Value; _snapshot.UpdatedAt = DateTime.Now; _snapshot.RackUpdatedAt = _snapshot.UpdatedAt; _snapshot.LastError = null; _snapshot.ConsecutiveFailures = 0; }
                 SnmpDataMapper.Apply(_snapshot, cycle);
                 if (_snapshot.Modules.Any(m => m.Connected)) _snapshot.ModulesUpdatedAt = DateTime.Now;
                 RaiseSnapshot();

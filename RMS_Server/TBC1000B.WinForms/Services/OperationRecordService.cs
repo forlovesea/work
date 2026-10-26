@@ -20,6 +20,7 @@ public sealed class OperationRecordService : IAsyncDisposable
     private readonly object _gate = new(); private readonly string _outputDirectory;
     private readonly Dictionary<DateOnly, List<object?[]>> _rows = []; private System.Threading.Timer? _timer;
     private Func<MonitorSnapshot?>? _snapshotProvider; private OperationRecordOptions? _options; private string _sessionId = "";
+    public string OutputDirectory => _outputDirectory;
     public bool IsRecording => _timer is not null; public DateTime? EndsAt { get; private set; }
     public event EventHandler<string>? FileSaved; public event EventHandler<string>? Error;
 

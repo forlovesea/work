@@ -65,10 +65,9 @@ public sealed class OperationRecordDialog : Form
         grid.Controls.Add(_discharge, 0, 1); grid.Controls.Add(WithUnit(_dischargeThreshold, "%"), 1, 1); grid.Controls.Add(_dischargeInterval, 2, 1);
         grid.Controls.Add(_charge, 0, 2); grid.Controls.Add(WithUnit(_chargeThreshold, "A"), 1, 2); grid.Controls.Add(_chargeInterval, 2, 2); eventPanel.Controls.Add(grid);
         _limits.Dock = DockStyle.Fill; _limits.ForeColor = Color.DarkSlateGray; eventPanel.Controls.Add(_limits);
-        var apply = UiTheme.Button("이벤트 설정 적용", Color.FromArgb(48, 133, 104)); apply.Width = 140;
-        var eventStart = UiTheme.Button("이벤트 기록시작", Color.FromArgb(16, 164, 83)); eventStart.Width = 140;
+        var eventStart = UiTheme.Button("이벤트 기록시작", Color.FromArgb(16, 164, 83)); eventStart.Width = 160; eventStart.Name = "EventActionButton";
         var eventStop = UiTheme.Button("이벤트 기록중지"); eventStop.Width = 140;
-        var applyBar = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false }; applyBar.Controls.AddRange([apply, eventStart, eventStop]); eventPanel.Controls.Add(applyBar);
+        var applyBar = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false }; applyBar.Controls.AddRange([eventStart, eventStop]); eventPanel.Controls.Add(applyBar);
         _eventStatus.Dock = DockStyle.Fill; _eventStatus.ForeColor = Color.DarkGreen; eventPanel.Controls.Add(_eventStatus); Add(root, eventPanel, 290);
 
         Add(root, new Label { Text = $"공통 저장 위치: {recorder.OutputDirectory}\n이벤트 파일: 충방전 이벤트 기록.csv (기존 운전 Excel과 별도)", Dock = DockStyle.Fill, Padding = new Padding(8), BackColor = Color.FromArgb(248, 248, 250) }, 82);
@@ -108,32 +107,24 @@ public sealed class OperationRecordDialog : Form
             _eventHeadingStatus.Text = "● " + _events.StateText;
             _eventHeadingStatus.ForeColor = running ? Color.DarkGreen : Color.DimGray;
             _eventStatus.Text = _events.Status + "\n기본값 자동 시작 · 설정 변경 후 적용 · 중지 후 시작으로 재개";
-            eventStart.Enabled = !running && (_charge.Checked || _discharge.Checked);
+            eventStart.Text = running ? "설정 변경 적용" : "이벤트 기록시작";
+            eventStart.Enabled = running ? CurrentOptions() != _events.Options : _charge.Checked || _discharge.Checked;
             eventStop.Enabled = running;
-            apply.Enabled = CurrentOptions() != _events.Options;
         }
         _charge.CheckedChanged += (_, _) => { RefreshEnabled(); UpdateEvents(); };
         _discharge.CheckedChanged += (_, _) => { RefreshEnabled(); UpdateEvents(); }; RefreshEnabled();
         _chargeThreshold.ValueChanged += (_, _) => UpdateEvents(); _dischargeThreshold.ValueChanged += (_, _) => UpdateEvents();
         _chargeInterval.SelectedIndexChanged += (_, _) => UpdateEvents(); _dischargeInterval.SelectedIndexChanged += (_, _) => UpdateEvents();
-        apply.Click += (_, _) =>
-        {
-            try
-            {
-                var snapshot = _snapshotProvider(); var sample = snapshot is null ? null : BatteryEventSample.Read(snapshot);
-                _events.Configure(CurrentOptions(), sample);
-                _events.Observe(sample); UpdateEvents();
-            }
-            catch (Exception ex) { MessageBox.Show(this, ex.Message, "이벤트 설정 확인", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
-        };
         eventStart.Click += (_, _) =>
         {
             try
             {
                 var snapshot = _snapshotProvider(); var sample = snapshot is null ? null : BatteryEventSample.Read(snapshot);
-                _events.Start(CurrentOptions(), sample); UpdateEvents();
+                if (_events.IsMonitoring) { _events.Configure(CurrentOptions(), sample); _events.Observe(sample); }
+                else _events.Start(CurrentOptions(), sample);
+                UpdateEvents();
             }
-            catch (Exception ex) { MessageBox.Show(this, ex.Message, "이벤트 기록 시작 불가", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+            catch (Exception ex) { MessageBox.Show(this, ex.Message, "이벤트 설정 확인", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
         };
         eventStop.Click += (_, _) => { _events.Stop(); UpdateEvents(); };
         _statusTimer.Tick += (_, _) => { RefreshLimits(); UpdateOperation(); UpdateEvents(); };

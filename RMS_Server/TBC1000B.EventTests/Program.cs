@@ -109,11 +109,11 @@ internal static class Program
             var discharge = controls.OfType<CheckBox>().Single(c => c.Text == "방전 이벤트 사용");
             var chargeThreshold = controls.OfType<NumericUpDown>().Single(c => c.DecimalPlaces == 1);
             var dischargeThreshold = controls.OfType<NumericUpDown>().Single(c => c.Maximum == 90);
-            var eventStart = controls.OfType<Button>().Single(c => c.Text == "이벤트 기록시작");
+            var eventStart = controls.OfType<Button>().Single(c => c.Name == "EventActionButton");
             var eventStop = controls.OfType<Button>().Single(c => c.Text == "이벤트 기록중지");
-            var eventApply = controls.OfType<Button>().Single(c => c.Text == "이벤트 설정 적용");
+            Check(eventStart.Parent!.Controls.OfType<Button>().Count() == 2, "Only combined action and stop buttons remain");
             var headingStatus = controls.OfType<Label>().Single(c => c.Name == "EventRecordingState");
-            Check(!eventStart.Enabled && eventStop.Enabled && !eventApply.Enabled && headingStatus.Text.Contains("데이터 대기"), "Automatic monitoring buttons and title state");
+            Check(!eventStart.Enabled && eventStart.Text == "설정 변경 적용" && eventStop.Enabled && headingStatus.Text.Contains("데이터 대기"), "Automatic monitoring buttons and title state");
             Check(charge.Checked && discharge.Checked && chargeThreshold.Value == 50m && dischargeThreshold.Value == 50m,
                 "UI defaults both enabled and thresholds 50A/50 percent");
             var eventIntervals = controls.OfType<ComboBox>().Where(c => c.Items.Count == 6).ToArray();
@@ -123,7 +123,9 @@ internal static class Program
             charge.Checked = discharge.Checked = true;
             Check(chargeThreshold.Enabled && dischargeThreshold.Enabled && chargeThreshold.Maximum == 50, "Checked fields enabled with calculated maximum");
             chargeThreshold.Value = 12.3m;
-            Check(eventApply.Enabled, "Apply only enabled for changed settings");
+            Check(eventStart.Enabled, "Combined action enabled for changed settings");
+            eventStart.PerformClick();
+            Check(uiRecorder.IsMonitoring && uiRecorder.Options.ChargeThresholdAmps == 12.3m && !eventStart.Enabled, "Combined action applies edits while monitoring");
             snapshot.RawValues.Remove(root + ".17.1.1.8.96");
             var refresh = typeof(OperationRecordDialog).GetMethod("RefreshLimits", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
             refresh.Invoke(dialog, null);
@@ -132,11 +134,11 @@ internal static class Program
             Check(chargeThreshold.Enabled && chargeThreshold.Value == 12.3m && chargeThreshold.Maximum == 50, "Temporary cap loss preserves draft and last cap");
             charge.Checked = false; Check(!chargeThreshold.Enabled, "Uncheck disables input"); charge.Checked = true;
             eventStop.PerformClick();
-            Check(eventStart.Enabled && !eventStop.Enabled && !uiRecorder.IsMonitoring && headingStatus.Text.Contains("중지"), "Stop updates buttons and title immediately");
+            Check(eventStart.Enabled && eventStart.Text == "이벤트 기록시작" && !eventStop.Enabled && !uiRecorder.IsMonitoring && headingStatus.Text.Contains("중지"), "Stop updates buttons and title immediately");
             snapshot.RawValues[root + ".17.1.1.8.96"] = "75";
             snapshot.RawValues[root + ".17.2.1.13.96"] = "50";
             eventStart.PerformClick();
-            Check(!eventStart.Enabled && eventStop.Enabled && uiRecorder.IsMonitoring && !eventApply.Enabled && headingStatus.Text.Contains("감시 중"), "Restart applies draft and restores monitoring UI");
+            Check(!eventStart.Enabled && eventStart.Text == "설정 변경 적용" && eventStop.Enabled && uiRecorder.IsMonitoring && headingStatus.Text.Contains("감시 중"), "Restart applies draft and restores monitoring UI");
             eventStop.PerformClick(); charge.Checked = discharge.Checked = false;
             Check(!eventStart.Enabled && !eventStop.Enabled, "Neither button enabled when stopped and no event selected");
             charge.Checked = discharge.Checked = true;

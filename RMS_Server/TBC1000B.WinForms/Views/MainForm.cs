@@ -948,7 +948,7 @@ public sealed class MainForm : Form
     {
         RemoveOwnedMasterMarker();
         _service.SnapshotChanged -= QueueSnapshotChanged;
-        _eventRecorder.Stop();
+        _eventRecorder.Stop("프로그램 종료");
         _service.PacketSent -= OnPacketSent;
         _service.PacketReceived -= OnPacketReceived;
         _trafficTimer.Stop(); _trafficTimer.Dispose();

@@ -9,6 +9,7 @@ public sealed class OperationRecordDialog : Form
     private readonly ChargeDischargeRecordService _events;
     private readonly Func<MonitorSnapshot?> _snapshotProvider;
     private readonly Label _status = new(), _eventStatus = new(), _limits = new();
+    private readonly Label _eventHeadingStatus = new() { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, Name = "EventRecordingState" };
     private readonly CheckBox _charge = new() { Text = "충전 이벤트 사용", AutoSize = true };
     private readonly CheckBox _discharge = new() { Text = "방전 이벤트 사용", AutoSize = true };
     private readonly NumericUpDown _chargeThreshold = new() { Minimum = 0.1m, Maximum = decimal.MaxValue, DecimalPlaces = 1, Increment = 0.1m, Dock = DockStyle.Fill };
@@ -51,7 +52,10 @@ public sealed class OperationRecordDialog : Form
         // Directly below the final EPO checkbox, separate from periodic operating data.
         var eventPanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, BackColor = mint, Padding = new Padding(12) };
         foreach (var height in new[] { 32, 93, 57, 36, 46 }) eventPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
-        eventPanel.Controls.Add(Heading("충방전 이벤트 기록"));
+        var eventHeading = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty };
+        eventHeading.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 210)); eventHeading.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        eventHeading.Controls.Add(Heading("충방전 이벤트 기록"), 0, 0); eventHeading.Controls.Add(_eventHeadingStatus, 1, 0);
+        eventPanel.Controls.Add(eventHeading);
         var grid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 3 };
         grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 25));
         grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 31));
@@ -61,8 +65,10 @@ public sealed class OperationRecordDialog : Form
         grid.Controls.Add(_discharge, 0, 1); grid.Controls.Add(WithUnit(_dischargeThreshold, "%"), 1, 1); grid.Controls.Add(_dischargeInterval, 2, 1);
         grid.Controls.Add(_charge, 0, 2); grid.Controls.Add(WithUnit(_chargeThreshold, "A"), 1, 2); grid.Controls.Add(_chargeInterval, 2, 2); eventPanel.Controls.Add(grid);
         _limits.Dock = DockStyle.Fill; _limits.ForeColor = Color.DarkSlateGray; eventPanel.Controls.Add(_limits);
-        var apply = UiTheme.Button("이벤트 설정 적용", Color.FromArgb(48, 133, 104)); apply.Width = 160;
-        var applyBar = new FlowLayoutPanel { Dock = DockStyle.Fill }; applyBar.Controls.Add(apply); eventPanel.Controls.Add(applyBar);
+        var apply = UiTheme.Button("이벤트 설정 적용", Color.FromArgb(48, 133, 104)); apply.Width = 140;
+        var eventStart = UiTheme.Button("이벤트 기록시작", Color.FromArgb(16, 164, 83)); eventStart.Width = 140;
+        var eventStop = UiTheme.Button("이벤트 기록중지"); eventStop.Width = 140;
+        var applyBar = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false }; applyBar.Controls.AddRange([apply, eventStart, eventStop]); eventPanel.Controls.Add(applyBar);
         _eventStatus.Dock = DockStyle.Fill; _eventStatus.ForeColor = Color.DarkGreen; eventPanel.Controls.Add(_eventStatus); Add(root, eventPanel, 290);
 
         Add(root, new Label { Text = $"공통 저장 위치: {recorder.OutputDirectory}\n이벤트 파일: 충방전 이벤트 기록.csv (기존 운전 Excel과 별도)", Dock = DockStyle.Fill, Padding = new Padding(8), BackColor = Color.FromArgb(248, 248, 250) }, 82);
@@ -94,20 +100,44 @@ public sealed class OperationRecordDialog : Form
         _dischargeThreshold.Value = saved.DischargeThresholdPercent;
         _chargeInterval.SelectedIndex = saved.ChargeIntervalMinutes / 5 - 1; _dischargeInterval.SelectedIndex = saved.DischargeIntervalMinutes / 5 - 1;
         RefreshLimits(); _chargeThreshold.Value = Math.Clamp(saved.ChargeThresholdAmps, _chargeThreshold.Minimum, _chargeThreshold.Maximum);
-        _charge.CheckedChanged += (_, _) => RefreshEnabled(); _discharge.CheckedChanged += (_, _) => RefreshEnabled(); RefreshEnabled();
+        ChargeDischargeRecordOptions CurrentOptions() => new(_charge.Checked, _chargeThreshold.Value, (_chargeInterval.SelectedIndex + 1) * 5,
+            _discharge.Checked, _dischargeThreshold.Value, (_dischargeInterval.SelectedIndex + 1) * 5);
+        void UpdateEvents()
+        {
+            var running = _events.IsMonitoring;
+            _eventHeadingStatus.Text = "● " + _events.StateText;
+            _eventHeadingStatus.ForeColor = running ? Color.DarkGreen : Color.DimGray;
+            _eventStatus.Text = _events.Status + "\n기본값 자동 시작 · 설정 변경 후 적용 · 중지 후 시작으로 재개";
+            eventStart.Enabled = !running && (_charge.Checked || _discharge.Checked);
+            eventStop.Enabled = running;
+            apply.Enabled = CurrentOptions() != _events.Options;
+        }
+        _charge.CheckedChanged += (_, _) => { RefreshEnabled(); UpdateEvents(); };
+        _discharge.CheckedChanged += (_, _) => { RefreshEnabled(); UpdateEvents(); }; RefreshEnabled();
+        _chargeThreshold.ValueChanged += (_, _) => UpdateEvents(); _dischargeThreshold.ValueChanged += (_, _) => UpdateEvents();
+        _chargeInterval.SelectedIndexChanged += (_, _) => UpdateEvents(); _dischargeInterval.SelectedIndexChanged += (_, _) => UpdateEvents();
         apply.Click += (_, _) =>
         {
             try
             {
                 var snapshot = _snapshotProvider(); var sample = snapshot is null ? null : BatteryEventSample.Read(snapshot);
-                _events.Configure(new(_charge.Checked, _chargeThreshold.Value, (_chargeInterval.SelectedIndex + 1) * 5,
-                    _discharge.Checked, _dischargeThreshold.Value, (_dischargeInterval.SelectedIndex + 1) * 5), sample);
-                _events.Observe(sample); _eventStatus.Text = _events.Status + "\n시작·인터벌·종료 시 SOC 함께 기록";
+                _events.Configure(CurrentOptions(), sample);
+                _events.Observe(sample); UpdateEvents();
             }
             catch (Exception ex) { MessageBox.Show(this, ex.Message, "이벤트 설정 확인", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
         };
-        _statusTimer.Tick += (_, _) => { RefreshLimits(); UpdateOperation(); _eventStatus.Text = _events.Status + "\n시작·인터벌·종료 시 SOC 함께 기록"; };
-        _statusTimer.Start(); UpdateOperation(); _eventStatus.Text = events.Status;
+        eventStart.Click += (_, _) =>
+        {
+            try
+            {
+                var snapshot = _snapshotProvider(); var sample = snapshot is null ? null : BatteryEventSample.Read(snapshot);
+                _events.Start(CurrentOptions(), sample); UpdateEvents();
+            }
+            catch (Exception ex) { MessageBox.Show(this, ex.Message, "이벤트 기록 시작 불가", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+        };
+        eventStop.Click += (_, _) => { _events.Stop(); UpdateEvents(); };
+        _statusTimer.Tick += (_, _) => { RefreshLimits(); UpdateOperation(); UpdateEvents(); };
+        _statusTimer.Start(); UpdateOperation(); UpdateEvents();
         FormClosed += (_, _) => { _statusTimer.Stop(); _statusTimer.Dispose(); };
     }
 

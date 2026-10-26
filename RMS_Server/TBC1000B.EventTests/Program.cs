@@ -18,6 +18,7 @@ internal static class Program
         var recorder = new ChargeDischargeRecordService(folder);
         Check(recorder.Options == new ChargeDischargeRecordOptions(true, 50m, 10, true, 50m, 5), "Requested defaults enabled");
         var defaultRecorder = new ChargeDischargeRecordService(Path.Combine(folder, "defaults"));
+        Check(defaultRecorder.IsMonitoring && defaultRecorder.StateText == "데이터 대기", "Automatic monitoring without configure or dialog");
         defaultRecorder.Observe(Sample(-49.9m, 0)); Check(!File.Exists(defaultRecorder.FilePath), "Default discharge below 50 percent waits");
         defaultRecorder.Observe(Sample(-50m, 1)); defaultRecorder.Observe(Sample(-50m, 6)); defaultRecorder.Observe(Sample(0, 7));
         Check(File.ReadAllLines(defaultRecorder.FilePath).Length == 4, "Default discharge starts at 50 percent and records at 5 minutes");
@@ -25,6 +26,17 @@ internal static class Program
         Check(File.ReadAllLines(defaultRecorder.FilePath).Length == 5, "Default charge waits beyond 5 minutes");
         defaultRecorder.Observe(Sample(50m, 18));
         Check(File.ReadAllLines(defaultRecorder.FilePath).Length == 6, "Default charge interval 10 minutes");
+        Check(defaultRecorder.StateText == "충전 기록 중", "Active charge state");
+        var beforeStop = defaultRecorder.Options; defaultRecorder.Stop();
+        Check(!defaultRecorder.IsMonitoring && defaultRecorder.StateText == "중지" && defaultRecorder.Options == beforeStop, "Stop preserves options");
+        Check(File.ReadAllLines(defaultRecorder.FilePath)[^1].Contains("사용자 중지"), "Stop writes interrupted event");
+        var afterStopCount = File.ReadAllLines(defaultRecorder.FilePath).Length;
+        defaultRecorder.Observe(Sample(50m, 20)); defaultRecorder.Observe((BatteryEventSample?)null);
+        Check(File.ReadAllLines(defaultRecorder.FilePath).Length == afterStopCount && !defaultRecorder.IsMonitoring, "New telemetry cannot resume stopped recorder");
+        defaultRecorder.Configure(beforeStop with { ChargeIntervalMinutes = 15 }, Sample(50m, 21));
+        Check(!defaultRecorder.IsMonitoring, "Configuring stopped recorder does not resume");
+        defaultRecorder.Start(defaultRecorder.Options, Sample(50m, 22));
+        Check(defaultRecorder.IsMonitoring && defaultRecorder.StateText == "충전 기록 중" && File.ReadAllLines(defaultRecorder.FilePath).Length == afterStopCount + 1, "Explicit restart opens new event");
         var limited = new ChargeDischargeRecordService(Path.Combine(folder, "limited"));
         limited.Observe(Sample(50m, 0) with { ChargeLimitC = 0.4m });
         Check(!File.Exists(limited.FilePath) && limited.Status.Contains("보류"), "Default charge respects device cap");
@@ -72,7 +84,7 @@ internal static class Program
         failure.Configure(options, Sample(0, 0)); failure.Observe(Sample(1, 0));
         var errors = 0; failure.Error += (_, _) => errors++;
         using (var held = new FileStream(failure.FilePath, FileMode.Open, FileAccess.Read, FileShare.None)) failure.Observe(Sample(1, 5));
-        Check(errors == 1 && !failure.Options.ChargeEnabled, "Locked file stops recording with explicit error");
+        Check(errors == 1 && !failure.IsMonitoring && failure.Options.ChargeEnabled, "Locked file stops recording while preserving options");
 
         var snapshot = new MonitorSnapshot { Connection = ConnectionState.Connected, RackUpdatedAt = DateTime.Now };
         const string root = "1.3.6.1.4.1.2011.6.164.1";
@@ -88,7 +100,8 @@ internal static class Program
         {
             ApplicationConfiguration.Initialize();
             var operation = new OperationRecordService(folder);
-            using var dialog = new OperationRecordDialog(operation, () => snapshot, new ChargeDischargeRecordService(folder));
+            var uiRecorder = new ChargeDischargeRecordService(Path.Combine(folder, "ui"));
+            using var dialog = new OperationRecordDialog(operation, () => snapshot, uiRecorder);
             dialog.Show(); Application.DoEvents();
             IEnumerable<Control> All(Control parent) => parent.Controls.Cast<Control>().SelectMany(c => new[] { c }.Concat(All(c)));
             var controls = All(dialog).ToArray();
@@ -96,6 +109,11 @@ internal static class Program
             var discharge = controls.OfType<CheckBox>().Single(c => c.Text == "방전 이벤트 사용");
             var chargeThreshold = controls.OfType<NumericUpDown>().Single(c => c.DecimalPlaces == 1);
             var dischargeThreshold = controls.OfType<NumericUpDown>().Single(c => c.Maximum == 90);
+            var eventStart = controls.OfType<Button>().Single(c => c.Text == "이벤트 기록시작");
+            var eventStop = controls.OfType<Button>().Single(c => c.Text == "이벤트 기록중지");
+            var eventApply = controls.OfType<Button>().Single(c => c.Text == "이벤트 설정 적용");
+            var headingStatus = controls.OfType<Label>().Single(c => c.Name == "EventRecordingState");
+            Check(!eventStart.Enabled && eventStop.Enabled && !eventApply.Enabled && headingStatus.Text.Contains("데이터 대기"), "Automatic monitoring buttons and title state");
             Check(charge.Checked && discharge.Checked && chargeThreshold.Value == 50m && dischargeThreshold.Value == 50m,
                 "UI defaults both enabled and thresholds 50A/50 percent");
             var eventIntervals = controls.OfType<ComboBox>().Where(c => c.Items.Count == 6).ToArray();
@@ -105,6 +123,7 @@ internal static class Program
             charge.Checked = discharge.Checked = true;
             Check(chargeThreshold.Enabled && dischargeThreshold.Enabled && chargeThreshold.Maximum == 50, "Checked fields enabled with calculated maximum");
             chargeThreshold.Value = 12.3m;
+            Check(eventApply.Enabled, "Apply only enabled for changed settings");
             snapshot.RawValues.Remove(root + ".17.1.1.8.96");
             var refresh = typeof(OperationRecordDialog).GetMethod("RefreshLimits", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
             refresh.Invoke(dialog, null);
@@ -112,9 +131,21 @@ internal static class Program
             snapshot.RawValues.Remove(root + ".17.2.1.13.96"); refresh.Invoke(dialog, null);
             Check(chargeThreshold.Enabled && chargeThreshold.Value == 12.3m && chargeThreshold.Maximum == 50, "Temporary cap loss preserves draft and last cap");
             charge.Checked = false; Check(!chargeThreshold.Enabled, "Uncheck disables input"); charge.Checked = true;
+            eventStop.PerformClick();
+            Check(eventStart.Enabled && !eventStop.Enabled && !uiRecorder.IsMonitoring && headingStatus.Text.Contains("중지"), "Stop updates buttons and title immediately");
+            snapshot.RawValues[root + ".17.1.1.8.96"] = "75";
+            snapshot.RawValues[root + ".17.2.1.13.96"] = "50";
+            eventStart.PerformClick();
+            Check(!eventStart.Enabled && eventStop.Enabled && uiRecorder.IsMonitoring && !eventApply.Enabled && headingStatus.Text.Contains("감시 중"), "Restart applies draft and restores monitoring UI");
+            eventStop.PerformClick(); charge.Checked = discharge.Checked = false;
+            Check(!eventStart.Enabled && !eventStop.Enabled, "Neither button enabled when stopped and no event selected");
+            charge.Checked = discharge.Checked = true;
             Check(charge.Visible && charge.Height > 0 && charge.Bottom <= charge.Parent!.ClientSize.Height, "Charge row fully visible");
             using var bitmap = new Bitmap(dialog.Width, dialog.Height); dialog.DrawToBitmap(bitmap, new Rectangle(0, 0, dialog.Width, dialog.Height));
             bitmap.Save(Path.Combine(folder, "event-dialog.png")); dialog.Close();
+            using var reopened = new OperationRecordDialog(operation, () => snapshot, uiRecorder);
+            Check(!uiRecorder.IsMonitoring && All(reopened).OfType<Button>().Single(c => c.Text == "이벤트 기록시작").Enabled,
+                "Reopening dialog does not resume explicit stop");
             Console.WriteLine("UI image: " + Path.Combine(folder, "event-dialog.png"));
             using var noData = new OperationRecordDialog(operation, () => null, new ChargeDischargeRecordService(folder));
             var noDataControls = All(noData).ToArray();

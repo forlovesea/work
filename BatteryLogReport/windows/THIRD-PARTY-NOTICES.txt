@@ -1,0 +1,14 @@
+Battery Log Report Windows x64
+
+Bundled runtime: BellSoft Liberica Java 8 (OpenJDK), Windows x86-64 JRE.
+Exact version, official URL, and vendor checksum are in runtime-version.json.
+Original runtime LICENSE, ASSEMBLY_EXCEPTION, THIRD_PARTY_README and other
+legal files are retained inside runtime. OpenJDK is distributed under
+GPL v2 with the Classpath Exception; consult the retained runtime notices.
+Unmodified runtime source distributions are available from the same vendor:
+https://github.com/bell-sw/Liberica
+https://bell-sw.com/pages/downloads/
+
+The native executable launcher is built from this project's launcher.c.
+Zig is a build-time tool and is not included in the runtime package.
+Report templates are the documents provided by the user for this project.

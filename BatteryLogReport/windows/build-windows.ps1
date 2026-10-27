@@ -25,7 +25,12 @@ if (-not (Test-Path -LiteralPath $runtimeTarget)) { Copy-Item -LiteralPath $runt
 $compiler = Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'tools/zig-unpacked') -Recurse -Filter zig.exe | Select-Object -First 1
 $env:ZIG_GLOBAL_CACHE_DIR = Join-Path $build 'zig-cache-global'
 $env:ZIG_LOCAL_CACHE_DIR = Join-Path $build 'zig-cache-local'
-& $compiler.FullName cc -target x86_64-windows-gnu -Os -nostdlib -fno-builtin -fno-stack-protector '-Wl,-e,entry' '-Wl,--subsystem,windows' '-Wl,--major-subsystem-version,6' '-Wl,--minor-subsystem-version,1' -o (Join-Path $package 'BatteryLogReport.exe') (Join-Path $PSScriptRoot 'launcher.c') -lkernel32 -luser32
+Push-Location $PSScriptRoot
+try {
+    & $compiler.FullName rc /fo (Join-Path $build 'battery.res') battery.rc
+    if ($LASTEXITCODE -ne 0) { throw 'Battery icon resource compilation failed.' }
+} finally { Pop-Location }
+& $compiler.FullName cc -target x86_64-windows-gnu -Os -nostdlib -fno-builtin -fno-stack-protector '-Wl,-e,entry' '-Wl,--subsystem,windows' '-Wl,--major-subsystem-version,6' '-Wl,--minor-subsystem-version,1' -o (Join-Path $package 'BatteryLogReport.exe') (Join-Path $PSScriptRoot 'launcher.c') (Join-Path $build 'battery.res') -lkernel32 -luser32
 if ($LASTEXITCODE -ne 0) { throw 'Native x64 launcher compilation failed.' }
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'README-Windows.txt'),(Join-Path $PSScriptRoot 'THIRD-PARTY-NOTICES.txt') -Destination $package -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'tools/runtime-x64-selected.json') -Destination (Join-Path $package 'runtime-version.json') -Force

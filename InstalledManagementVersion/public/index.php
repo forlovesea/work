@@ -410,6 +410,17 @@ try {
         </section>
         <footer class="page-footer">Installed Management Version</footer>
     </main>
+    <dialog id="locationMatchDialog" class="location-match-dialog" aria-labelledby="locationMatchTitle" aria-describedby="locationMatchCount">
+        <div class="location-match-heading">
+            <h2 id="locationMatchTitle">중복·유사 설치장소 확인</h2>
+            <button id="closeLocationMatches" type="button" class="secondary-button" autofocus>닫기</button>
+        </div>
+        <p id="locationMatchCount"></p>
+        <div id="locationMatchList" class="location-match-list"></div>
+        <div class="location-match-footer">
+            <button id="ignoreLocationMatches" type="button" class="primary-button">무시하고 신규방문기록 저장</button>
+        </div>
+    </dialog>
     <section id="printReport" class="print-report" aria-label="설치 버전 내보내기 보고서"></section>
 </body>
 </html>

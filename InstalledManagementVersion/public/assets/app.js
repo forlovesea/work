@@ -2141,8 +2141,86 @@ for (const input of [filterDate, filterStartDate, filterEndDate, deviceFilter, v
     input.addEventListener('change', scheduleFilterLoad);
 }
 
+// Ignore formatting differences, then allow containment and small spelling differences.
+function locationMatch(left, right) {
+    const normalize = (value) => String(value || '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+    const a = normalize(left);
+    const b = normalize(right);
+    if (!a || !b) return '';
+    if (a === b) return '중복';
+    const shorter = Math.min(a.length, b.length);
+    const longer = Math.max(a.length, b.length);
+    if (shorter < 3) return '';
+    if ((a.includes(b) || b.includes(a)) && shorter / longer >= 0.6) return '유사';
+    let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+    for (let i = 1; i <= a.length; i++) {
+        const current = [i];
+        for (let j = 1; j <= b.length; j++) {
+            current[j] = Math.min(current[j - 1] + 1, previous[j] + 1,
+                previous[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+        }
+        previous = current;
+    }
+    return 1 - previous[b.length] / longer >= 0.8 ? '유사' : '';
+}
+
+function findLocationMatches(records, payload) {
+    return records.map((record) => ({
+        record,
+        siteMatch: locationMatch(payload.site_name, record.site_name),
+        addressMatch: locationMatch(payload.address, record.address),
+    })).filter((item) => item.siteMatch || item.addressMatch)
+        .sort((a, b) => Number(b.siteMatch === '중복') + Number(b.addressMatch === '중복')
+            - Number(a.siteMatch === '중복') - Number(a.addressMatch === '중복'));
+}
+
+function chooseLocationMatch(matches) {
+    const dialog = document.querySelector('#locationMatchDialog');
+    const list = document.querySelector('#locationMatchList');
+    const ignoreButton = document.querySelector('#ignoreLocationMatches');
+    const closeButton = document.querySelector('#closeLocationMatches');
+    list.replaceChildren();
+    document.querySelector('#locationMatchCount').textContent = `${matches.length}개의 중복·유사 기록이 있습니다. 기존 기록을 수정하거나 신규 저장을 선택하세요.`;
+    return new Promise((resolve) => {
+        let selection = { action: 'cancel' };
+        const finish = (choice) => { selection = choice; dialog.close(); };
+        for (const { record, siteMatch, addressMatch } of matches) {
+            const row = document.createElement('div');
+            row.className = 'location-match-row';
+            const details = document.createElement('div');
+            for (const text of [
+                `설치장소: ${record.site_name || '(미입력)'}${siteMatch ? ` · ${siteMatch}` : ''}`,
+                `주소: ${record.address || '(미입력)'}${addressMatch ? ` · ${addressMatch}` : ''}`,
+                `${record.visit_date} · ${record.device_name} · 기록 #${record.id}`,
+            ]) {
+                const line = document.createElement('p');
+                line.textContent = text;
+                details.append(line);
+            }
+            const edit = document.createElement('button');
+            edit.type = 'button';
+            edit.className = 'secondary-button';
+            edit.textContent = '수정';
+            edit.setAttribute('aria-label', `${record.site_name || record.address} ${record.visit_date} 기록 수정`);
+            edit.addEventListener('click', () => finish({ action: 'edit', record }));
+            row.append(details, edit);
+            list.append(row);
+        }
+        ignoreButton.onclick = () => finish({ action: 'create' });
+        closeButton.onclick = () => finish({ action: 'cancel' });
+        dialog.addEventListener('close', () => {
+            ignoreButton.onclick = null;
+            closeButton.onclick = null;
+            resolve(selection);
+        }, { once: true });
+        dialog.showModal();
+    });
+}
+
+let isSubmittingRecord = false;
 recordForm.addEventListener('submit', async (event) => {
     event.preventDefault();
+    if (isSubmittingRecord) return;
     if (!recordForm.reportValidity()) {
         return;
     }
@@ -2157,6 +2235,7 @@ recordForm.addEventListener('submit', async (event) => {
     }
 
     const isEditing = editingRecordId !== null;
+    isSubmittingRecord = true;
     saveButton.disabled = true;
     setFormMessage(isEditing ? '수정 내용을 저장하고 있습니다.' : '기록을 저장하고 있습니다.');
 
@@ -2184,7 +2263,29 @@ recordForm.addEventListener('submit', async (event) => {
         if (isEditing) {
             payload.action = 'update_record';
             payload.id = editingRecordId;
+        } else if (payload.site_name || payload.address) {
+            setFormMessage('기존 기록의 설치장소와 주소를 확인하고 있습니다.');
+            const checkResponse = await authenticatedFetch('api.php?date_mode=all', {
+                headers: { Accept: 'application/json' }, cache: 'no-store',
+            });
+            const checkResult = await checkResponse.json();
+            if (!checkResponse.ok || !Array.isArray(checkResult.records)) {
+                throw new Error(checkResult.error || '기존 기록을 확인하지 못했습니다. 다시 시도해 주세요.');
+            }
+            const matches = findLocationMatches(checkResult.records, payload);
+            if (matches.length) {
+                const choice = await chooseLocationMatch(matches);
+                if (choice.action === 'edit') {
+                    startEditingRecord(choice.record);
+                    return;
+                }
+                if (choice.action !== 'create') {
+                    setFormMessage('신규 저장을 취소했습니다. 입력 내용을 확인해 주세요.');
+                    return;
+                }
+            }
         }
+        setFormMessage(isEditing ? '수정 내용을 저장하고 있습니다.' : '기록을 저장하고 있습니다.');
         const response = await authenticatedFetch('api.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -2203,6 +2304,7 @@ recordForm.addEventListener('submit', async (event) => {
     } catch (error) {
         setFormMessage(error.message, true);
     } finally {
+        isSubmittingRecord = false;
         saveButton.disabled = false;
     }
 });

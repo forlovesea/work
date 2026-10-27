@@ -1771,3 +1771,15 @@ h2 {
         text-align: right;
     }
 }
+/* Duplicate location review before creating a visit. */
+.location-match-dialog { width: min(760px, calc(100vw - 32px)); max-height: 85vh; padding: 24px; border: 0; border-radius: 16px; box-sizing: border-box; color: #172b4d; background: #fff; box-shadow: 0 20px 70px #0004; }
+.location-match-dialog::backdrop { background: #101c35a6; }
+.location-match-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.location-match-heading h2 { margin: 0; font-size: 1.25rem; }
+.location-match-list { max-height: 50vh; overflow-y: auto; margin: 16px 0; }
+.location-match-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 0; border-bottom: 1px solid #dce3ed; }
+.location-match-row > div { min-width: 0; overflow-wrap: anywhere; }
+.location-match-row p { margin: 4px 0; }
+.location-match-row button { flex-shrink: 0; }
+.location-match-footer { padding-top: 12px; }
+.location-match-footer button { width: 100%; white-space: normal; }

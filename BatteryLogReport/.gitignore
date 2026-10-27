@@ -7,4 +7,4 @@ signing/
 windows/build/
 windows/tools/
 build/
-releases/BatteryLogReport-Windows-x64/
+releases/BatteryLogReport-Windows-x64*/

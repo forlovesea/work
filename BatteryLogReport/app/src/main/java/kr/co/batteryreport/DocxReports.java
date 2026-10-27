@@ -79,7 +79,7 @@ public final class DocxReports {
         p(13,"2-2. 로그 해석");p(14,"정상 운전 추정 (해석 기준)");keep(15);keep(16);keep(17);p(18,"Power Supply Source = Battery / Battery Status = Discharge");keep(19);keep(20);keep(21);
         for(Result r:rr){keep(22);p(23,site.name+" "+r.unit.label+": "+r.unit.uncertainName+" > perfmg_uncertain.csv");picture(24,images.evidence(r,"states"),6400800);}
         keep(26);p(27,"perfmg_minute.csv의 Lithium Battery Group / Current, SOC를 상태 전환 구간과 대조함.");
-        for(Result r:rr){keep(28);p(29,site.name+" "+r.unit.label+": "+r.unit.minuteName+" > perfmg_minute.csv");picture(30,images.evidence(r,"current"),6400800);}
+        for(Result r:rr){keep(28);p(29,site.name+" "+r.unit.label+": "+r.unit.minuteName+" > perfmg_minute.csv");picture(30,images.evidence(r,"current"),6400800);p(27,r.unit.label+": "+ReportImages.currentExplanation(r));}
         keep(33);
         for(Result r:rr){
             p(34,r.unit.label+": Battery 공급 전환 "+time(r.batterySource)+", 방전 상태 전환 "+time(r.dischargeStatus)+", 이후 Unknown 전환 "+time(r.unknownAfter)+".");

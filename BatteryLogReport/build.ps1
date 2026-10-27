@@ -27,7 +27,7 @@ Push-Location $project
 try {
     & (Join-Path $toolsRoot 'gradle-8.11.1/bin/gradle.bat') --offline --no-daemon :app:assembleRelease
     if ($LASTEXITCODE -ne 0) { throw 'Android build failed' }
-    Copy-Item -LiteralPath 'app/build/outputs/apk/release/app-release.apk' -Destination 'releases/BatteryLogReport-1.0.0.apk' -Force
-    $hash = (Get-FileHash -LiteralPath 'releases/BatteryLogReport-1.0.0.apk' -Algorithm SHA256).Hash
-    [IO.File]::WriteAllText((Join-Path $project 'releases/SHA256SUMS.txt'), "$hash  BatteryLogReport-1.0.0.apk`n")
+    Copy-Item -LiteralPath 'app/build/outputs/apk/release/app-release.apk' -Destination 'releases/BatteryLogReport-1.0.1.apk' -Force
+    $hash = (Get-FileHash -LiteralPath 'releases/BatteryLogReport-1.0.1.apk' -Algorithm SHA256).Hash
+    [IO.File]::WriteAllText((Join-Path $project 'releases/SHA256SUMS.txt'), "$hash  BatteryLogReport-1.0.1.apk`n")
 } finally { Pop-Location; Remove-Item Env:BATTERY_REPORT_STORE_PASSWORD -ErrorAction SilentlyContinue }

@@ -24,6 +24,8 @@ Outage: indexes 3,5–8,10,12,23–24,27,29–31,34–38,42–44,46–48,50–55
 
 Clone existing table and cell properties. Use one or two system columns per table; for more than two systems repeat the table. Remove the empty trailing row in the outage template. Preserve total content widths (8640 and 10080 twips), divide columns evenly and repeat header rows. New illustrations replace all old sample images and use fresh relationship IDs and unique drawing IDs. Evidence images show up to the first 12 matching original rows, explicitly labeled; analysis uses all records.
 
+Version 1.0.1 exception requested by the user: the outage section 2-3 Current/SOC evidence image includes up to 12 discharge samples plus up to 4 subsequent positive-current samples. Choose the first discharge cycle with subsequent charging (otherwise the first discharge). Preserve the first positive-current timestamp and select the remaining samples across the uninterrupted charging run, ending at the last positive record before zero, negative current, or a gap exceeding 10 minutes. Never manufacture charging samples. Add a source-styled paragraph explaining the observed transition, sustained positive samples and SOC increase when available. This allows up to 16 rows and a proportionately taller image. Other evidence image selection rules remain unchanged.
+
 Charge chart width is fitted to 5486400 EMU, the template content width; the reference chart's 6400800 EMU extends beyond the charge text area. This is an intentional geometry correction. Outage images remain 6400800 EMU wide. Image heights follow the actual PNG aspect ratio.
 
 ## Package preservation

@@ -15,6 +15,51 @@ public final class ReportImages {
         byte[] png()throws IOException;
     }
     private final Painter p;
+    /** One discharge cycle and its first uninterrupted positive-current run. */
+    public static final class CurrentEvidence {
+        public final List<LocalDateTime> discharge=new ArrayList<>(),charging=new ArrayList<>();
+        public LocalDateTime chargeStart,chargeEnd;
+        public int positiveCount;
+    }
+    public static CurrentEvidence currentEvidence(LogAnalyzer.Result r){
+        CurrentEvidence out=new CurrentEvidence();
+        if(r.episodes.isEmpty())return out;
+        LogAnalyzer.Episode selected=r.episodes.get(0);
+        for(LogAnalyzer.Episode e:r.episodes)if(e.charge!=null){selected=e;break;}
+        for(Map.Entry<LocalDateTime,Double> e:r.unit.currents().subMap(selected.start,true,selected.last,true).entrySet())if(e.getValue()<0)out.discharge.add(e.getKey());
+        // Keep both ends when a long discharge needs a compact evidence table.
+        sample(out.discharge,12);
+        if(selected.charge==null)return out;
+        LocalDateTime previous=null;
+        List<LocalDateTime> run=new ArrayList<>();
+        for(Map.Entry<LocalDateTime,Double> e:r.unit.currents().tailMap(selected.charge,true).entrySet()){
+            if(e.getValue()<=0||(previous!=null&&Duration.between(previous,e.getKey()).getSeconds()>600))break;
+            run.add(e.getKey());previous=e.getKey();
+        }
+        if(!run.isEmpty()){
+            out.chargeStart=run.get(0);out.chargeEnd=run.get(run.size()-1);out.positiveCount=run.size();
+            sample(run,4);out.charging.addAll(run);
+        }
+        return out;
+    }
+    private static void sample(List<LocalDateTime> times,int limit){
+        if(times.size()<=limit)return;
+        List<LocalDateTime> selected=new ArrayList<>();
+        for(int i=0;i<limit;i++)selected.add(times.get((int)Math.round(i*(times.size()-1.0)/(limit-1))));
+        times.clear();times.addAll(selected);
+    }
+    public static String currentExplanation(LogAnalyzer.Result r){
+        CurrentEvidence e=currentEvidence(r);
+        if(e.discharge.isEmpty())return "음(-)의 방전 전류가 확인되지 않아 방전 후 충전으로 전환되는 동작은 확인할 수 없음.";
+        if(e.charging.isEmpty())return "음(-)의 전류로 방전 동작은 확인되었으나, 이후 양(+)의 충전 전류는 확인되지 않아 충전 전환·유지 기록은 표시하지 않았음.";
+        String s="음(-)의 전류로 방전한 이후 "+LogAnalyzer.time(e.chargeStart)+"에 양(+)의 충전 전류가 처음 실측되었음. ";
+        if(e.positiveCount==1)return s+"충전 방향 전환은 확인되었으나 양수 기록이 1개뿐이므로 충전 유지 여부는 추가 확인이 필요함.";
+        s+=LogAnalyzer.time(e.chargeEnd)+"까지 양수 전류 "+e.positiveCount+"개 실측값이 이어져, 해당 관측 구간에서 방전 후 충전 전환 및 충전 유지 동작을 확인하였음. ";
+        Double first=r.unit.socs().get(e.chargeStart),last=r.unit.socs().get(e.chargeEnd);
+        if(first!=null&&last!=null&&last>first)s+="같은 시각의 SOC도 "+LogAnalyzer.number(first,0)+"%에서 "+LogAnalyzer.number(last,0)+"%로 증가하여 재충전 동작을 교차 확인하였음.";
+        else s+="충전 구간의 SOC 증가 여부는 해당 SOC 기록을 추가 대조해야 함.";
+        return s;
+    }
     static final int INK=0xff182638,GRID=0xffe3e8ec,BLUE=0xff2866a6,TEAL=0xff71afa6,ORANGE=0xffbb6d20;
     public ReportImages(Painter painter){p=painter;}
     public byte[] chart(LogAnalyzer.Result r)throws IOException{
@@ -70,6 +115,10 @@ public final class ReportImages {
             for(Map.Entry<LocalDateTime,String> e:r.unit.sources().entrySet())rows.add(new String[]{"Digital Power", "Power Supply Source",LogAnalyzer.time(e.getKey()),e.getValue()});
             for(Map.Entry<LocalDateTime,String> e:r.unit.statuses().entrySet())if(e.getValue().equals("Discharge"))rows.add(new String[]{"Lithium Battery Group","Battery Status",LogAnalyzer.time(e.getKey()),e.getValue()});
             rows.sort(Comparator.comparing(a->a[2]));
+        }else if(kind.equals("current")){
+            CurrentEvidence evidence=currentEvidence(r);
+            List<LocalDateTime> times=new ArrayList<>(evidence.discharge);times.addAll(evidence.charging);
+            for(LocalDateTime t:times){double current=r.unit.currents().get(t);rows.add(new String[]{"Lithium Battery Group","Current / SOC",LogAnalyzer.time(t),(current>0?"+":"")+LogAnalyzer.number(current,1)+" A / "+LogAnalyzer.number(r.unit.socs().getOrDefault(t,Double.NaN),0)+"%"});}
         }else{
             for(Map.Entry<LocalDateTime,Double> e:r.unit.currents().entrySet()){
                 if(e.getValue()>=0)continue;
@@ -78,16 +127,18 @@ public final class ReportImages {
                 else rows.add(new String[]{"Lithium Battery Group","Current / SOC",t,LogAnalyzer.number(e.getValue(),1)+" A / "+LogAnalyzer.number(r.unit.socs().getOrDefault(e.getKey(),Double.NaN),0)+"%"});
             }
         }
-        int total=rows.size();if(total>12)rows=new ArrayList<>(rows.subList(0,12));
+        int total=rows.size();if(!kind.equals("current")&&total>12)rows=new ArrayList<>(rows.subList(0,12));
         if(rows.isEmpty())rows.add(new String[]{"기록 없음","해당 조건 미확인","—","—"});
         int height=110+rows.size()*43+45;p.begin(1800,height);p.rect(0,0,1800,height,0xffffffff);
-        p.text(r.unit.label+" | "+(kind.equals("states")?"상태 변경 원본 기록":kind.equals("load")?"방전 시점의 DC 부하 원본 기록":"방전 전류 · SOC 원본 기록"),18,35,26,INK,true);
+        p.text(r.unit.label+" | "+(kind.equals("states")?"상태 변경 원본 기록":kind.equals("load")?"방전 시점의 DC 부하 원본 기록":currentEvidence(r).charging.isEmpty()?"방전 전류 · SOC 원본 기록":"방전·충전 전류 · SOC 원본 기록"),18,35,26,INK,true);
         int[] x={10,430,950,1445,1790};String[] labels={"Equipment","Performance Data","Statistical Start Time","Value"};
         p.rect(10,52,1780,44,0xffeaf0f4);
         for(int c=0;c<4;c++)p.text(labels[c],x[c]+10,82,23,INK,true);
         int y=96;
         for(String[] row:rows){for(int c=0;c<4;c++){p.text(row[c],x[c]+10,y+30,23,INK,false);p.line(x[c],y,x[c],y+43,GRID,1);}p.line(10,y+43,1790,y+43,GRID,1);y+=43;}
-        p.text("원본 실측값 · "+total+"건 중 "+Math.min(total,12)+"건 표시"+(total>12?" (시간순 첫 12건; 전체 구간은 본문 분석에 반영)":""),18,y+35,21,INK,false);
+        String footer="원본 실측값 · "+total+"건 중 "+Math.min(total,12)+"건 표시"+(total>12?" (시간순 첫 12건; 전체 구간은 본문 분석에 반영)":"");
+        if(kind.equals("current")){CurrentEvidence e=currentEvidence(r);footer="원본 실측값 · 방전 "+e.discharge.size()+"건"+(e.charging.isEmpty()?"":" + 충전 전환·유지 "+e.charging.size()+"건 (첫 양수 시점과 유지 구간에서 발췌)");}
+        p.text(footer,18,y+35,21,INK,false);
         return p.png();
     }
 }

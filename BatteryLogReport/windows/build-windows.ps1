@@ -5,7 +5,7 @@ $jdk = Get-ChildItem -LiteralPath (Join-Path $workspace 'BatteryWatch/android-ap
 if ($env:JAVA_HOME -and (Test-Path (Join-Path $env:JAVA_HOME 'bin/javac.exe'))) { $javaHomeForBuild = $env:JAVA_HOME } else { $javaHomeForBuild = $jdk.FullName }
 $build = Join-Path $PSScriptRoot 'build'
 $classes = Join-Path $build 'classes'
-$package = Join-Path $project 'releases/BatteryLogReport-Windows-x64'
+$package = Join-Path $project 'releases/BatteryLogReport-Windows-x64-1.0.1'
 New-Item -ItemType Directory -Path $classes,$package -Force | Out-Null
 $shared = Join-Path $project 'app/src/main/java/kr/co/batteryreport'
 $sources = @((Join-Path $shared 'LogAnalyzer.java'),(Join-Path $shared 'ReportImages.java'),(Join-Path $shared 'DocxReports.java'),(Join-Path $project 'tools/DesktopPainter.java'))

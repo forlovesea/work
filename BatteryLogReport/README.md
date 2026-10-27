@@ -2,7 +2,7 @@
 
 ## Windows 64비트
 
-[Windows 배포 ZIP](releases/BatteryLogReport-Windows-x64.zip)을 **전체 압축 해제**한 다음 `BatteryLogReport.exe`를 실행합니다. Java 런타임이 포함되어 있어 별도 Java/Python 설치가 필요 없습니다. Word가 없어도 DOCX를 생성할 수 있습니다.
+[Windows 배포 ZIP 1.0.1](releases/BatteryLogReport-Windows-x64-1.0.1.zip)을 **전체 압축 해제**한 다음 `BatteryLogReport.exe`를 실행합니다. Java 런타임이 포함되어 있어 별도 Java/Python 설치가 필요 없습니다. Word가 없어도 DOCX를 생성할 수 있습니다.
 
 대상: **Windows 7 SP1 이상 64비트 전용**. EXE와 포함 JVM 모두 x64입니다. Windows 7 SP1을 명시한 [BellSoft 지원 구성](https://bell-sw.com/pages/supported-configurations/)에 따라 Liberica Java 8을 포함하고, Java 8 API와 Windows 7 실행 API만 사용하도록 빌드했습니다. 실제 실행 검증은 현재 Windows 10 계열 환경에서 수행했으며 **실제 Windows 7 장비에서는 미검증**입니다.
 
@@ -21,7 +21,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\windows\package-windows.ps
 
 ## Android
 
-설치 파일: `releases/BatteryLogReport-1.0.0.apk` (Android 8.0 이상)
+설치 파일: `releases/BatteryLogReport-1.0.1.apk` (Android 8.0 이상)
+
+1.0.1 변경: AC 정전 추정 보고서의 2-3절 원본 기록 표에 첫 양수 전류 시점과 이후 충전 유지 구간의 실측값을 최대 4개 추가합니다. 방전 후 충전 구간이 확인되는 첫 주기를 표시하며, 긴 구간은 시작·중간·끝에서 발췌합니다. 양수 전류가 없으면 충전 행을 넣지 않습니다. 0 A·재방전·10분 초과 기록 공백을 넘어서 충전이 유지되었다고 설명하지 않습니다. 본문에는 실측 시각, 양수 전류 기록 수와 SOC 증가 근거를 함께 기재합니다.
 
 제공된 Word 문서 2개를 내장 템플릿으로 사용하며 인터넷 연결 없이 ZIP 로그를 분석합니다. 원본 자료는 수정하지 않습니다.
 

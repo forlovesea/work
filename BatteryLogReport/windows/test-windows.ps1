@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $project = Split-Path $PSScriptRoot
-$package = Join-Path $project 'releases/BatteryLogReport-Windows-x64'
+$package = Join-Path $project 'releases/BatteryLogReport-Windows-x64-1.0.1'
 $exe = Join-Path $package 'BatteryLogReport.exe'
 function Assert-X64([string]$path) {
     $bytes = [IO.File]::ReadAllBytes($path)

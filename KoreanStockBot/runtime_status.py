@@ -27,6 +27,26 @@ def describe_status(line):
         prefix='주문 제출 · 체결 확인 필요' if report['mode']=='LIVE' else '읽기 전용 신호 · 주문하지 않음'
         return f"{prefix} · {action} {report.get('quantity')}주 / {report.get('price')}원"
     code=report.get('status','')
+    if code=='ORDERBOOK_WAIT':
+        return f"호가 응답 일시 이상 · 이번 주기 주문 보류 · {report.get('retry_seconds','설정된 간격의')}초 후 자동 재조회\n호가가 비어 있거나 매수·매도 가격 관계가 맞지 않습니다. 정상 호가 확인 후 매매 조건을 다시 검사합니다."
+    if code=='HOLD' and report.get('wait_reason'):
+        reasons={'POSITION_MONITORING':'보유 종목의 매도 조건 감시', 'RISK_LIMIT':'손실 한도로 신규 매수 보류',
+                 'TARGET_REACHED':'수익 목표 도달로 신규 매수 보류','STOCK_WARNING':'종목 위험 경고로 매수 보류',
+                 'RESEARCH_BLOCKED':'분석 조건 미충족','TREND_NOT_MET':'상승 추세 조건 미충족',
+                 'DAILY_BUY_LIMIT':'당일 추가 매수 제한','SIGNAL_CHECK':'매매 신호 확인',
+                 'BUDGET_INSUFFICIENT':'매수 예산으로 1주를 주문할 수 없음'}
+        return '자동매매 감시 중 · '+reasons.get(report['wait_reason'],'매매 조건 확인')+' · 다음 주기 재확인'
+    if code=='CONFIG_CHECK':return '실행 설정 확인 중 · 아직 증권사 연결 확인 전'
+    if code=='READ_ONLY_CHECK_COMPLETE':
+        return ('읽기 전용 연결 점검 완료 · 인증·계좌·보유분·미체결·주문 가능액 조회 성공 · 주문 없음\n'
+                '다음 단계: 인증·계좌 설정에서 6자리 종목코드를 저장하거나 업종별 종목 추천에서 선택 종목 적용을 누르세요.\n'
+                '종목 선택 후 읽기 전용 점검을 다시 실행하면 시세·전략 조건까지 확인합니다.')
+    if code=='MARKET_DATA_WAIT':
+        source='호가' if report.get('source')=='orderbook' else '시세'
+        return (f"{source} 시간 확인 대기 · 이번 주기 주문 없음 · 자동매매 감시 유지\n"
+                f"데이터 경과 {report.get('age_seconds')}초 / 허용 {report.get('max_age_seconds')}초 · "
+                f"{report.get('retry_seconds')}초 후 자동 재조회\n"
+                '정상 시세와 매매 조건이 확인되면 자동매매를 계속합니다. 반복되면 PC 시간 동기화와 시세 응답을 확인하세요.')
     if code=='WORKER_ERROR':
         from candidate_feedback import SAFETY_REASONS
         detail=SAFETY_REASONS.get(report.get('error_code'))

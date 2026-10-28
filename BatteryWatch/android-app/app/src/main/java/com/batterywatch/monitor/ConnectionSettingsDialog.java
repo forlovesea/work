@@ -28,9 +28,10 @@ final class ConnectionSettingsDialog extends Dialog {
     private EditText url, token, interval;
     private TextView urlError, tokenError, intervalError, feedback;
     private Button save;
+    private final Activity activity;
 
     ConnectionSettingsDialog(Activity activity, SettingsStore settings, SaveListener listener) {
-        super(activity); this.listener=listener; ui=new BatteryDashboard(activity);
+        super(activity); this.activity=activity; this.listener=listener; ui=new BatteryDashboard(activity);
         requestWindowFeature(Window.FEATURE_NO_TITLE);
         LinearLayout root=vertical(); root.setPadding(ui.dp(20),ui.dp(16),ui.dp(20),ui.dp(12));
         root.setBackgroundColor(BatteryDashboard.BG);
@@ -79,6 +80,12 @@ final class ConnectionSettingsDialog extends Dialog {
             LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,ui.dp(48),1);lp.setMargins(ui.dp(2),ui.dp(6),ui.dp(2),0);presets.addView(preset,lp);}
         timing.addView(presets);timing.addView(ui.label("5~300초 · 기본 5초",12,BatteryDashboard.MUTED));
 
+        LinearLayout backup=ui.card(form);
+        backup.addView(ui.label("04  연결 설정 파일",18,BatteryDashboard.INK));
+        backup.addView(ui.label("서버 주소·조회용 토큰·조회 주기를 파일로 보관하고 앱 재설치 후 불러올 수 있습니다. 파일에는 토큰이 평문으로 포함되므로 안전한 위치에 보관하세요.",13,BatteryDashboard.MUTED));
+        backup.addView(button("설정 파일 저장",false,()->submit(true)),new LinearLayout.LayoutParams(-1,ui.dp(48)));
+        backup.addView(button("설정 파일 불러오기",false,()->((MainActivity)activity).importConnection()),new LinearLayout.LayoutParams(-1,ui.dp(48)));
+
         LinearLayout delivery=ui.card(form);delivery.addView(ui.label("알림 수신",15,BatteryDashboard.INK));
         delivery.addView(ui.label(PushBridge.description(activity),13,BatteryDashboard.MUTED));
         if(!settings.url().isEmpty()) {Button logout=button("저장된 연결 해제",false,()->listener.save("","",5,true,this));
@@ -125,18 +132,26 @@ final class ConnectionSettingsDialog extends Dialog {
         b.setBackgroundTintList(ColorStateList.valueOf(primary?BatteryDashboard.GREEN:BatteryDashboard.PANEL));
         b.setOnClickListener(v->action.run());controls.add(b);return b;}
     private void invalid(EditText field,TextView label,String message){label.setText(message);label.setVisibility(View.VISIBLE);field.requestFocus();}
-    private void submit(){
+    private void submit(){submit(false);}
+    private void submit(boolean export){
         urlError.setVisibility(View.GONE);tokenError.setVisibility(View.GONE);intervalError.setVisibility(View.GONE);feedback.setVisibility(View.GONE);
         String endpoint;
         try{endpoint=Endpoint.validate(url.getText().toString(),BuildConfig.DEBUG);}
         catch(IllegalArgumentException e){invalid(url,urlError,e.getMessage());return;}
         String secret=token.getText().toString().trim();
         if(secret.isEmpty()){invalid(token,tokenError,"앱 조회용 토큰을 입력하세요.");return;}
+        if(secret.length()>8192||secret.matches("(?s).*\\s.*")){invalid(token,tokenError,"토큰에 공백이 있거나 길이가 너무 깁니다.");return;}
         int seconds;
         try{seconds=Integer.parseInt(interval.getText().toString().trim());}
         catch(NumberFormatException e){invalid(interval,intervalError,"조회 주기를 숫자로 입력하세요. (5~300초)");return;}
         if(seconds<5||seconds>300){invalid(interval,intervalError,"5초 이상 300초 이하로 입력하세요.");return;}
-        listener.save(endpoint,secret,seconds,false,this);
+        if(export)((MainActivity)activity).exportConnection(endpoint,secret,seconds);
+        else listener.save(endpoint,secret,seconds,false,this);
+    }
+    void imported(String endpoint,String secret,int seconds){
+        url.setText(endpoint);token.setText(secret);interval.setText(String.valueOf(seconds));
+        urlError.setVisibility(View.GONE);tokenError.setVisibility(View.GONE);intervalError.setVisibility(View.GONE);
+        showError("파일을 불러왔습니다. 서버 주소를 확인하고 ‘저장하고 조회’를 누르세요.");
     }
     void saving(boolean saving){for(View v:controls)v.setEnabled(!saving);setCancelable(!saving);
         save.setText(saving?"설정 적용 중…":"저장하고 조회");if(saving)feedback.setVisibility(View.GONE);}

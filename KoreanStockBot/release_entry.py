@@ -7,6 +7,10 @@ from pathlib import Path
 
 def main():
     name=Path(sys.executable).stem.lower().split('_v',1)[0]
+    if '--advisor-gui-smoke' in sys.argv:
+        from advisor_gui_smoke import run
+        run()
+        return
     if '--self-test' in sys.argv:
         # Offline packaging check: no credentials read and no network calls.
         from app_paths import ROOT,worker_command
@@ -58,6 +62,9 @@ def main():
         parser.add_argument('--output',type=Path,required=True)
         args=parser.parse_args()
         raise SystemExit(worker(args.as_of,args.output))
+    elif name=='koreanstockbotadvisor':
+        from advisor_gui import main as advisor_main
+        advisor_main()
     else:
         from app import gui
         gui('stock' if name=='koreanstockbotstock' else 'paper' if name=='koreanstockbotpaper' else 'etf')

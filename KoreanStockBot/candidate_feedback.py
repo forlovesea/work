@@ -6,6 +6,12 @@ from broker import BrokerError
 
 # Exact, application-owned messages only; never export arbitrary API text.
 SAFETY_REASONS={
+ 'SYMBOL_REQUIRED':('live_config.json: choose a domestic 6-character symbol first','매매할 단일 종목이 선택되지 않았거나 종목코드 형식이 잘못됐습니다.','인증·계좌 설정에서 6자리 종목코드를 저장하거나 업종별 종목 추천에서 선택 종목 적용을 누르세요.'),
+ 'PROCESS_LOCKED':('Another bot process holds the lock','같은 실행 폴더에서 다른 점검 또는 매매 작업이 실행 중입니다.','기존 작업을 중지하고 종료가 확인된 뒤 다시 시작하세요.'),
+ 'CREDENTIAL_DECRYPT_FAILED':('Windows credential encryption/decryption failed','현재 Windows 사용자로 저장된 인증정보를 해독하지 못했습니다.','현재 PC의 인증·계좌 설정에서 인증정보를 다시 입력하고 암호화 저장하세요.'),
+ 'CREDENTIAL_RECORD_INVALID':('Invalid encrypted credential record','저장된 인증정보 형식을 확인하지 못했습니다.','인증·계좌 설정에서 인증정보를 다시 저장하세요.'),
+ 'STRATEGY_MODE_MISMATCH':('ETF configuration requires --etf','실행 모드와 전략 설정이 일치하지 않습니다.','ETF 실행파일과 ETF 설정 파일의 조합을 확인하세요.'),
+ 'OTHER_STRATEGY_ACTIVE':('Other strategy has positions/orders: reconcile it first','다른 전략에 보유분 또는 미완료 주문 기록이 있습니다.','기존 전략에서 주문·보유분을 확인하세요. 기록을 삭제해서 진행하지 마세요.'),
  'STALE_MARKET_DATA':('Stale/future market data; no order sent','시세·호가의 시각이 허용 범위를 벗어나 안전 검사를 멈췄습니다.','정규장에 다시 점검하세요. 반복되면 PC 시각과 시세 응답을 진단 ZIP으로 확인하세요.'),
  'INVALID_ORDERBOOK':('Empty/crossed orderbook','호가가 비어 있거나 매수·매도 호가 관계를 확인하지 못했습니다.','잠시 후 다시 점검하세요. 반복되면 진단 ZIP을 저장하세요.'),
  'INVALID_QUOTE':('Invalid quote identity','시세 응답의 종목 정보를 확인하지 못했습니다.','진단 ZIP을 저장하고 종목·시세 응답 검증을 점검하세요.'),

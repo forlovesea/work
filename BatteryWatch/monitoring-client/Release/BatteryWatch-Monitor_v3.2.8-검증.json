@@ -1,0 +1,17 @@
+{
+  "ok": true,
+  "version": "3.2.8",
+  "build_date": "2026-10-27",
+  "module": "monitor",
+  "architecture": "Windows x64",
+  "frozen": true,
+  "checks": [
+    "Qt profile/settings dialogs",
+    "images/icons/audio",
+    "SNMP dynamic MIB",
+    "Excel read/write",
+    "charge/discharge CSV",
+    "event start/stop",
+    "TLS"
+  ]
+}

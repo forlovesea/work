@@ -1,0 +1,117 @@
+[
+  {
+    "path": ".gitattributes",
+    "source": "5125d0fc6b9eaa3d43d54d283c37fb4b4c6f474a674604a6ed50689735166451",
+    "previous": null
+  },
+  {
+    "path": ".gitignore",
+    "source": "3d60d81cf6e1c1fdf4a2de5c1ee0da7ff2d01266ba50ff70e3d59ef8d38bef64",
+    "previous": "bb751089c3bf39530d1d0950a8b989f2ee3e2fa03baa84ef7b14a85e094b0e4c"
+  },
+  {
+    "path": "bootstrap.py",
+    "source": "6bc65ffc2d8ded6abb946884fe4e284e27e893dda11d3823c1e55e91a7821bea",
+    "previous": null
+  },
+  {
+    "path": "README.md",
+    "source": "59c5c01e8f288b33d7b2e13073bc3ceafc0b226c1f87dd5fe769d64beb393488",
+    "previous": "2b6f6170bf5bc4df39f9194e606542dff53c8d58cbcef63f93140f42803943ea"
+  },
+  {
+    "path": "android-app/gradlew",
+    "source": "9cbbb4d68ff7fb5211c4d58f598ac9d8664c05fdcd1e5f59b7f2c3ac1ee00af0",
+    "previous": null
+  },
+  {
+    "path": "android-app/gradlew.bat",
+    "source": "0f3ed8f03b50934cb8c48b15a470d5c20a30a5385825e48b55bcc8ea3d8f8e18",
+    "previous": null
+  },
+  {
+    "path": "android-app/README.md",
+    "source": "3205838281324f03babd6d09f8f28bead516cd56cc80a6320f9ccbe4e52cfc06",
+    "previous": "7b120c3c24a83c54e6526ab144549078cc7987c6971cd591a1e5418d33730c42"
+  },
+  {
+    "path": "android-app/setup_tools.py",
+    "source": "f1a1ba2d8c32cdc532977aa8fc2a9dc005904f4d2095ad97784fb1fdced595fd",
+    "previous": "1534c397847e38b5ee7837c1e7be46251498ab24b7c02bf819ed7f862ef4b61a"
+  },
+  {
+    "path": "android-app/gradle/wrapper/gradle-wrapper.jar",
+    "source": "2db75c40782f5e8ba1fc278a5574bab070adccb2d21ca5a6e5ed840888448046",
+    "previous": null
+  },
+  {
+    "path": "android-app/gradle/wrapper/gradle-wrapper.properties",
+    "source": "8dae366d5f717f6f251e2474d40b46dec3b680bc52a0981246ab13443c1e077e",
+    "previous": null
+  },
+  {
+    "path": "docs/reproduce.md",
+    "source": "90b046a174599f70d20d28f9d14046f18c10a1ce115b14cd8c07016e44dfb765",
+    "previous": null
+  },
+  {
+    "path": "monitoring-client/.python-version",
+    "source": "2c6bb7b4a0cc70e45e866dc579bec9f0b5c843c42fd6ed7391df7f5cd7859f14",
+    "previous": null
+  },
+  {
+    "path": "monitoring-client/device-defaults.example.json",
+    "source": "9ae04e45f433df4996015c8758c62e671a1bafbe1deef64e4c183fe752e8ce56",
+    "previous": null
+  },
+  {
+    "path": "monitoring-client/monitor.py",
+    "source": "5a6d1a36bf7b93ad0321cba958e01cf56d901e9e7e84a7ec4364bc666eac6ca8",
+    "previous": "b251bc5402b34b38d0237e13100ed437fb0d94c96fbac24ec3d5ac9593d741da"
+  },
+  {
+    "path": "monitoring-client/README.md",
+    "source": "ea7fb5409f702120f9426d7cd6800ea6bcdfe611404d6996cae12470f7e82bb6",
+    "previous": "c6fded15880f9ab258ab3b30bbd8f26ad9cae4aa9a7fdc572db400463ded1859"
+  },
+  {
+    "path": "monitoring-client/requirements-lock.txt",
+    "source": "743c05b2853129e390096e40f879f14f6959ad1644117e3d2e5e7503c2557361",
+    "previous": null
+  },
+  {
+    "path": "monitoring-client/requirements.txt",
+    "source": "ce16615d7af86786e309127bfe17d7ad5f739d12cc21e717d571c87cb94625ec",
+    "previous": "0979ff7528959b61080982962629fd825b631b53aaf25ba252572dd013d27a66"
+  },
+  {
+    "path": "monitoring-client/run.bat",
+    "source": "f2a567a009e7852cd2f340ae7a9cc0242c708026d90f152184b015b120f88894",
+    "previous": "f31cf5849555852c14ce6ed8f1707b4ad1189dd490e3fa554083557a62ccf438"
+  },
+  {
+    "path": "server/.python-version",
+    "source": "8dfda54ba2f66ab3a8ebab460f4338bbeea1fb1e0f85ce06fe3530aa3c64679b",
+    "previous": null
+  },
+  {
+    "path": "server/requirements-push.lock.txt",
+    "source": "f34249b882310ce3e21708d6e151af55e054bfdb9aa62238ae02262d9047bda5",
+    "previous": null
+  },
+  {
+    "path": "server/requirements-push.txt",
+    "source": "b0532913030a960911c02bfd98552d45479565b9384c88be09a5026295c2b187",
+    "previous": "515d14565c3cfa67ad3d85b650059a557cde58a4fa7a6765bb1cc72bef24ce2d"
+  },
+  {
+    "path": "server/run.bat",
+    "source": "5abb17f3eec1a833fbca4519307f55265a177da8e1fc03505ffb08a6e3315f22",
+    "previous": "9c03a6e75a83d920c36830a00859dd53eadf513518299312fc7cf3d3aab38b15"
+  },
+  {
+    "path": "server/run.sh",
+    "source": "cccb20f6ed234f65abcac85674a2a5de17f9987182f6fb473b444306e8cab7ec",
+    "previous": null
+  }
+]

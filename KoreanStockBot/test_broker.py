@@ -22,6 +22,18 @@ class Transport:
 
 
 class BrokerTests(unittest.TestCase):
+    @patch.dict('os.environ',{'TOSS_CLIENT_ID':'saved-client','TOSS_CLIENT_SECRET':'saved-secret'})
+    @patch('broker.time.sleep')
+    def test_account_lookup_keys_do_not_change_saved_connection_environment(self,sleep):
+        import os
+        broker=TossBroker();broker.credentials=('lookup-client','lookup-secret')
+        broker.opener=Transport([{'access_token':'fake-token','expires_in':3600}])
+        broker.authenticate()
+        auth=parse_qs(broker.opener.requests[0].data.decode())
+        self.assertEqual(auth['client_id'],['lookup-client'])
+        self.assertEqual(os.environ['TOSS_CLIENT_ID'],'saved-client')
+        self.assertEqual(os.environ['TOSS_CLIENT_SECRET'],'saved-secret')
+
     def test_stop_interrupts_blocked_read(self):
         started=threading.Event();release=threading.Event();stop=threading.Event()
         class Blocked:

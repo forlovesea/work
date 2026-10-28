@@ -13,6 +13,9 @@ def self_test(report):
     try:
         os.environ['QT_QPA_PLATFORM'] = 'windows' if os.name == 'nt' else 'offscreen'
         import monitor
+        from app_info import VERSION, BUILD_DATE, window_title
+        from datetime import date
+        date.fromisoformat(BUILD_DATE)
         from PySide6.QtWidgets import QApplication
         from PySide6.QtCore import Qt
         from PySide6.QtGui import QPixmap, QIcon
@@ -29,6 +32,7 @@ def self_test(report):
         engine.getMibBuilder().importSymbols('SNMPv2-MIB', 'sysDescr')
         with tempfile.TemporaryDirectory() as folder:
             dialog = monitor.ProfileDialog(str(Path(folder) / 'profiles'))
+            assert dialog.windowTitle() == window_title('프로파일 선택')
             dialog.setAttribute(Qt.WA_DontShowOnScreen, True)
             dialog.show()
             app.processEvents()
@@ -42,6 +46,7 @@ def self_test(report):
         ssl.create_default_context()
         assert monitor.DEVICE_DEFAULTS == {}, 'Local site defaults must not be bundled'
         result = {'ok': True, 'frozen': bool(getattr(sys, 'frozen', False)),
+                  'version': VERSION, 'build_date': BUILD_DATE,
                   'checks': ['Qt profile dialog', 'icons and images', 'alarm audio resource',
                              'SNMP engine and dynamic MIB', 'Excel read/write', 'SQLite queue', 'TLS context', 'clean defaults']}
     except Exception:

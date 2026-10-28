@@ -10,7 +10,7 @@ a=Analysis(['release_entry.py'],pathex=[],
 pyz=PYZ(a.pure)
 executables=[]
 for name,console in [('KoreanStockBotETF',False),('KoreanStockBotStock',False),
-                     ('KoreanStockBotPaper',False),('trader',True),('research',True)]:
+                     ('KoreanStockBotPaper',False),('KoreanStockBotAdvisor',False),('trader',True),('research',True)]:
     output_name=name if console else name+'_v'+version
     executables.append(EXE(pyz,a.scripts,[],exclude_binaries=True,name=output_name,version='build/version_info.txt',
         debug=False,bootloader_ignore_signals=False,strip=False,upx=False,console=console,icon='assets/stock_chart.ico'))

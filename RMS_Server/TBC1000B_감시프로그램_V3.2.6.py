@@ -1777,6 +1777,7 @@ class OperationDataRecordThread(QThread):
 # ======================
 
 class SNMPThread(QThread):
+    event_sample_signal = Signal(bool, object, object)  # completed polling cycles only
     result_signal = Signal(bool, object)  # str → object (dict 전달 가능)
     soc_charge_limit_signal = Signal(bool, object)
     initial_load_complete_signal = Signal()
@@ -1989,6 +1990,7 @@ class SNMPThread(QThread):
 
             # 기본 모듈 데이터 결과를 SOC 별도 조회보다 먼저 UI에 전달한다.
             # 실패한 주기의 부분 데이터는 폐기해 마지막 정상 UI를 유지한다.
+            self.event_sample_signal.emit(not cycle_failed and bool(result_data), dict(result_data), datetime.now())
             if cycle_failed or not result_data:
                 self.result_signal.emit(False, "")
             else:
@@ -2055,6 +2057,8 @@ class SNMPThread(QThread):
 # ======================
 # 메인 UI
 # ======================
+from charge_discharge_record import ChargeDischargeRecorder, add_event_controls
+
 class BatteryMonitorUI(QMainWindow):
     def __init__(self, profile_path, mode, new_profile_data=None, forced_slave=False):
         super().__init__()
@@ -2904,6 +2908,7 @@ class BatteryMonitorUI(QMainWindow):
     def closeEvent(self, event):
     
         # 이미 연결 중이면 종료 로직 호출
+        self.get_charge_discharge_recorder().stop('프로그램 종료')
         if self.is_connected:
             self.on_connect_clicked()
 
@@ -3207,6 +3212,7 @@ class BatteryMonitorUI(QMainWindow):
             #self.snmp_thread.rx_signal.connect(self.rx_led_on)
             self.snmp_thread.rx_signal.connect(self.rx_led_poll)
             self.snmp_thread.parent_ui = self
+            self.snmp_thread.event_sample_signal.connect(self.handle_charge_discharge_sample)
             self.snmp_thread.result_signal.connect(self.handle_snmp_result)
             self.snmp_thread.initial_load_complete_signal.connect(
                 lambda: self.close_initial_load_message(completed=True)
@@ -3533,6 +3539,7 @@ class BatteryMonitorUI(QMainWindow):
         # ======================================
         if self.is_connected:
 
+            self.get_charge_discharge_recorder().invalidate('연결 종료')
             #print("[INFO] Disconnect requested")
             dprint("MODULE", "[INFO] Disconnect requested")
             if self.is_operation_recording() or getattr(
@@ -6512,6 +6519,7 @@ class BatteryMonitorUI(QMainWindow):
 
     def reset_module_state(self, checked=False, for_reconnect=False):
 
+        self.get_charge_discharge_recorder().invalidate('연결 초기화')
         self.set_module_status_update_time()
         # 1️⃣ 데이터 초기화
         self.module_map.clear()
@@ -6619,10 +6627,18 @@ class BatteryMonitorUI(QMainWindow):
 
     def open_operation_record_dialog(self):
         dialog = QDialog(self)
-        dialog.setWindowTitle("운전 데이타 기록 설정")
-        dialog.setMinimumWidth(620)
+        dialog.setWindowTitle("운전 데이터 / 충방전 이벤트 기록 설정")
+        dialog.setMinimumWidth(700)
+        from PySide6.QtWidgets import QScrollArea
+        scroll = QScrollArea(dialog)
+        scroll.setWidgetResizable(True)
+        content = QWidget()
+        scroll.setWidget(content)
+        outer = QVBoxLayout(dialog)
+        outer.addWidget(scroll)
+        dialog.resize(780, min(900, dialog.screen().availableGeometry().height() - 80))
 
-        layout = QVBoxLayout(dialog)
+        layout = QVBoxLayout(content)
         layout.setContentsMargins(18, 16, 18, 16)
         layout.setSpacing(12)
 
@@ -6922,6 +6938,7 @@ class BatteryMonitorUI(QMainWindow):
         button_layout.addStretch()
         button_layout.addWidget(close_btn)
         layout.addLayout(button_layout)
+        add_event_controls(self, dialog, layout)
 
         dialog.exec()
 
@@ -7974,6 +7991,7 @@ class BatteryMonitorUI(QMainWindow):
 
     #############################################################################
     def set_connection_system_name(self, name):
+        self._event_system_name = (name or '').strip()
         name = (name or "").strip()
         if name.casefold() == "iiot":
             name = "iIoT Gateway"
@@ -8536,6 +8554,20 @@ class BatteryMonitorUI(QMainWindow):
     def open_slave_list_dialog(self):
         dialog = SlaveListDialog(self)
         dialog.exec()
+
+    def get_charge_discharge_recorder(self):
+        if not hasattr(self, '_charge_discharge_recorder'):
+            self._charge_discharge_recorder = ChargeDischargeRecorder(
+                self.get_operation_record_directory(),
+                lambda message: QMessageBox.warning(self, '충방전 이벤트 기록 오류', message))
+        return self._charge_discharge_recorder
+
+    def handle_charge_discharge_sample(self, success, values, measured_at):
+        if not self.is_connected:
+            return
+        self.get_charge_discharge_recorder().observe_raw(
+            success, values, getattr(self, '_event_system_name', ''), measured_at)
+
 
 class SlaveListDialog(QDialog):
     def __init__(self, parent):

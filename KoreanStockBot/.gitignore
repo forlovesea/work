@@ -10,3 +10,6 @@ inputs/
 .venv/
 Release/
 build/
+advisor/
+*.dpapi
+*.ksbkey

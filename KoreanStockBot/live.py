@@ -30,6 +30,14 @@ class SafetyStop(RuntimeError):
     pass
 
 
+class MarketDataWait(SafetyStop):
+    """A pre-order freshness check failed; retry reads on the next poll."""
+    def __init__(self,age,source):
+        super().__init__('Empty/crossed orderbook' if age is None else 'Stale/future market data; no order sent')
+        self.age=age
+        self.source=source
+
+
 def dec(value):
     try:
         result = Decimal(str(value))
@@ -58,9 +66,9 @@ def now_kst():
     return datetime.now(KST)
 
 
-def load_config(path):
+def load_config(path,allow_empty_symbol=False):
     c = json.loads(Path(path).read_text(encoding='utf-8-sig'))
-    if c.get('strategy')!='kosdaq_etf_top20' and not re.fullmatch('[0-9A-Z]{6}',c['symbol']):
+    if c.get('strategy')!='kosdaq_etf_top20' and not (allow_empty_symbol and c['symbol']=='') and not re.fullmatch('[0-9A-Z]{6}',c['symbol']):
         raise SafetyStop('live_config.json: choose a domestic 6-character symbol first')
     for key in ('capital','max_order_won'):
         if dec(c[key]) <= 0:
@@ -330,10 +338,10 @@ class LiveBot:
             return None
         return cal,start,end
 
-    def fresh(self,value):
+    def fresh(self,value,source='quote'):
         age=(self.clock()-stamp(value)).total_seconds()
         if not -2<=age<=self.c['max_quote_age_seconds']:
-            raise SafetyStop('Stale/future market data; no order sent')
+            raise MarketDataWait(age,source)
 
     def submit(self,side,quantity,price,reason):
         if getattr(self,'stop_requested',lambda:False)():raise StopRequested()
@@ -372,6 +380,9 @@ class LiveBot:
 
     def profit_reached(self,last,bid,entry,fee):
         return last>=entry*(1+dec(self.c['take_profit']))
+
+    def loss_reached(self,last,bid,entry,fee):
+        return last<=entry*(1-dec(self.c['stop_loss']))
 
     def step(self,stop=False):
         self.reconcile()
@@ -432,13 +443,13 @@ class LiveBot:
         quote=quotes[0]
         book=self.b.get('orderbook',{'symbol':self.symbol})
         self.fresh(quote['timestamp'])
-        self.fresh(book['timestamp'])
+        self.fresh(book['timestamp'],'orderbook')
         if book['currency']!='KRW':
             raise SafetyStop('Invalid book currency')
         asks=[integer(r['price']) for r in book['asks'] if dec(r['volume'])>0]
         bids=[integer(r['price']) for r in book['bids'] if dec(r['volume'])>0]
         if not asks or not bids or min(asks)<=0 or max(bids)<=0 or min(asks)<max(bids):
-            raise SafetyStop('Empty/crossed orderbook')
+            raise MarketDataWait(None,'orderbook')
         ask,bid=Decimal(min(asks)),Decimal(max(bids))
         last=dec(quote['lastPrice'])
         if last<=0:
@@ -450,12 +461,18 @@ class LiveBot:
         report={'status':'HOLD','equity':str(equity),'returns':self.s['returns'],
                 'target_paused':target_hit,'halted':self.s['halted'],'quantity':quantity,
                 'symbol':self.symbol,'research_reasons':research['reasons']}
+        report['wait_reason']=('POSITION_MONITORING' if quantity else
+            'RISK_LIMIT' if self.s['halted'] or daily_loss else
+            'TARGET_REACHED' if target_hit else 'STOCK_WARNING' if warnings else
+            'RESEARCH_BLOCKED' if not research['allow_buy'] else
+            'TREND_NOT_MET' if fast<=slow else
+            'DAILY_BUY_LIMIT' if self.s['last_buy_day']==self.clock().date().isoformat() else 'SIGNAL_CHECK')
         reason=None
         side=None
         if quantity:
             entry=dec(self.s['cost'])/quantity
             if self.s['halted'] or daily_loss: reason='LOSS_LIMIT'
-            elif last<=entry*(1-dec(self.c['stop_loss'])): reason='STOP_LOSS'
+            elif self.loss_reached(last,bid,entry,fees[0]): reason='STOP_LOSS'
             elif self.profit_reached(last,bid,entry,fees[0]): reason='TAKE_PROFIT'
             elif target_hit: reason='PERIOD_TARGET'
             elif research['exit']: reason='FUNDAMENTALS_AND_NEWS_EXIT'
@@ -468,6 +485,7 @@ class LiveBot:
             budget=min(dec(self.s['cash']),power,dec(self.c['max_order_won']),equity*dec(self.c['allocation']))
             quantity=max(0,int((budget-Decimal(10))/(ask*(1+fees[0]+Decimal('0.001')))))
             side,price,reason='BUY',ask,'TREND_ENTRY'
+            if quantity==0:report['wait_reason']='BUDGET_INSUFFICIENT'
         if side and quantity>0:
             if (ask-bid)/bid>dec(self.c['max_spread']):
                 return dict(report,status='SPREAD_TOO_WIDE')
@@ -477,7 +495,7 @@ class LiveBot:
             if not start<=self.clock()<end:
                 return dict(report,status='SESSION_ENDED')
             self.fresh(quote['timestamp'])
-            self.fresh(book['timestamp'])
+            self.fresh(book['timestamp'],'orderbook')
             if (ROOT/'STOP').exists():
                 return {'status':'STOP_REQUESTED'}
             return self.submit(side,quantity,price,reason)
@@ -520,9 +538,23 @@ def main(argv=None,broker=None):
             config=json.loads(args.config.read_text(encoding='utf-8-sig'))
             run(broker,config,args.sector_limit)
             return
-        config=load_config(ROOT/'etf_config.json' if args.etf and args.config==ROOT/'live_config.json' else args.config)
+        print(json.dumps({'status':'CONFIG_CHECK'}),flush=True)
+        config=load_config(ROOT/'etf_config.json' if args.etf and args.config==ROOT/'live_config.json' else args.config,
+                           allow_empty_symbol=not (args.live or args.etf or args.recover_order))
         if args.etf != (config.get('strategy')=='kosdaq_etf_top20'):
             raise SafetyStop('ETF configuration requires --etf')
+        if not args.etf and not config['symbol']:
+            # Connection checks do not need a trading symbol, a clean account,
+            # or a trading ledger. Never initialize/change trading state here.
+            print(json.dumps({'status':'INITIALIZING'}),flush=True)
+            accounts=broker.get('accounts')
+            if not any(str(a['accountSeq'])==broker.account and a['accountType']=='BROKERAGE' for a in accounts):
+                raise SafetyStop('Selected brokerage account not found')
+            broker.get('holdings',account=True)['items']
+            broker.orders()
+            dec(broker.get('buying-power',{'currency':'KRW'},account=True)['cashBuyingPower'])
+            print(json.dumps({'status':'READ_ONLY_CHECK_COMPLETE','next_action':'SELECT_SYMBOL'}),flush=True)
+            return
         prefix='etf_' if args.etf else ''
         other=Store(runtime/('live_state.json' if args.etf else 'etf_live_state.json')).data
         if other and (other.get('quantity') or any(not o.get('done') for o in other['orders'])):
@@ -584,6 +616,15 @@ def main(argv=None,broker=None):
                     result=bot.step(stop=stopped)
                 except StopRequested:
                     continue
+                except MarketDataWait as exc:
+                    # Only freshness failures are recoverable here. Never retry
+                    # submissions or bypass account/order reconciliation.
+                    if bot.active():
+                        raise
+                    result={'status':'ORDERBOOK_WAIT' if exc.age is None else 'MARKET_DATA_WAIT','source':exc.source,
+                            'age_seconds':round(exc.age,2) if exc.age is not None else None,
+                            'max_age_seconds':config['max_quote_age_seconds'],
+                            'retry_seconds':config['poll_seconds']}
                 except BrokerError as exc:
                     pending=bot.active()
                     if pending and not pending.get('order_id'):

@@ -36,6 +36,8 @@ public class MainActivity extends Activity {
     private String site = "", device = "", page = "devices";
     private final Set<String> selectedEvents = new HashSet<>();
     private AlertDialog historyDeleteDialog;
+    private static final int EXPORT_CONNECTION = 401, IMPORT_CONNECTION = 402;
+    private String pendingConnectionExport;
     private final Runnable poll = new Runnable() {
         @Override public void run() {
             if (!resumed) return;
@@ -60,7 +62,15 @@ public class MainActivity extends Activity {
         }
         root.setBackgroundColor(BatteryDashboard.BG);
         TextView title = new TextView(this);
-        title.setText("BatteryWatch"); title.setTextSize(26); title.setTextColor(BatteryDashboard.INK);
+        String brand = "BatteryWatch";
+        android.text.SpannableString heading = new android.text.SpannableString(
+            brand + "  v" + BuildConfig.VERSION_NAME + "\nAPK 빌드 " + BuildConfig.BUILD_DATE);
+        heading.setSpan(new android.text.style.RelativeSizeSpan(0.5f), brand.length(), heading.length(),
+            android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        heading.setSpan(new android.text.style.ForegroundColorSpan(BatteryDashboard.MUTED), brand.length(), heading.length(),
+            android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        title.setText(heading); title.setTextSize(24); title.setTextColor(BatteryDashboard.INK);
+        title.setPadding(0, 0, dashboard.dp(6), 0);
         LinearLayout header = new LinearLayout(this);
         header.setGravity(android.view.Gravity.CENTER_VERTICAL);
         header.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
@@ -492,6 +502,95 @@ public class MainActivity extends Activity {
                 new ApiClient(settings.url(), settings.token()).request("POST", "/api/v1/acknowledgements", new JSONObject().put("event_id", id));
                 runOnUiThread(() -> { busy = false; refresh(); });
             } catch (Exception e) { runOnUiThread(() -> { busy = false; status.setText("확인 기록 실패: " + e.getMessage()); }); }
+        });
+    }
+
+    void exportConnection(String url, String token, int interval) {
+        try {
+            pendingConnectionExport = new JSONObject().put("format", "batterywatch-connection")
+                .put("version", 1).put("url", url).put("token", token).put("interval", interval).toString(2);
+            android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_CREATE_DOCUMENT)
+                .addCategory(android.content.Intent.CATEGORY_OPENABLE).setType("application/json")
+                .putExtra(android.content.Intent.EXTRA_TITLE, "BatteryWatch-connection.json");
+            startActivityForResult(intent, EXPORT_CONNECTION);
+        } catch (Exception e) {
+            pendingConnectionExport = null;
+            if (settingsDialog != null) settingsDialog.showError("파일 저장 화면을 열지 못했습니다. 다시 시도하세요.");
+        }
+    }
+
+    void importConnection() {
+        try {
+            startActivityForResult(new android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT)
+                .addCategory(android.content.Intent.CATEGORY_OPENABLE).setType("*/*"), IMPORT_CONNECTION);
+        } catch (Exception e) {
+            if (settingsDialog != null) settingsDialog.showError("파일 선택 화면을 열지 못했습니다.");
+        }
+    }
+
+    @Override protected void onActivityResult(int requestCode, int resultCode, android.content.Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != EXPORT_CONNECTION && requestCode != IMPORT_CONNECTION) return;
+        final String exported = pendingConnectionExport;
+        pendingConnectionExport = null;
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
+        showSettings();
+        final ConnectionSettingsDialog target = settingsDialog;
+        if (requestCode == EXPORT_CONNECTION && exported == null) {
+            target.showError("화면이 재생성되어 저장을 완료하지 못했습니다. 설정 파일 저장을 다시 눌러주세요.");
+            return;
+        }
+        final android.net.Uri uri = data.getData();
+        target.saving(true);
+        network.execute(() -> {
+            try {
+                String endpoint = null, secret = null;
+                int seconds = 5;
+                if (requestCode == EXPORT_CONNECTION) {
+                    try (java.io.OutputStream out = getContentResolver().openOutputStream(uri, "wt")) {
+                        if (out == null) throw new java.io.IOException();
+                        out.write(exported.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    }
+                } else {
+                    String json;
+                    try (java.io.InputStream in = getContentResolver().openInputStream(uri);
+                         java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream()) {
+                        if (in == null) throw new java.io.IOException();
+                        byte[] buffer = new byte[4096]; int n;
+                        while ((n = in.read(buffer)) != -1) {
+                            if (out.size() + n > 65536) throw new java.io.IOException();
+                            out.write(buffer, 0, n);
+                        }
+                        json = out.toString("UTF-8");
+                    }
+                    JSONObject connection = new JSONObject(json);
+                    if (!"batterywatch-connection".equals(connection.optString("format"))
+                        || !(connection.get("version") instanceof Integer) || connection.getInt("version") != 1
+                        || !(connection.get("url") instanceof String) || !(connection.get("token") instanceof String)
+                        || !(connection.get("interval") instanceof Integer)) throw new java.io.IOException();
+                    endpoint = Endpoint.validate(connection.getString("url"), BuildConfig.DEBUG);
+                    secret = connection.getString("token").trim();
+                    seconds = connection.getInt("interval");
+                    if (secret.isEmpty() || secret.length() > 8192 || secret.matches("(?s).*\\s.*")
+                        || seconds < 5 || seconds > 300) throw new java.io.IOException();
+                }
+                final String importedUrl = endpoint, importedToken = secret;
+                final int importedInterval = seconds;
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || target != settingsDialog) return;
+                    target.saving(false);
+                    if (requestCode == IMPORT_CONNECTION) target.imported(importedUrl, importedToken, importedInterval);
+                    else target.showError("설정 파일을 저장했습니다. 재설치 후 ‘설정 파일 불러오기’로 복원하세요.");
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || target != settingsDialog) return;
+                    target.saving(false);
+                    target.showError(requestCode == IMPORT_CONNECTION
+                        ? "파일을 불러오지 못했습니다. BatteryWatch에서 저장한 설정 JSON 파일인지 확인하세요."
+                        : "파일 저장에 실패했습니다. 저장 위치를 확인하고 다시 시도하세요.");
+                });
+            }
         });
     }
 

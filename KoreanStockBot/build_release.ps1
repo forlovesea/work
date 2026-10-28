@@ -5,7 +5,7 @@ $releaseVersion = & .\.venv\Scripts\python.exe prepare_version.py
 if ($LASTEXITCODE -ne 0) { throw 'Version preparation failed' }
 if (-not $DistPath) { $DistPath = "Release\v$releaseVersion" }
 $releaseTarget = Join-Path (Join-Path $PSScriptRoot $DistPath) 'KoreanStockBot'
-foreach ($personalDirectory in @('runtime','research')) {
+foreach ($personalDirectory in @('runtime','research','advisor')) {
     if (Test-Path -LiteralPath (Join-Path $releaseTarget $personalDirectory)) {
         throw 'Existing release has runtime/research data. Build in a fresh checkout; do not overwrite trading records.'
     }
@@ -18,7 +18,7 @@ foreach ($configName in @('etf_config.json', 'live_config.json')) {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $configName) -Destination $configTarget
     }
 }
-foreach ($docName in @('GUI_GUIDE.md','EXE_BUILD_GUIDE.md','RELEASE_README.txt','CHANGELOG.md')) {
+foreach ($docName in @('GUI_GUIDE.md','EXE_BUILD_GUIDE.md','RELEASE_README.txt','CHANGELOG.md','ADVISOR_GUIDE.md')) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot $docName) -Destination $releaseTarget
 }
 Get-ChildItem -LiteralPath $PSScriptRoot -Filter '*.docx' | ForEach-Object {

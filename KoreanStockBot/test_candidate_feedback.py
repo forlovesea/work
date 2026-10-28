@@ -6,6 +6,15 @@ from live import SafetyStop
 
 
 class CandidateFeedbackTests(unittest.TestCase):
+    def test_startup_error_is_actionable_and_exportable(self):
+        from support_log import block
+        error=SafetyStop('live_config.json: choose a domestic 6-character symbol first')
+        report=failure(error)
+        self.assertEqual(report['code'],'SYMBOL_REQUIRED')
+        text=block('RUNTIME',{'status':'WORKER_ERROR','error_code':report['code']})
+        self.assertIn('선택 종목 적용',text)
+        self.assertNotIn('UNVERIFIED',text)
+
     def test_stale_quotes_explain_actual_exclusion(self):
         text=unavailable_message({'selection_details':{'market':'정규장 마감 후','budget':'9000',
             'rows':[{'state':'QUOTE_STALE'},{'state':'BUDGET'}]}})

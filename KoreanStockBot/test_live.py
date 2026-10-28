@@ -161,6 +161,19 @@ class LiveTests(unittest.TestCase):
         with self.assertRaises(SafetyStop): self.bot.step()
         self.assertEqual(self.b.sent,[])
 
+    def test_future_orderbook_wait_preserves_state_then_recovers(self):
+        from live import MarketDataWait
+        book=self.b.get('orderbook')
+        book['timestamp']=(self.b.now+timedelta(seconds=30)).isoformat()
+        self.b.override['orderbook']=book
+        with self.assertRaises(MarketDataWait) as caught:self.bot.step()
+        self.assertEqual(caught.exception.source,'orderbook')
+        self.assertEqual(caught.exception.age,-30)
+        self.assertEqual(self.b.sent,[])
+        self.assertEqual(self.bot.s['orders'],[])
+        del self.b.override['orderbook']
+        self.assertEqual(self.bot.step()['side'],'BUY')
+
     def test_holiday_no_order(self):
         self.b.holiday=True
         self.assertEqual(self.bot.step()['status'],'OUTSIDE_REGULAR_SESSION')

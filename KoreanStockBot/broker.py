@@ -29,6 +29,7 @@ class TossBroker:
     def __init__(self, account=None, live=False):
         self.account = str(account or os.environ.get('TOSS_ACCOUNT_SEQ', ''))
         self.live = live
+        self.credentials = None  # Optional per-connection keys; never logged.
         self.token, self.expires, self.last_call = '', 0, 0
         self.opener = build_opener(NoRedirect())
         self.stop_requested = lambda: False
@@ -90,7 +91,7 @@ class TossBroker:
     def authenticate(self):
         if self.token and time.monotonic() < self.expires:
             return
-        client, secret = os.environ.get('TOSS_CLIENT_ID'), os.environ.get('TOSS_CLIENT_SECRET')
+        client, secret = self.credentials if self.credentials is not None else (os.environ.get('TOSS_CLIENT_ID'), os.environ.get('TOSS_CLIENT_SECRET'))
         if not client or not secret:
             raise BrokerError('Set TOSS_CLIENT_ID and TOSS_CLIENT_SECRET locally')
         data = urlencode(dict(grant_type='client_credentials', client_id=client, client_secret=secret)).encode()

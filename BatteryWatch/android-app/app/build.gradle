@@ -8,6 +8,7 @@ ext.customerReleaseSigning = [
     keyPassword: System.getenv('BW_ANDROID_KEY_PASSWORD')
 ]
 def offlineReleaseRequested = requested.any { it.contains('offlinerelease') }
+def apkBuildDate = java.time.LocalDate.now(java.time.ZoneId.of('Asia/Seoul')).toString()
 android {
     namespace 'com.batterywatch.monitor'
     compileSdk 35
@@ -15,8 +16,9 @@ android {
         applicationId 'com.batterywatch.monitor'
         minSdk 26
         targetSdk 35
-        versionCode 13
-        versionName '0.2.11'
+        versionCode 16
+        versionName '0.2.14'
+        buildConfigField 'String', 'BUILD_DATE', '"' + apkBuildDate + '"'
         testInstrumentationRunner 'android.test.InstrumentationTestRunner'
     }
     flavorDimensions 'delivery'

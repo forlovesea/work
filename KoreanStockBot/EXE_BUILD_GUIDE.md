@@ -1,10 +1,11 @@
 # Windows EXE 빌드
 
-현재 구현은 `release_entry.py`와 `KoreanStockBot.spec`을 사용합니다. 하나의 공통 라이브러리 폴더를 공유하는 다섯 EXE를 생성합니다.
+현재 구현은 `release_entry.py`와 `KoreanStockBot.spec`을 사용합니다. 하나의 공통 라이브러리 폴더를 공유하는 여섯 EXE를 생성합니다. GUI 실행파일 이름에는 `_v버전`이 붙습니다.
 
 - KoreanStockBotETF.exe: ETF GUI
 - KoreanStockBotStock.exe: 단일 종목 GUI
 - KoreanStockBotPaper.exe: 모의 GUI
+- KoreanStockBotAdvisor.exe: 추천종목 분석·모의매매·개별 승인 GUI
 - trader.exe: GUI가 호출하는 거래 엔진
 - research.exe: 거래 엔진이 호출하는 ETF 자료 수집기
 

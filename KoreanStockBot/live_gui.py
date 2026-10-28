@@ -403,6 +403,8 @@ class LivePanel:
                     if not messagebox.askyesno('중지 상태 해제','토스의 기존 주문·보유분을 확인했나요?\nSTOP 파일만 제거하고 같은 계좌·설정으로 시작합니다.'):return
                     (ROOT/'STOP').unlink()
             self.live=live
+            self.read_only_complete=False
+            self.last_worker_error=None
             self.guidance_started=datetime.now(KST);self.guidance_runtime='INITIALIZING';self.guidance_failures=set()
             self.guidance_operation='';self.guidance_last=None
             self.last_details=None;self.scope_details=None;self.last_delay_minute=None
@@ -459,7 +461,7 @@ class LivePanel:
         if self.child is None and not self.querying:self.root.destroy()
 
     def finish_exit(self,code):
-        self.exit_unverified=not (code==0 and self.stop_confirmed)
+        self.exit_unverified=not (code==0 and (self.stop_confirmed or getattr(self,'read_only_complete',False)))
         if self.closing and self.exit_unverified:
             self.closing=False
             messagebox.showerror('자동 종료 보류','미체결 정리를 포함한 정상 중지를 확인하지 못했습니다. 창을 유지합니다.\n토스 앱에서 주문·보유분을 확인하세요.')
@@ -482,10 +484,13 @@ class LivePanel:
                     if report.get('status'):
                         self.guidance_runtime=report['status']
                         self.guidance_operation=report.get('operation','')
-                    self.diagnostic('RUNTIME',status=report.get('status'),error_code=report.get('error_code'),error_type=report.get('error_type'),live=self.live,operation=report.get('operation'),elapsed=report.get('elapsed'))
+                    self.diagnostic('RUNTIME',status=report.get('status'),error_code=report.get('error_code'),error_type=report.get('error_type'),live=self.live,operation=report.get('operation'),elapsed=report.get('elapsed'),
+                        **{key:report.get(key) for key in ('source','age_seconds','max_age_seconds','retry_seconds','wait_reason')})
                     if report.get('mode') in ('LIVE','DRY_RUN') and report.get('side') in ('BUY','SELL'):
                         self.diagnostic('ORDER',mode=report['mode'],side=report['side'],quantity=report.get('quantity'),price=float(report.get('price',0)))
                     if report.get('status')=='STOPPED':self.stop_confirmed=True
+                    if report.get('status')=='READ_ONLY_CHECK_COMPLETE' and not self.live:self.read_only_complete=True
+                    if report.get('status')=='WORKER_ERROR':self.last_worker_error=readable
                     if details and report.get('status') not in ('RESEARCH_FIRST_COLLECTION','RESEARCH_UPDATING'):
                         self.scope_details=details
                         from diagnostics import selection_text
@@ -527,8 +532,13 @@ class LivePanel:
             if self.child.poll() is not None and getattr(self,'reader_done',False):
                 code=self.child.returncode
                 self.diagnostic('EXIT',exit_code=code,confirmed=code==0 and self.stop_confirmed)
-                self.log_line(f'프로세스 종료 ({code}). 토스 앱에서 미체결·보유분을 확인하세요.')
+                if not (code==0 and getattr(self,'read_only_complete',False)):
+                    self.log_line(f'프로세스 종료 ({code}). 토스 앱에서 미체결·보유분을 확인하세요.')
                 final_status=exit_status(code,self.stop_confirmed)
+                if code==0 and getattr(self,'read_only_complete',False):
+                    final_status=describe_status(json.dumps({'status':'READ_ONLY_CHECK_COMPLETE'}))
+                elif getattr(self,'last_worker_error',None):
+                    final_status+='\n'+self.last_worker_error
                 self.status.set(final_status)
                 self.runtime_text.set(final_status)
                 self.log_line(final_status)

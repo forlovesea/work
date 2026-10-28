@@ -13,3 +13,13 @@ obj/
 .pytest_cache/
 RMS_Server/installers/
 RMS_Server/TBC1000B.WinForms/Final/*.exe
+
+# Local signing keys, private connection settings, and generated staging caches
+/BatteryWatch/keys
+/Modbus/rectifier_battery_system/.bw_private_defaults.json
+/Modbus/rectifier_battery_system/.bw_pipcache/
+/Modbus/rectifier_battery_system/.bw-download-test-*/
+/Modbus/rectifier_battery_system/.bw-ui-stage/
+/Modbus/rectifier_battery_system/.bw_publish/
+/KoreanStockBot/.rms-event-stage/
+/RMS_Server/TBC1000B.WinForms/.event-port/

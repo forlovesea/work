@@ -11,6 +11,8 @@ def guidance(*,active=False,querying=False,stopping=False,confirmed=False,unveri
              runtime='',collection=None,age=0,now=None,operation=''):
     state=collection or {};code=state.get('state');now=now or datetime.now(KST)
     if unverified:return 'red','종료 확인 필요','정상 중지를 확인하지 못했습니다. 토스 앱의 미체결·보유분을 확인하고 진단 ZIP을 저장하세요.'
+    if runtime=='READ_ONLY_CHECK_COMPLETE' and not active:
+        return 'green','읽기 전용 연결 점검 완료','인증·계좌 조회에 성공했습니다. 종목코드를 저장하거나 추천 종목을 적용한 뒤 시세·전략 점검을 진행하세요. 실제 주문은 전송하지 않았습니다.'
     if stopping and active:return 'red','중지 처리 중','중지 요청을 받았습니다. 주문 정리 확인이 끝날 때까지 기다려 주세요.'
     if querying:return 'blue','조회 진행 중','계좌·시세를 확인하고 있습니다. 결과가 나올 때까지 잠시 기다려 주세요.'
     if confirmed and not active:return 'red','작업 중지 완료','요청대로 작업을 멈췄습니다. 다시 확인하려면 읽기 전용 점검을 시작하세요.'

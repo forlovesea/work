@@ -3,7 +3,7 @@ import json
 import platform
 import uuid
 import re
-from collections import Counter
+from collections import Counter,deque
 from datetime import datetime
 from pathlib import Path
 from zipfile import ZipFile,ZIP_DEFLATED
@@ -28,6 +28,10 @@ LABELS={'status':'처리 상태','stage':'수집 단계','error_code':'오류 �
 TOKENS=set('''INITIALIZING BROKER_REQUEST BROKER_CONNECTION_WAIT HOLD STOP_CHECKING PENDING STOPPING STOPPED STOP_REQUESTED HALTED ENTRY_PAUSED RESEARCH_OR_CANDIDATE_DATA_UNAVAILABLE NO_ELIGIBLE_AFFORDABLE_ETF SPREAD_TOO_WIDE SESSION_ENDED OUTSIDE_REGULAR_SESSION CANDIDATE_REPORT CANDIDATE_ERROR IDLE UPDATING READY NO_SUPPORTED_ETF COLLECTION_FAILED COLLECTING_KRX COLLECTING_DATA ANALYZING_FINANCIALS_AND_NEWS WORKER_TIMEOUT_OR_DATE_CHANGED SETUP COMPLETE KRX_ETF_DAILY KRX_ETF_METADATA KRX_CATALOG_VALIDATE KRX_CATALOG_CACHE KRX_COMPOSITION_REQUEST KRX_COMPOSITION_VALIDATE KRX_COMPOSITION_CACHE DART_CORPORATION_MAP DART_FINANCIAL_REQUEST DART_FINANCIAL_ANALYSIS NAVER_NEWS_REQUEST NAVER_NEWS_ANALYSIS KRX DART NAVER START COMPLETED FAILED STATUS SOURCE_RESULT RUN_START RUN_FAILED NOT_REQUESTED IN_PROGRESS VALIDATION_OR_LOCAL_ERROR LOCAL_FILE_ACCESS NETWORK_OR_TIMEOUT HTTP_ERROR DART_API_REJECTED NAVER_API_REJECTED INVALID_RESPONSE INVALID_CORPORATION_MAP MISSING_RESEARCH_CREDENTIALS MISSING_DART_KEY MISSING_NAVER_KEYS MISSING_FILE RESEARCH_STALE BROKER_ERROR AUTH_OR_PERMISSION CAPITAL ACCOUNT UNVERIFIED PermissionError FileNotFoundError SafetyStop BrokerError CollectionError ValueError KeyError TypeError OSError TimeoutError JSONDecodeError network cache error'''.split())
 NUMBERS={'count','eligible','candidates','supported','exit_code','elapsed','capital','max_order_won','poll_seconds','network','cache','errors','http_status','errno','winerror'}
 TOKENS.update(('WORKER_ERROR','SUCCESS','LOOKUP_FAILED','WORKER_FAILED','START_FAILED'))
+TOKENS.update(('CONFIG_CHECK','READ_ONLY_CHECK_COMPLETE','MARKET_DATA_WAIT','SELECT_SYMBOL'))
+TOKENS.update(('ORDERBOOK_WAIT','quote','orderbook','POSITION_MONITORING','RISK_LIMIT','TARGET_REACHED','STOCK_WARNING','RESEARCH_BLOCKED','TREND_NOT_MET','DAILY_BUY_LIMIT','SIGNAL_CHECK','BUDGET_INSUFFICIENT'))
+LABELS.update(source='시세 검사 대상',age_seconds='시세 경과 초',max_age_seconds='허용 경과 초',retry_seconds='재조회 간격 초',wait_reason='주문 대기 사유')
+NUMBERS.update(('age_seconds','max_age_seconds','retry_seconds'))
 TOKENS.update(('BUY','SELL','LIVE','DRY_RUN'))
 TOKENS.update(('BROKER_RESPONSE','OTHER','ACCOUNTS','HOLDINGS','BUYING_POWER','CALENDAR','STOCKS','CANDLES','PRICES','ORDERBOOK','ORDERS','CONDITIONS','COMMISSIONS','SELLABLE_QUANTITY','AUTH','ORDER_CANCEL','WARNINGS'))
 LABELS['operation']='API 처리 단계'
@@ -88,7 +92,7 @@ def block(event,data):
         if value in MEANINGS:lines.append('  설명: '+MEANINGS[value])
     if event=='RUNTIME' and fields.get('status') not in (None,'WORKER_ERROR'):
         from runtime_status import describe_status
-        lines.append('  설명: '+describe_status(json.dumps({'status':fields['status']})))
+        lines.append('  설명: '+describe_status(json.dumps(fields)))
     if fields.get('error_code')=='LOCAL_FILE_ACCESS':lines.append('  안내: 파일 잠금 또는 실행 폴더의 쓰기 권한을 확인하세요.')
     if fields.get('error_code') in SAFETY_REASONS:
         detail=SAFETY_REASONS[fields['error_code']]
@@ -103,6 +107,7 @@ class SupportLog:
     def __init__(self,root):
         self.root=Path(root);self.enabled=False;self.path=None
         self.counts=Counter();self.latest={};self.session=uuid.uuid4().hex[:12]
+        self.recent=deque(maxlen=100)
 
     def enable(self):
         directory=self.root/'logs';directory.mkdir(parents=True,exist_ok=True)
@@ -110,13 +115,19 @@ class SupportLog:
             self.path=directory/('진단_'+datetime.now(KST).strftime('%Y%m%d_%H%M%S')+'_'+self.session+'.txt')
             self.path.write_text(self.header(),encoding='utf-8-sig')
         self.enabled=True
+        if self.recent:
+            with self.path.open('a',encoding='utf-8') as stream:
+                stream.write('로그 활성화 전 현재 창에서 관측한 최근 이벤트입니다. 메모리에 보관한 안전 필드만 포함하며 원래 관측 시각을 표시합니다.\n')
+            while self.recent:
+                observed,event,fields=self.recent.popleft()
+                self._append(event,fields,observed)
         self.record('ENABLED')
 
     def header(self):
         return (f'KoreanStockBot 진단 기록 | 버전 {VERSION} | 세션 {self.session}\n'
                 f'운영체제: {platform.system()} {platform.release()} | 시각: 한국시간(+09:00)\n'
                 '읽는 순서: 시작 → 계좌/후보/수집 단계 → 오류 또는 완료 → 중지 확인\n'
-                '기록이 없으면 성공으로 판단할 수 없습니다. 꺼져 있던 시간은 복원하지 않습니다.\n'
+                '기록이 없으면 성공으로 판단할 수 없습니다. 현재 창의 최근 100개 이벤트만 메모리에 보관하며 이전 실행은 복원하지 않습니다.\n'
                 '인증키, 계좌번호·선택값, 주문 ID, 원본 API 응답, 환경변수는 기록하지 않습니다.\n'
                 '설정 금액·처리 개수·오류 코드가 포함됩니다. 기본 수집/주문 기록은 별도 유지됩니다.\n\n')
 
@@ -125,9 +136,15 @@ class SupportLog:
         finally:self.enabled=False
 
     def record(self,event,**data):
-        if not self.enabled:return
         if event not in EVENTS:return
         fields=safe_fields(data)
+        observed=datetime.now(KST).isoformat(timespec='seconds')
+        if not self.enabled:
+            self.recent.append((observed,event,fields))
+            return
+        self._append(event,fields,observed)
+
+    def _append(self,event,fields,observed):
         self.counts[event]+=1;self.latest[(event,fields.get('provider',''))]=fields
         if self.path.stat().st_size>2_000_000:
             for index in (3,2,1):
@@ -137,7 +154,7 @@ class SupportLog:
             self.path.replace(Path(str(self.path)+'.1'))
             self.path.write_text(self.header(),encoding='utf-8-sig')
         with self.path.open('a',encoding='utf-8',newline='\n') as stream:
-            stream.write(datetime.now(KST).isoformat(timespec='seconds')+' | '+block(event,fields)+'\n\n')
+            stream.write(observed+' | '+block(event,fields)+'\n\n')
 
     def export(self,target):
         if self.path is None:raise ValueError('No recorded session')

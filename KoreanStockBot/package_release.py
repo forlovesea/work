@@ -10,10 +10,10 @@ parser=argparse.ArgumentParser()
 parser.add_argument('--dist-path',default='Release/v'+VERSION)
 root=Path(__file__).resolve().parent/parser.parse_args().dist_path
 app=root/'KoreanStockBot'
-for private in ('runtime','research','inputs','reports','logs','.env','STOP'):
+for private in ('runtime','research','advisor','inputs','reports','logs','.env','STOP'):
     if (app/private).exists():raise RuntimeError('Release contains private/runtime data; use a clean build')
 files=[p for p in app.rglob('*') if p.is_file()]
-assert len(list(app.glob('*.exe')))==5
+assert len(list(app.glob('*.exe')))==6
 assert not any(p.suffix.lower() in ('.dpapi','.ksbkey') for p in files)
 hashes={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in app.glob('*.exe')}
 (root/'SHA256.json').write_text(json.dumps(hashes,indent=2)+'\n',encoding='utf-8')

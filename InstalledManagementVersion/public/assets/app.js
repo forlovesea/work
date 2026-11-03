@@ -1,3 +1,5 @@
+const siteCategoryInput = document.querySelector('#siteCategory');
+const siteRegionInput = document.querySelector('#siteRegion');
 const recordForm = document.querySelector('#recordForm');
 const siteNameInput = document.querySelector('#siteName');
 const siteAddressInput = document.querySelector('#siteAddress');
@@ -60,6 +62,8 @@ function addContact(contact = {}) {
 function fillAdditionalFields(record = {}) {
     document.querySelector('#doorExistingVersion').value = record.door_existing_version || '';
     document.querySelector('#doorUpgradeVersion').value = record.door_upgrade_version || '';
+    siteCategoryInput.value = record.category || '';
+    siteRegionInput.value = record.region || '';
     siteNameInput.value = record.site_name || '';
     siteAddressInput.value = record.address || '';
     notesInput.value = record.notes || '';
@@ -83,6 +87,8 @@ function additionalRecordDetails(record) {
         ['SMU02C 업그레이드 버전', record.device_name === 'SMU02C + Door LCD' ? record.upgrade_version : ''],
         ['Door LCD 기존 설치 버전', record.door_existing_version],
         ['Door LCD 업그레이드 버전', record.door_upgrade_version],
+        ['구분', record.category],
+        ['지역', record.region],
         ['설치장소(국소)', record.site_name],
         ['주소', record.address],
         ['담당자 정보', (record.contacts || []).map((contact) => `${contact.name} (${contact.phone})`).join(', ')],
@@ -525,7 +531,7 @@ function csvCell(value) {
 function exportRows() {
     return [
         ['현장방문날짜', '장비명', '기존 설치 버전', '현재 설치 버전', '축전지 Rack 수', 'Rack별 모듈 수',
-            '설치장소(국소)', '주소', '담당자 정보', '작업상태', '비고'],
+            '구분', '지역', '설치장소(국소)', '주소', '담당자 정보', '작업상태', '비고'],
         ...displayedRecords.map((record) => [
             record.visit_date,
             record.device_name,
@@ -533,6 +539,8 @@ function exportRows() {
             versionDisplay(record, 'upgrade_version'),
             record.rack_count,
             moduleSummary(record),
+            record.category || '',
+            record.region || '',
             record.site_name || '',
             record.address || '',
             (record.contacts || []).map((contact) => `${contact.name} (${contact.phone})`).join(', '),
@@ -658,8 +666,9 @@ function createTemplateCell(reference, value, style = '') {
     return `<c r="${reference}" t="inlineStr"${styleAttribute}><is><t xml:space="preserve">${xmlEscape(value)}</t></is></c>`;
 }
 
-function importTemplateHeaders(contactCount = 1, rackCount = 1, includeOtherStatus = false) {
+function importTemplateHeaders(contactCount = 1, rackCount = 1, includeOtherStatus = false, includeLocation = true) {
     return [
+        ...(includeLocation ? ['구분', '지역'] : []),
         '설치장소(국소)', '주소', '작업상태', ...(includeOtherStatus ? ['기타 작업상태'] : []),
         ...Array.from({ length: contactCount }, (_, i) => [`담당자 ${i + 1} 이름`, `담당자 ${i + 1} 연락처`]).flat(),
         '현장방문날짜', '장비명', '새 장치명', '기존 설치 버전', '업그레이드 버전',
@@ -684,8 +693,8 @@ function legacyImportTemplateHeaders(contactCount = 2, rackCount = 3, componentV
     ];
 }
 
-function basicImportHeaders() {
-    return ['설치장소(국소)', '주소', '작업상태', '담당자 이름', '담당자 연락처', '현장방문날짜', '장비명'];
+function basicImportHeaders(includeLocation = true) {
+    return [...(includeLocation ? ['구분', '지역'] : []), '설치장소(국소)', '주소', '작업상태', '담당자 이름', '담당자 연락처', '현장방문날짜', '장비명'];
 }
 
 function downloadImportTemplate(extended = false) {
@@ -749,7 +758,7 @@ function downloadImportTemplate(extended = false) {
         ['버전', '기존 설치 버전과 업그레이드 버전을 입력하세요. 통합 장비의 앞 두 버전은 SMU02C용이며 바로 옆의 Door LCD 버전 두 열도 필수입니다. 단일 장비는 Door LCD 전용 열을 비워 두세요.'],
         ['Rack 수', '기본 1개입니다. 필요하면 1~100 사이의 정수로 수정하세요.'],
         ['Rack별 모듈 수', '각 Rack의 모듈 수는 기본 10개입니다. 필요하면 1~10을 선택하세요. Rack 수를 줄이면 사용하지 않는 Rack의 이름과 모듈 수를 비워 주세요.'],
-        ['설치 정보', '설치장소(국소), 주소, 비고를 입력하세요. 작업상태가 비어 있으면 방문예정으로 등록합니다.'],
+        ['설치 정보', '구분, 지역, 설치장소(국소), 주소, 비고를 입력하세요. 작업상태가 비어 있으면 방문예정으로 등록합니다.'],
         ['작업상태', '목록에서 선택하세요. 기타 작업상태 열은 사용하지 않습니다. 필요한 설명은 비고에 적어 주세요.'],
         ['담당자', '기본 1인입니다. 추가 시 현장방문날짜 열 앞에 번호 순서대로 이름/연락처 열을 삽입하세요(최대 20명). 연락처는 앞자리 0을 유지합니다.'],
         ['버전 기본값', '장비 선택 시 SMU02C(통합 포함)는 V100R024C10SPC235, iIoT Gateway는 V100R024C10SPC265로 자동 표시합니다. 직접 덮어써서 수정할 수 있습니다. 업그레이드 버전은 직접 입력하세요.'],
@@ -1003,7 +1012,7 @@ function columnIndexFromReference(reference) {
     return index - 1;
 }
 
-function parseBasicImportRows(rows, sharedStrings) {
+function parseBasicImportRows(rows, sharedStrings, includeLocation = false) {
     const records = [];
     const errors = [];
     for (const [index, row] of rows.slice(1).entries()) {
@@ -1012,14 +1021,15 @@ function parseBasicImportRows(rows, sharedStrings) {
         for (const cell of row.getElementsByTagNameNS('*', 'c')) {
             const col = columnIndexFromReference(cell.getAttribute('r') || '');
             const value = getCellValue(cell, sharedStrings).trim();
-            if (col >= 7 && value) errors.push({ row: sourceRow, message: '기본 템플릿에 없는 열에 값이 있습니다.' });
+            if (col >= (includeLocation ? 9 : 7) && value) errors.push({ row: sourceRow, message: '기본 템플릿에 없는 열에 값이 있습니다.' });
             else if (col >= 0) values[col] = value;
         }
         if (!values.some(Boolean)) continue;
         const fail = message => errors.push({ row: sourceRow, message });
         if (records.length >= 100) { fail('한 번에 최대 100개 현장까지만 등록할 수 있습니다.'); continue; }
+        const [category = '', region = ''] = includeLocation ? values.splice(0, 2) : [];
         const [site = '', address = '', status = '', name = '', phone = '', date = '', device = ''] = values;
-        for (const [value, label, limit] of [[site, '설치장소(국소)', 100], [address, '주소', 300], [name, '담당자 이름', 100], [phone, '담당자 연락처', 50], [device, '장비명', 100]]) {
+        for (const [value, label, limit] of [[category, '구분', 100], [region, '지역', 100], [site, '설치장소(국소)', 100], [address, '주소', 300], [name, '담당자 이름', 100], [phone, '담당자 연락처', 50], [device, '장비명', 100]]) {
             if ([...value].length > limit) fail(`${label}은(는) ${limit}자 이내로 입력하세요.`);
         }
         if (Boolean(name) !== Boolean(phone)) fail('담당자 이름과 연락처를 함께 입력하세요.');
@@ -1028,7 +1038,7 @@ function parseBasicImportRows(rows, sharedStrings) {
         const parsed = /^\d{4}-\d{2}-\d{2}$/.test(date) ? new Date(`${date}T00:00:00Z`) : null;
         if (!parsed || Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) fail('현장방문날짜는 YYYY-MM-DD 형식의 실제 날짜여야 합니다.');
         records.push({
-            import_layout: 'basic', source_row: sourceRow, site_name: site, address,
+            import_layout: 'basic', source_row: sourceRow, category, region, site_name: site, address,
             work_status: status || '방문예정', work_status_other: '',
             contacts: name || phone ? [{ name, phone }] : [], visit_date: date, device_name: device,
             existing_version: device === 'iIoT Gateway' ? 'V100R024C10SPC265' : (['SMU02C', 'SMU02C + Door LCD'].includes(device) ? 'V100R024C10SPC235' : ''),
@@ -1052,16 +1062,17 @@ function parseImportRows(sheetXml, sharedStrings) {
             headerValues[column] = getCellValue(cell, sharedStrings).trim().replaceAll('랙', 'Rack');
         }
     }
-    if (headerValues.length === 7 && basicImportHeaders().every((header, index) => headerValues[index] === header)) {
-        return parseBasicImportRows(rows, sharedStrings);
+    const includeLocation = headerValues[0] === '구분';
+    if (headerValues.length === (includeLocation ? 9 : 7) && basicImportHeaders(includeLocation).every((header, index) => headerValues[index] === header)) {
+        return parseBasicImportRows(rows, sharedStrings, includeLocation);
     }
-    const screenLayout = headerValues[0] === '설치장소(국소)';
+    const screenLayout = includeLocation || headerValues[0] === '설치장소(국소)';
     const fileHeaders = [...headerValues];
     const legacy = headerValues.filter(Boolean).length === 6;
     const contactCount = headerValues.filter((header) => /^담당자 \d+ 이름$/.test(header)).length;
     const templateRackCount = headerValues.filter((header) => /^Rack \d+ 이름$/.test(header)).length;
     const rackStart = 11 + contactCount * 2;
-    const expectedHeaders = screenLayout ? importTemplateHeaders(contactCount, templateRackCount, headerValues.includes('기타 작업상태'))
+    const expectedHeaders = screenLayout ? importTemplateHeaders(contactCount, templateRackCount, headerValues.includes('기타 작업상태'), includeLocation)
         : (legacy ? legacyImportTemplateHeaders().slice(0, 6) : legacyImportTemplateHeaders(contactCount, templateRackCount, headerValues.includes('Door LCD 기존 설치 버전')));
     if (!legacy && (contactCount < 1 || contactCount > 20 || templateRackCount < 1 || templateRackCount > 100)) {
         throw new Error('담당자는 1~20명, Rack은 1~100개의 열을 사용하세요.');
@@ -1087,15 +1098,17 @@ function parseImportRows(sheetXml, sharedStrings) {
                 values[column] = getCellValue(cell, sharedStrings).trim();
             }
         }
+        const category = includeLocation ? (values[0] || '') : '';
+        const region = includeLocation ? (values[1] || '') : '';
         const customDevice = screenLayout ? (values[fileHeaders.indexOf('새 장치명')] || '') : '';
         if (screenLayout) {
             const original = values;
             values = headerValues.map(header => original[fileHeaders.indexOf(header === '축전지 Rack 수' ? 'Rack 수' : header)] || '');
         }
-        const onlyDefaults = !customDevice && !legacy && values.every((value, index) => !value ||
+        const onlyDefaults = !category && !region && !customDevice && !legacy && values.every((value, index) => !value ||
             (index === 4 && value === (screenLayout && !fileHeaders.includes('기타 작업상태') ? '1' : '3')) ||
             (index >= rackStart && (index - rackStart) % 2 === 1 && index < rackStart + 6 && value === '10'));
-        if ((!customDevice && !values.some((value) => value)) || onlyDefaults) {
+        if ((!category && !region && !customDevice && !values.some((value) => value)) || onlyDefaults) {
             continue;
         }
         if (records.length >= 100) {
@@ -1114,7 +1127,7 @@ function parseImportRows(sheetXml, sharedStrings) {
             if (formula === expectedFormula) existingVersion = deviceName === 'iIoT Gateway' ? 'V100R024C10SPC265' : (['SMU02C', 'SMU02C + Door LCD'].includes(deviceName) ? 'V100R024C10SPC235' : '');
         }
         const rackCount = /^\d+$/.test(rackCountText || '') ? Number(rackCountText) : NaN;
-        const extra = { site_name: values[6] || '', address: values[7] || '', work_status: values[8] || '방문예정', work_status_other: values[9] || '', notes: values[10] || '', contacts: [] };
+        const extra = { category, region, site_name: values[6] || '', address: values[7] || '', work_status: values[8] || '방문예정', work_status_other: values[9] || '', notes: values[10] || '', contacts: [] };
         const fail = (message) => errors.push({ row: rowNumber, message });
         if (screenLayout && deviceName === '+ 새 장치 추가') {
             deviceName = customDevice;
@@ -1132,7 +1145,7 @@ function parseImportRows(sheetXml, sharedStrings) {
         } else {
             if (extra.door_existing_version || extra.door_upgrade_version) fail('Door LCD 전용 버전 열은 SMU02C + Door LCD 선택 시에만 입력하세요.');
         }
-        for (const [key, label, limit] of [['site_name', '설치장소', 100], ['address', '주소', 300], ['work_status_other', '기타 작업상태', 100], ['notes', '비고', 2000]]) {
+        for (const [key, label, limit] of [['category', '구분', 100], ['region', '지역', 100], ['site_name', '설치장소', 100], ['address', '주소', 300], ['work_status_other', '기타 작업상태', 100], ['notes', '비고', 2000]]) {
             if ([...extra[key]].length > limit) fail(`${label}은(는) ${limit}자 이내로 입력하세요.`);
         }
         if (!['방문예정', '작업완료', '작업실패', '작업보류', '기타'].includes(extra.work_status)) fail('작업상태를 목록에서 선택하세요.');
@@ -1551,7 +1564,7 @@ function exportResults() {
     window.print();
 }
 
-function createRecordCard(record) {
+function createRecordCard(record, index = 0) {
     const article = document.createElement('article');
     article.className = 'record-card';
     article.dataset.recordId = String(record.id);
@@ -1566,7 +1579,7 @@ function createRecordCard(record) {
     selection.setAttribute('aria-label', `${record.visit_date} ${record.device_name} 기록 선택`);
     selection.checked = selectedRecordIds.has(record.id);
     const title = document.createElement('h3');
-    title.textContent = record.device_name;
+    title.textContent = `${index + 1}. ${record.device_name}`;
     const date = document.createElement('time');
     date.dateTime = record.visit_date;
     date.textContent = formatDate(record.visit_date);
@@ -1745,8 +1758,8 @@ async function loadData() {
             empty.textContent = '조건에 맞는 설치 정보가 없습니다.';
             historyList.append(empty);
         } else {
-            for (const record of data.records) {
-                historyList.append(createRecordCard(record));
+            for (const [index, record] of data.records.entries()) {
+                historyList.append(createRecordCard(record, index));
             }
         }
         updateRecordActionControls();
@@ -2250,6 +2263,8 @@ recordForm.addEventListener('submit', async (event) => {
             rack_count: Number(rackCountInput.value),
             module_counts: currentModuleCounts(),
             rack_names: currentRackNames(),
+            category: siteCategoryInput.value.trim(),
+            region: siteRegionInput.value.trim(),
             site_name: siteNameInput.value.trim(),
             address: siteAddressInput.value.trim(),
             contacts: [...contactList.children].map((row) => ({

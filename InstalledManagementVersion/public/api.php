@@ -72,6 +72,8 @@ function connectDatabase(): PDO
         'door_existing_version' => "TEXT NOT NULL DEFAULT ''",
         'door_upgrade_version' => "TEXT NOT NULL DEFAULT ''",
         'rack_names' => "TEXT NOT NULL DEFAULT '[]'",
+        'category' => "TEXT NOT NULL DEFAULT ''",
+        'region' => "TEXT NOT NULL DEFAULT ''",
         'site_name' => "TEXT NOT NULL DEFAULT ''",
         'address' => "TEXT NOT NULL DEFAULT ''",
         'contacts_json' => "TEXT NOT NULL DEFAULT '[]'",
@@ -152,6 +154,8 @@ function activityRecordData(array $record): array
         'rack_count' => (int) $record['rack_count'],
         'module_counts' => array_values($moduleCounts),
         'rack_names' => decodedRackNames($record),
+        'category' => $record['category'] ?? '',
+        'region' => $record['region'] ?? '',
         'site_name' => $record['site_name'] ?? '',
         'address' => $record['address'] ?? '',
         'contacts' => array_values($contacts),
@@ -188,7 +192,7 @@ function loadData(PDO $database, array $filters): array
     [$conditions, $parameters] = filterConditions($filters);
 
     $sql = 'SELECT id, visit_date, device_name, existing_version, upgrade_version, door_existing_version, door_upgrade_version,
-                   rack_count, module_counts, rack_names, site_name, address, contacts_json, notes,
+                   rack_count, module_counts, rack_names, category, region, site_name, address, contacts_json, notes,
                    work_status, work_status_other, created_at
             FROM records';
     if ($conditions !== []) {
@@ -224,7 +228,7 @@ function loadData(PDO $database, array $filters): array
     )->fetchAll();
     $inputHistory = $database->query(
         'SELECT id, visit_date, device_name, existing_version, upgrade_version, door_existing_version, door_upgrade_version,
-                rack_count, module_counts, rack_names, site_name, address, contacts_json, notes,
+                rack_count, module_counts, rack_names, category, region, site_name, address, contacts_json, notes,
                 work_status, work_status_other
          FROM records
          ORDER BY visit_date DESC, id DESC
@@ -367,6 +371,8 @@ function validateAdditionalFields(array $input, bool $requireVersions = true): a
     $fields = [
         'door_existing_version' => ['Door LCD 기존 설치 버전', 50],
         'door_upgrade_version' => ['Door LCD 업그레이드 버전', 50],
+        'category' => ['구분', 100],
+        'region' => ['지역', 100],
         'site_name' => ['설치장소(국소)', 100],
         'address' => ['주소', 300],
         'notes' => ['비고', 2000],
@@ -630,7 +636,7 @@ try {
         $database->beginTransaction();
         $exists = $database->prepare(
             'SELECT visit_date, device_name, existing_version, upgrade_version, door_existing_version, door_upgrade_version, rack_count, module_counts, rack_names,
-                    site_name, address, contacts_json, notes, work_status, work_status_other
+                    category, region, site_name, address, contacts_json, notes, work_status, work_status_other
              FROM records WHERE id = ?'
         );
         $exists->execute([$recordId]);
@@ -651,6 +657,8 @@ try {
             'rack_count' => '축전지 Rack 수',
             'module_counts' => 'Rack별 모듈 수',
             'rack_names' => 'Rack 이름',
+            'category' => '구분',
+            'region' => '지역',
             'site_name' => '설치장소(국소)',
             'address' => '주소',
             'contacts' => '담당자 정보',
@@ -683,7 +691,7 @@ try {
         $recordUpdate = $database->prepare(
             'UPDATE records
              SET visit_date = ?, device_name = ?, existing_version = ?, upgrade_version = ?, door_existing_version = ?, door_upgrade_version = ?,
-                 rack_count = ?, module_counts = ?, rack_names = ?, site_name = ?, address = ?, contacts_json = ?,
+                 rack_count = ?, module_counts = ?, rack_names = ?, category = ?, region = ?, site_name = ?, address = ?, contacts_json = ?,
                  notes = ?, work_status = ?, work_status_other = ?
              WHERE id = ?'
         );
@@ -697,6 +705,8 @@ try {
             $validated['record']['rack_count'],
             json_encode(array_values($validated['record']['module_counts']), JSON_THROW_ON_ERROR),
             json_encode($validated['record']['rack_names'], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+            $validated['record']['category'],
+            $validated['record']['region'],
             $validated['record']['site_name'],
             $validated['record']['address'],
             json_encode($validated['record']['contacts'], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
@@ -731,7 +741,7 @@ try {
             $placeholders = implode(',', array_fill(0, count($idChunk), '?'));
             $recordsQuery = $database->prepare(
                 'SELECT id, visit_date, device_name, existing_version, upgrade_version, door_existing_version, door_upgrade_version,
-                        rack_count, module_counts, rack_names, site_name, address, contacts_json, notes,
+                        rack_count, module_counts, rack_names, category, region, site_name, address, contacts_json, notes,
                         work_status, work_status_other
                  FROM records WHERE id IN (' . $placeholders . ')'
             );
@@ -757,7 +767,7 @@ try {
         [$conditions, $parameters] = filterConditions($filters);
         $sql = 'DELETE FROM records';
         $selectSql = 'SELECT id, visit_date, device_name, existing_version, upgrade_version, door_existing_version, door_upgrade_version,
-                             rack_count, module_counts, rack_names, site_name, address, contacts_json, notes,
+                             rack_count, module_counts, rack_names, category, region, site_name, address, contacts_json, notes,
                              work_status, work_status_other FROM records';
         if ($conditions !== []) {
             $sql .= ' WHERE ' . implode(' AND ', $conditions);
@@ -825,8 +835,8 @@ try {
         $recordInsert = $database->prepare(
             'INSERT INTO records (
                 visit_date, device_name, existing_version, upgrade_version, door_existing_version, door_upgrade_version, rack_count, module_counts, rack_names,
-                site_name, address, contacts_json, notes, work_status, work_status_other
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                category, region, site_name, address, contacts_json, notes, work_status, work_status_other
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         foreach ($validatedRecords as $record) {
             $deviceInsert->execute([$record['device_name']]);
@@ -840,6 +850,8 @@ try {
                 $record['rack_count'],
                 json_encode(array_values($record['module_counts']), JSON_THROW_ON_ERROR),
                 json_encode($record['rack_names'], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+                $record['category'],
+                $record['region'],
                 $record['site_name'],
                 $record['address'],
                 json_encode($record['contacts'], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
@@ -902,8 +914,8 @@ try {
     $recordInsert = $database->prepare(
         'INSERT INTO records (
             visit_date, device_name, existing_version, upgrade_version, door_existing_version, door_upgrade_version, rack_count, module_counts, rack_names,
-            site_name, address, contacts_json, notes, work_status, work_status_other
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            category, region, site_name, address, contacts_json, notes, work_status, work_status_other
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
     $recordInsert->execute([
         $visitDate,
@@ -915,6 +927,8 @@ try {
         $rackCount,
         json_encode(array_values($moduleCounts), JSON_THROW_ON_ERROR),
         json_encode($record['rack_names'], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+        $record['category'],
+        $record['region'],
         $record['site_name'],
         $record['address'],
         json_encode($record['contacts'], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
@@ -932,6 +946,8 @@ try {
         'door_upgrade_version' => $additional['record']['door_upgrade_version'],
         'rack_count' => $rackCount,
         'module_counts' => $moduleCounts,
+        'category' => $record['category'] ?? '',
+        'region' => $record['region'] ?? '',
         'site_name' => $record['site_name'],
         'address' => $record['address'],
         'contacts' => $record['contacts'],

@@ -128,7 +128,7 @@ try {
                                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
                     </label>
                     <p class="bulk-import-hint">
-                        설치장소(국소), 주소, 작업상태, 담당자 이름, 담당자 연락처, 현장방문날짜, 장비명을 입력하세요.
+                        구분, 지역, 설치장소(국소), 주소, 작업상태, 담당자 이름, 담당자 연락처, 현장방문날짜, 장비명을 입력하세요.
                         날짜는 YYYY-MM-DD 형식이며, 버전과 Rack 구성은 등록 후 웹에서 수정할 수 있습니다.
                         한 번에 최대 100개 현장을 등록할 수 있습니다.
                     </p>
@@ -148,6 +148,14 @@ try {
 
             <form id="recordForm">
                 <div class="form-grid site-fields">
+                    <label class="field">
+                        <span>구분</span>
+                        <input id="siteCategory" name="category" type="text" maxlength="100" placeholder="입력하세요">
+                    </label>
+                    <label class="field">
+                        <span>지역</span>
+                        <input id="siteRegion" name="region" type="text" maxlength="100" placeholder="입력하세요">
+                    </label>
                     <label class="field">
                         <span>설치장소(국소)</span>
                         <input id="siteName" name="site_name" type="text" maxlength="100" placeholder="설치 국소명을 입력하세요">

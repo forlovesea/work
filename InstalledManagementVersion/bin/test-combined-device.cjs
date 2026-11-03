@@ -11,7 +11,7 @@ const context = vm.createContext({
     document: { querySelector: field, createElement: () => ({}) },
     deviceSelect: { value: '', options: [], replaceChildren() { this.options = []; }, append(option) { this.options.push(option); } },
     customDeviceField: {}, customDeviceName: {}, existingVersionInput: {},
-    siteNameInput: {}, siteAddressInput: {}, notesInput: {}, workStatusInput: {}, workStatusOtherInput: {},
+    siteCategoryInput: {}, siteRegionInput: {}, siteNameInput: {}, siteAddressInput: {}, notesInput: {}, workStatusInput: {}, workStatusOtherInput: {},
     updateWorkStatusField() {}, contactList: { replaceChildren() {} }, addContactButton: {}, addContact() {},
 });
 for (const name of ['versionDisplay', 'fillAdditionalFields', 'renderDevices', 'updateCustomDeviceField', 'applyDeviceVersionDefault']) {
@@ -58,3 +58,10 @@ context.renderDevices(['SMU02C', 'iIoT Gateway', 'Door LCD']);
 assert.equal(context.existingVersionInput.value, 'user-edited-version');
 assert.equal(context.deviceSelect.options.filter(o => o.value === 'iIoT Gateway').length, 1);
 console.log('PASS: device ordering, initial versions, preserved edits, required fields, record loading and display');
+
+context.fillAdditionalFields({ category: '신규', region: '서울' });
+assert.equal(context.siteCategoryInput.value, '신규');
+assert.equal(context.siteRegionInput.value, '서울');
+context.fillAdditionalFields();
+assert.equal(context.siteCategoryInput.value, '');
+assert.equal(context.siteRegionInput.value, '');

@@ -809,6 +809,30 @@ try {
                 $row['module_counts'] = [10];
                 $row['rack_names'] = ['Rack 01'];
             }
+            if (is_array($row)) {
+                $defaults = [];
+                $fallbacks = [
+                    'visit_date' => ['현장방문날짜', (new DateTimeImmutable('now', new DateTimeZone('Asia/Seoul')))->format('Y-m-d')],
+                    'device_name' => ['장비명', '미입력'],
+                ];
+                if (!$basic) {
+                    $fallbacks['existing_version'] = ['기존 설치 버전', '미입력'];
+                    $fallbacks['upgrade_version'] = ['업그레이드 버전', '미입력'];
+                    if (($row['device_name'] ?? '') === 'SMU02C + Door LCD') {
+                        $fallbacks['door_existing_version'] = ['Door LCD 기존 설치 버전', '미입력'];
+                        $fallbacks['door_upgrade_version'] = ['Door LCD 업그레이드 버전', '미입력'];
+                    }
+                }
+                foreach ($fallbacks as $key => [$label, $value]) {
+                    if (!isset($row[$key]) || (is_string($row[$key]) && trim($row[$key]) === '')) {
+                        $row[$key] = $value;
+                        $defaults[] = $label . ': ' . $value;
+                    }
+                }
+                if ($defaults !== [] && (!isset($row['notes']) || is_string($row['notes']))) {
+                    $row['notes'] = trim(($row['notes'] ?? '') . "\n[엑셀 임시값] " . implode(' / ', $defaults));
+                }
+            }
             $validated = validateBulkRecord($row, $basic);
             if ($validated['errors'] !== []) {
                 $sourceRow = is_array($row) && isset($row['source_row']) &&

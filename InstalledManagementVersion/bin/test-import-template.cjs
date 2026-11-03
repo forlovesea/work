@@ -12,7 +12,7 @@ const context = vm.createContext({
     downloadBlob: files => { context.files = files; },
     getCellValue: cell => cell.value,
 });
-for (const name of ['xmlEscape', 'columnName', 'createTemplateCell', 'importTemplateHeaders', 'legacyImportTemplateHeaders', 'basicImportHeaders', 'downloadImportTemplate', 'columnIndexFromReference', 'defaultRackName', 'parseBasicImportRows', 'parseImportRows']) {
+for (const name of ['importToday', 'importFallback', 'importNotes', 'xmlEscape', 'columnName', 'createTemplateCell', 'importTemplateHeaders', 'legacyImportTemplateHeaders', 'basicImportHeaders', 'downloadImportTemplate', 'columnIndexFromReference', 'defaultRackName', 'parseBasicImportRows', 'parseImportRows']) {
     const start = source.indexOf(`function ${name}(`);
     const next = source.indexOf('\nfunction ', start + 1);
     vm.runInContext(source.slice(start, next), context);
@@ -39,7 +39,7 @@ assert.equal(result.records[0].contacts[0].phone, '01001234567');
 assert.equal(result.records[0].rack_names[1], 'Rack 02');
 assert.equal(result.records[0].module_counts.join(','), '4,10');
 assert.equal(parse(['2026-10-22', 'Door LCD', '001', '002', '2', '4,10'], true).errors.length, 0);
-for (const changes of [{ 9: '' }, { 12: '' }, { 18: '11' }, { 20: '1' }, { 5: '4,10' }, { 8: '잘못된 상태' }]) {
+for (const changes of [{ 18: '11' }, { 20: '1' }, { 5: '4,10' }, { 8: '잘못된 상태' }]) {
     assert.ok(parse(Object.assign([...values], changes)).errors.length > 0);
 }
 const defaults = Array(21).fill('');
@@ -70,7 +70,7 @@ assert.equal(combinedResult.records[0].existing_version, '001');
 assert.equal(combinedResult.records[0].upgrade_version, '002');
 assert.equal(combinedResult.records[0].door_existing_version, '0008');
 assert.equal(combinedResult.records[0].door_upgrade_version, '0009');
-for (const changes of [{ 21: '' }, { 22: '' }, { 22: 'x'.repeat(51) }, { 1: 'Door LCD' }]) {
+for (const changes of [{ 22: 'x'.repeat(51) }, { 1: 'Door LCD' }]) {
     assert.ok(parse(Object.assign([...combined], changes)).errors.length > 0);
 }
 const screenHeaders = context.importTemplateHeaders(2, 3, true, false);
@@ -89,7 +89,7 @@ const custom = toScreen(defaults);
 Object.assign(custom, { 9: '+ 새 장치 추가', 10: 'Custom Device' });
 assert.equal(parse(custom, false, screenHeaders).records[0].device_name, 'Custom Device');
 assert.equal(parse(custom, false, screenHeaders).errors.length, 0);
-assert.ok(parse(Object.assign([...custom], { 10: '' }), false, screenHeaders).errors.length);
+assert.equal(parse(Object.assign([...custom], { 10: '' }), false, screenHeaders).records[0].device_name, '미입력');
 assert.ok(parse(Object.assign([...custom], { 9: 'Door LCD' }), false, screenHeaders).errors.length);
 const blankScreen = Array(23).fill('');
 Object.assign(blankScreen, { 15: '3', 17: '10', 19: '10', 21: '10' });
@@ -107,7 +107,7 @@ assert.equal(compactHeaders.includes('Rack 2 이름'), false);
 const compactValues = compactHeaders.map(header => ({ '작업상태': '기타', '현장방문날짜': '2026-10-24', '장비명': 'SMU02C', '기존 설치 버전': 'V100R024C10SPC235', '업그레이드 버전': 'new-version', 'Rack 수': '1', 'Rack 1 모듈 수': '10' }[header] || ''));
 assert.equal(parse(compactValues, false, compactHeaders).errors.length, 0);
 assert.equal(parse(compactValues, false, compactHeaders).records[0].rack_count, 1);
-assert.equal(parse(compactValues, false, compactHeaders).records[0].work_status_other, '');
+assert.equal(parse(compactValues, false, compactHeaders).records[0].work_status_other, '미입력');
 const compactBlank = compactHeaders.map(header => header === 'Rack 수' ? '1' : header === 'Rack 1 모듈 수' ? '10' : '');
 assert.equal(parse(compactBlank, false, compactHeaders).records.length, 0);
 assert.match(sheet, /<c r="K2" t="str"><f>IF\(OR\(I2=/);
@@ -123,7 +123,7 @@ for (const [device, expected] of [['SMU02C', 'V100R024C10SPC235'], ['iIoT Gatewa
     const result = parse(row, false, compactHeaders, { 8: defaultFormula });
     assert.equal(result.errors.length, 0);
     assert.equal(result.records[0].existing_version, expected);
-    assert.ok(parse(row, false, compactHeaders).errors.length > 0);
+    assert.equal(parse(row, false, compactHeaders).records[0].existing_version, '미입력');
     const override = parse(Object.assign([...row], { 8: 'manual-version' }), false, compactHeaders);
     assert.equal(override.records[0].existing_version, 'manual-version');
 }
@@ -145,7 +145,7 @@ for (const device of ['SMU02C + Door LCD', 'Door LCD', 'iIoT Gateway', 'SMU02C',
     assert.equal(result.records[0].device_name, device);
 }
 const base = ['국소', '주소', '기타', '담당자', '01001234567', '2026-10-25', 'Door LCD'];
-for (const changes of [{ 4: '' }, { 5: '2026-02-30' }, { 6: '' }, { 2: '알수없음' }, { 7: '추가값' }]) {
+for (const changes of [{ 5: '2026-02-30' }, { 2: '알수없음' }, { 7: '추가값' }]) {
     assert.ok(parse(Object.assign([...base], changes), false, basicHeaders).errors.length);
 }
 assert.equal(parse(Array(7).fill(''), false, basicHeaders).records.length, 0);
@@ -164,3 +164,28 @@ for (const extended of [false, true]) {
     assert.ok(parse(newHeaders.map(header => header === '지역' ? '가'.repeat(101) : input[header] || ''), false, newHeaders).errors.length);
 }
 console.log('PASS: category/region basic and extended imports and length validation');
+
+for (const extended of [false, true]) {
+    const newHeaders = extended ? context.importTemplateHeaders() : context.basicImportHeaders();
+    const input = { '설치장소(국소)': '일부 입력 국소', [extended ? '담당자 1 이름' : '담당자 이름']: '홍길동' };
+    const result = parse(newHeaders.map(h => input[h] || ''), false, newHeaders);
+    assert.equal(result.errors.length, 0, JSON.stringify(result.errors));
+    const record = result.records[0];
+    assert.equal(record.device_name, '미입력');
+    assert.equal(record.visit_date, context.importToday());
+    assert.equal(record.category, '');
+    assert.equal(record.address, '');
+    assert.equal(record.contacts[0].name, '홍길동');
+    assert.equal(record.contacts[0].phone, '미입력');
+    assert.equal(record.rack_count, 1);
+    assert.equal(record.module_counts.join(','), '10');
+    assert.match(record.notes, /엑셀 임시값/);
+    assert.match(record.notes, /현장방문날짜/);
+    assert.equal(parse(newHeaders.map(() => ''), false, newHeaders).records.length, 0);
+}
+const partialModules = [...values];
+partialModules[16] = '';
+assert.equal(parse(partialModules).errors.length, 0);
+assert.equal(parse(partialModules).records[0].module_counts.join(','), '10,10');
+assert.equal(parse(Object.assign([...combined], { 21: '', 22: '' })).records[0].door_upgrade_version, '미입력');
+console.log('PASS: missing required fields, partial contacts/modules, optional blanks, blank rows');

@@ -758,12 +758,14 @@ function downloadImportTemplate(extended = false) {
         ['버전', '기존 설치 버전과 업그레이드 버전을 입력하세요. 통합 장비의 앞 두 버전은 SMU02C용이며 바로 옆의 Door LCD 버전 두 열도 필수입니다. 단일 장비는 Door LCD 전용 열을 비워 두세요.'],
         ['Rack 수', '기본 1개입니다. 필요하면 1~100 사이의 정수로 수정하세요.'],
         ['Rack별 모듈 수', '각 Rack의 모듈 수는 기본 10개입니다. 필요하면 1~10을 선택하세요. Rack 수를 줄이면 사용하지 않는 Rack의 이름과 모듈 수를 비워 주세요.'],
+        ['빈칸 처리', '선택 항목은 비워 둡니다. 빈 필수값은 장비명·버전: 미입력, 날짜: 업로드 당일(한국 시간), Rack: 1개, 모듈: 10개로 보완하며 비고에 표시합니다. 담당자는 한쪽만 입력하면 나머지를 미입력으로 보완합니다.'],
         ['설치 정보', '구분, 지역, 설치장소(국소), 주소, 비고를 입력하세요. 작업상태가 비어 있으면 방문예정으로 등록합니다.'],
         ['작업상태', '목록에서 선택하세요. 기타 작업상태 열은 사용하지 않습니다. 필요한 설명은 비고에 적어 주세요.'],
         ['담당자', '기본 1인입니다. 추가 시 현장방문날짜 열 앞에 번호 순서대로 이름/연락처 열을 삽입하세요(최대 20명). 연락처는 앞자리 0을 유지합니다.'],
         ['버전 기본값', '장비 선택 시 SMU02C(통합 포함)는 V100R024C10SPC235, iIoT Gateway는 V100R024C10SPC265로 자동 표시합니다. 직접 덮어써서 수정할 수 있습니다. 업그레이드 버전은 직접 입력하세요.'],
         ['조건부 입력', '통합 장비일 때만 Door LCD 버전 두 열을 입력하세요. 단일 장비일 때는 회색으로 표시됩니다. 일반 xlsx에서는 행마다 열을 숨길 수 없어 회색 표시로 구분합니다.'],
         ['Rack 이름', 'Rack 수만큼 입력하세요. 빈 이름은 Rack 01 등의 기본 이름을 사용합니다. 추가 시 비고 열 앞에 번호 순서대로 이름/모듈 수 열을 삽입하세요(최대 100개).'],
+        ['빈칸 처리', '선택 항목은 비워 둡니다. 장비명이 없으면 미입력, 날짜가 없으면 업로드 당일(한국 시간)을 넣고 비고에 표시합니다. 담당자는 한쪽만 입력하면 나머지를 미입력으로 보완합니다.'],
         ['선택 항목', '장비명과 버전은 목록에서 선택하거나 새 값을 직접 입력할 수 있습니다.'],
         ['등록 제한', '한 번 업로드할 때 최대 100개 현장을 등록합니다. 빈 행과 Rack 기본값만 남은 행은 무시합니다.'],
         ['주의', '열 제목을 수정하거나 삭제하지 마세요. 업로드 전에 화면에서 모든 행의 검증 결과를 확인합니다.'],
@@ -1012,6 +1014,20 @@ function columnIndexFromReference(reference) {
     return index - 1;
 }
 
+function importToday() {
+    return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+}
+
+function importFallback(value, label, defaults, fallback = '미입력') {
+    if (value) return value;
+    defaults.push(`${label}: ${fallback}`);
+    return fallback;
+}
+
+function importNotes(notes, defaults) {
+    return [notes, defaults.length ? `[엑셀 임시값] ${defaults.join(' / ')}` : ''].filter(Boolean).join('\n');
+}
+
 function parseBasicImportRows(rows, sharedStrings, includeLocation = false) {
     const records = [];
     const errors = [];
@@ -1028,7 +1044,14 @@ function parseBasicImportRows(rows, sharedStrings, includeLocation = false) {
         const fail = message => errors.push({ row: sourceRow, message });
         if (records.length >= 100) { fail('한 번에 최대 100개 현장까지만 등록할 수 있습니다.'); continue; }
         const [category = '', region = ''] = includeLocation ? values.splice(0, 2) : [];
-        const [site = '', address = '', status = '', name = '', phone = '', date = '', device = ''] = values;
+        const defaults = [];
+        let [site = '', address = '', status = '', name = '', phone = '', date = '', device = ''] = values;
+        date = importFallback(date, '현장방문날짜', defaults, importToday());
+        device = importFallback(device, '장비명', defaults);
+        if (name || phone) {
+            name = importFallback(name, '담당자 이름', defaults);
+            phone = importFallback(phone, '담당자 연락처', defaults);
+        }
         for (const [value, label, limit] of [[category, '구분', 100], [region, '지역', 100], [site, '설치장소(국소)', 100], [address, '주소', 300], [name, '담당자 이름', 100], [phone, '담당자 연락처', 50], [device, '장비명', 100]]) {
             if ([...value].length > limit) fail(`${label}은(는) ${limit}자 이내로 입력하세요.`);
         }
@@ -1043,7 +1066,7 @@ function parseBasicImportRows(rows, sharedStrings, includeLocation = false) {
             contacts: name || phone ? [{ name, phone }] : [], visit_date: date, device_name: device,
             existing_version: device === 'iIoT Gateway' ? 'V100R024C10SPC265' : (['SMU02C', 'SMU02C + Door LCD'].includes(device) ? 'V100R024C10SPC235' : ''),
             upgrade_version: '', door_existing_version: '', door_upgrade_version: '',
-            rack_count: 1, module_counts: [10], rack_names: [defaultRackName(0)], notes: '',
+            rack_count: 1, module_counts: [10], rack_names: [defaultRackName(0)], notes: importNotes('', defaults),
         });
     }
     if (!records.length && !errors.length) errors.push({ row: null, message: '등록할 현장 정보가 없습니다. 두 번째 행부터 값을 입력하세요.' });
@@ -1126,21 +1149,28 @@ function parseImportRows(sheetXml, sharedStrings) {
             const expectedFormula = `IF(OR(${deviceRef}="SMU02C + Door LCD",${deviceRef}="SMU02C"),"V100R024C10SPC235",IF(${deviceRef}="iIoT Gateway","V100R024C10SPC265",""))`;
             if (formula === expectedFormula) existingVersion = deviceName === 'iIoT Gateway' ? 'V100R024C10SPC265' : (['SMU02C', 'SMU02C + Door LCD'].includes(deviceName) ? 'V100R024C10SPC235' : '');
         }
-        const rackCount = /^\d+$/.test(rackCountText || '') ? Number(rackCountText) : NaN;
+        const defaults = [];
+        visitDate = importFallback(visitDate, '현장방문날짜', defaults, importToday());
+        rackCountText = importFallback(rackCountText, 'Rack 수', defaults, '1');
+        const rackCount = /^\d+$/.test(rackCountText) ? Number(rackCountText) : NaN;
         const extra = { category, region, site_name: values[6] || '', address: values[7] || '', work_status: values[8] || '방문예정', work_status_other: values[9] || '', notes: values[10] || '', contacts: [] };
         const fail = (message) => errors.push({ row: rowNumber, message });
         if (screenLayout && deviceName === '+ 새 장치 추가') {
             deviceName = customDevice;
-            if (!deviceName) fail('새 장치명을 입력하세요.');
+
         } else if (customDevice) {
             fail('새 장치명은 장비명에서 + 새 장치 추가를 선택한 경우에만 입력하세요.');
         }
+        deviceName = importFallback(deviceName, '장비명', defaults);
+        existingVersion = importFallback(existingVersion, '기존 설치 버전', defaults);
+        upgradeVersion = importFallback(upgradeVersion, '업그레이드 버전', defaults);
         const doorColumn = headerValues.indexOf('Door LCD 기존 설치 버전');
         extra.door_existing_version = doorColumn >= 0 ? (values[doorColumn] || '') : '';
         extra.door_upgrade_version = doorColumn >= 0 ? (values[doorColumn + 1] || '') : '';
         if (deviceName === 'SMU02C + Door LCD') {
             for (const [key, label] of [['door_existing_version', 'Door LCD 기존 설치 버전'], ['door_upgrade_version', 'Door LCD 업그레이드 버전']]) {
-                if (!extra[key] || [...extra[key]].length > 50) fail(`${label}을(를) 50자 이내로 입력하세요.`);
+                extra[key] = importFallback(extra[key], label, defaults);
+                if ([...extra[key]].length > 50) fail(`${label}을(를) 50자 이내로 입력하세요.`);
             }
         } else {
             if (extra.door_existing_version || extra.door_upgrade_version) fail('Door LCD 전용 버전 열은 SMU02C + Door LCD 선택 시에만 입력하세요.');
@@ -1149,12 +1179,14 @@ function parseImportRows(sheetXml, sharedStrings) {
             if ([...extra[key]].length > limit) fail(`${label}은(는) ${limit}자 이내로 입력하세요.`);
         }
         if (!['방문예정', '작업완료', '작업실패', '작업보류', '기타'].includes(extra.work_status)) fail('작업상태를 목록에서 선택하세요.');
-        if (fileHeaders.includes('기타 작업상태') && extra.work_status === '기타' && !extra.work_status_other) fail('기타 작업상태를 입력하세요.');
+        if (extra.work_status === '기타') extra.work_status_other = importFallback(extra.work_status_other, '기타 작업상태', defaults);
         if (extra.work_status !== '기타') extra.work_status_other = '';
         for (let i = 0; i < contactCount; i += 1) {
-            const name = values[11 + i * 2] || '';
-            const phone = values[12 + i * 2] || '';
+            let name = values[11 + i * 2] || '';
+            let phone = values[12 + i * 2] || '';
             if (!name && !phone) continue;
+            name = importFallback(name, `담당자 ${i + 1} 이름`, defaults);
+            phone = importFallback(phone, `담당자 ${i + 1} 연락처`, defaults);
             if (!name || !phone || [...name].length > 100 || [...phone].length > 50) fail(`담당자 ${i + 1}: 이름(100자 이내)과 연락처(50자 이내)를 함께 입력하세요.`);
             extra.contacts.push({ name, phone });
         }
@@ -1172,9 +1204,13 @@ function parseImportRows(sheetXml, sharedStrings) {
             }
             if (selectedModules.some(Boolean)) {
                 if (moduleCountsText) fail('쉼표 구분 모듈 수와 개별 Rack 모듈 수 중 한 방식만 입력하세요.');
-                moduleCountsText = selectedModules.join(',');
+                moduleCountsText = selectedModules.map((value, i) => importFallback(value, `Rack ${i + 1} 모듈 수`, defaults, '10')).join(',');
             }
         }
+        if (!moduleCountsText && Number.isInteger(rackCount) && rackCount >= 1 && rackCount <= 100) {
+            moduleCountsText = Array.from({ length: rackCount }, (_, i) => importFallback('', `Rack ${i + 1} 모듈 수`, defaults, '10')).join(',');
+        }
+        extra.notes = importNotes(extra.notes, defaults);
         const moduleCounts = (moduleCountsText || '').split(',').map((value) => (
             /^\d+$/.test(value.trim()) ? Number(value.trim()) : NaN
         ));

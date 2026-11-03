@@ -114,7 +114,7 @@ try {
                     <div>
                         <p class="eyebrow">MULTIPLE FIELD RECORDS</p>
                         <h3 id="bulk-import-title">Excel로 여러 현장 등록</h3>
-                        <p>템플릿을 내려받아 현장별 한 줄씩 작성한 후 업로드하세요.</p>
+                        <p>템플릿을 내려받아 아는 항목만 현장별 한 줄씩 작성하세요. 빈 필수값은 임시값으로 보완하며 비고에 표시합니다. 날짜가 비어 있으면 업로드 당일(한국 시간)로 등록됩니다.</p>
                     </div>
                     <button id="downloadTemplateButton" class="secondary-button template-button" type="button">
                         <span aria-hidden="true">↓</span> Excel 템플릿

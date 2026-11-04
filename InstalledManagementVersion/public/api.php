@@ -7,12 +7,17 @@ header('X-Content-Type-Options: nosniff');
 
 function respond(int $status, array $payload): void
 {
+    if (function_exists('contactsRestricted') && contactsRestricted() && empty($GLOBALS['approved_contact_response'])) {
+        $payload = maskContactPayload($payload);
+    }
     http_response_code($status);
     echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;
 }
 
 require_once dirname(__DIR__) . '/lib/auth.php';
+require_once dirname(__DIR__) . '/lib/contact-privacy.php';
+require_once dirname(__DIR__) . '/lib/visit-schedule.php';
 
 function readJsonRequest(): array
 {
@@ -80,6 +85,7 @@ function connectDatabase(): PDO
         'notes' => "TEXT NOT NULL DEFAULT ''",
         'work_status' => "TEXT NOT NULL DEFAULT '방문예정'",
         'work_status_other' => "TEXT NOT NULL DEFAULT ''",
+        'visit_schedule' => "TEXT NOT NULL DEFAULT '{}'",
     ];
     foreach ($additionalColumns as $column => $definition) {
         if (!in_array($column, $existingColumns, true)) {
@@ -162,6 +168,7 @@ function activityRecordData(array $record): array
         'notes' => $record['notes'] ?? '',
         'work_status' => $record['work_status'] ?? '방문예정',
         'work_status_other' => $record['work_status_other'] ?? '',
+        'visit_schedule' => $record['visit_schedule'] ?? '{}',
     ];
 }
 
@@ -193,7 +200,7 @@ function loadData(PDO $database, array $filters): array
 
     $sql = 'SELECT id, visit_date, device_name, existing_version, upgrade_version, door_existing_version, door_upgrade_version,
                    rack_count, module_counts, rack_names, category, region, site_name, address, contacts_json, notes,
-                   work_status, work_status_other, created_at
+                   work_status, work_status_other, visit_schedule, created_at
             FROM records';
     if ($conditions !== []) {
         $sql .= ' WHERE ' . implode(' AND ', $conditions);
@@ -229,7 +236,7 @@ function loadData(PDO $database, array $filters): array
     $inputHistory = $database->query(
         'SELECT id, visit_date, device_name, existing_version, upgrade_version, door_existing_version, door_upgrade_version,
                 rack_count, module_counts, rack_names, category, region, site_name, address, contacts_json, notes,
-                work_status, work_status_other
+                work_status, work_status_other, visit_schedule
          FROM records
          ORDER BY visit_date DESC, id DESC
          LIMIT 100'
@@ -412,6 +419,7 @@ function validateAdditionalFields(array $input, bool $requireVersions = true): a
         $record['work_status_other'] = '';
     }
     $record['work_status'] = $workStatus;
+    $record['visit_schedule'] = validateVisitSchedule($input['visit_schedule'] ?? ['mode' => 'undecided'], $workStatus, $errors);
 
     $contacts = $input['contacts'] ?? [];
     if (!is_array($contacts) || !isListArray($contacts) || count($contacts) > 20) {
@@ -524,6 +532,7 @@ try {
         respond(200, [
             'authenticated' => isAppAuthenticated(),
             'can_delete_activity' => canDeleteActivity(),
+            'contacts_restricted' => contactsRestricted(),
             'csrf_token' => isAppAuthenticated() ? csrfToken() : null,
         ]);
     }
@@ -541,9 +550,11 @@ try {
             }
             session_regenerate_id(true);
             $_SESSION['app_authenticated'] = true;
+            $_SESSION['account_role'] = password_verify($password, $secondaryHash) ? 'secondary' : 'primary';
+            unset($_SESSION['contact_approval_owner']);
             $_SESSION['can_delete_activity'] = password_verify($password, $passwordHash) && hash_equals(DEFAULT_APP_PASSWORD, $password);
             unset($_SESSION['app_csrf_token']);
-            respond(200, ['csrf_token' => csrfToken(), 'can_delete_activity' => canDeleteActivity()]);
+            respond(200, ['csrf_token' => csrfToken(), 'can_delete_activity' => canDeleteActivity(), 'contacts_restricted' => contactsRestricted()]);
         }
 
         if (!isAppAuthenticated()) {
@@ -565,7 +576,7 @@ try {
         if (($_GET['action'] ?? '') === 'dashboard_records') {
             $filters = validatedFilters($_GET);
             if ($filters['device'] === '' || $filters['work_status'] === '') respond(422, ['error' => '장비와 작업상태를 선택해 주세요.']);
-            $query = $database->prepare('SELECT device_name, site_name, work_status, rack_count, rack_names, module_counts FROM records WHERE device_name = ? AND work_status = ? ORDER BY visit_date DESC, id DESC');
+            $query = $database->prepare('SELECT device_name, site_name, work_status, visit_schedule, rack_count, rack_names, module_counts FROM records WHERE device_name = ? AND work_status = ? ORDER BY visit_date DESC, id DESC');
             $query->execute([$filters['device'], $filters['work_status']]);
             $records = $query->fetchAll();
             foreach ($records as &$record) {
@@ -602,6 +613,10 @@ try {
 
     $input = $requestInput;
 
+    if (in_array($input['action'] ?? '', ['request_contact_approval', 'consume_contact_approval'], true)) {
+        handleContactApproval($input);
+    }
+
     if (in_array($input['action'] ?? '', ['delete_activity_selected', 'delete_activity_all'], true)) {
         if (!canDeleteActivity()) respond(403, ['error' => '작업이력을 삭제할 권한이 없습니다.']);
         if (($input['confirmed'] ?? false) !== true) respond(422, ['error' => '작업이력 삭제를 확인해 주세요.']);
@@ -628,6 +643,14 @@ try {
         if (!is_int($recordId) || $recordId < 1) {
             respond(422, ['error' => '수정할 기록을 확인해 주세요.']);
         }
+        if (contactsRestricted()) {
+            // Never overwrite original contacts with masked values supplied by a restricted client.
+            $contactQuery = $database->prepare('SELECT contacts_json FROM records WHERE id = ?');
+            $contactQuery->execute([$recordId]);
+            $originalContacts = $contactQuery->fetchColumn();
+            if ($originalContacts === false) respond(404, ['error' => '수정할 기록이 없습니다.']);
+            $input['contacts'] = json_decode($originalContacts, true, 512, JSON_THROW_ON_ERROR);
+        }
         $validated = validateBulkRecord($input);
         if ($validated['errors'] !== []) {
             respond(422, ['error' => implode(' ', $validated['errors'])]);
@@ -636,7 +659,7 @@ try {
         $database->beginTransaction();
         $exists = $database->prepare(
             'SELECT visit_date, device_name, existing_version, upgrade_version, door_existing_version, door_upgrade_version, rack_count, module_counts, rack_names,
-                    category, region, site_name, address, contacts_json, notes, work_status, work_status_other
+                    category, region, site_name, address, contacts_json, notes, work_status, work_status_other, visit_schedule
              FROM records WHERE id = ?'
         );
         $exists->execute([$recordId]);
@@ -646,6 +669,7 @@ try {
             respond(404, ['error' => '수정할 설치 기록을 찾을 수 없습니다. 새로고침 후 다시 시도해 주세요.']);
         }
         $oldRecord = activityRecordData($oldRecord);
+        if (contactsRestricted()) $validated['record']['contacts'] = $oldRecord['contacts'];
         $newRecord = activityRecordData($validated['record']);
         $fieldLabels = [
             'visit_date' => '현장방문날짜',
@@ -665,6 +689,7 @@ try {
             'notes' => '비고',
             'work_status' => '작업상태',
             'work_status_other' => '기타 작업상태',
+            'visit_schedule' => '방문 일정',
         ];
         $changes = [];
         foreach ($fieldLabels as $field => $label) {
@@ -692,7 +717,7 @@ try {
             'UPDATE records
              SET visit_date = ?, device_name = ?, existing_version = ?, upgrade_version = ?, door_existing_version = ?, door_upgrade_version = ?,
                  rack_count = ?, module_counts = ?, rack_names = ?, category = ?, region = ?, site_name = ?, address = ?, contacts_json = ?,
-                 notes = ?, work_status = ?, work_status_other = ?
+                 notes = ?, work_status = ?, work_status_other = ?, visit_schedule = ?
              WHERE id = ?'
         );
         $recordUpdate->execute([
@@ -713,6 +738,7 @@ try {
             $validated['record']['notes'],
             $validated['record']['work_status'],
             $validated['record']['work_status_other'],
+            $validated['record']['visit_schedule'],
             $recordId,
         ]);
         if ($changes !== []) {
@@ -742,7 +768,7 @@ try {
             $recordsQuery = $database->prepare(
                 'SELECT id, visit_date, device_name, existing_version, upgrade_version, door_existing_version, door_upgrade_version,
                         rack_count, module_counts, rack_names, category, region, site_name, address, contacts_json, notes,
-                        work_status, work_status_other
+                        work_status, work_status_other, visit_schedule
                  FROM records WHERE id IN (' . $placeholders . ')'
             );
             $recordsQuery->execute($idChunk);
@@ -768,7 +794,7 @@ try {
         $sql = 'DELETE FROM records';
         $selectSql = 'SELECT id, visit_date, device_name, existing_version, upgrade_version, door_existing_version, door_upgrade_version,
                              rack_count, module_counts, rack_names, category, region, site_name, address, contacts_json, notes,
-                             work_status, work_status_other FROM records';
+                             work_status, work_status_other, visit_schedule FROM records';
         if ($conditions !== []) {
             $sql .= ' WHERE ' . implode(' AND ', $conditions);
             $selectSql .= ' WHERE ' . implode(' AND ', $conditions);
@@ -859,8 +885,8 @@ try {
         $recordInsert = $database->prepare(
             'INSERT INTO records (
                 visit_date, device_name, existing_version, upgrade_version, door_existing_version, door_upgrade_version, rack_count, module_counts, rack_names,
-                category, region, site_name, address, contacts_json, notes, work_status, work_status_other
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                category, region, site_name, address, contacts_json, notes, work_status, work_status_other, visit_schedule
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         foreach ($validatedRecords as $record) {
             $deviceInsert->execute([$record['device_name']]);
@@ -882,6 +908,7 @@ try {
                 $record['notes'],
                 $record['work_status'],
                 $record['work_status_other'],
+                $record['visit_schedule'],
             ]);
             recordActivity(
                 $database,
@@ -938,8 +965,8 @@ try {
     $recordInsert = $database->prepare(
         'INSERT INTO records (
             visit_date, device_name, existing_version, upgrade_version, door_existing_version, door_upgrade_version, rack_count, module_counts, rack_names,
-            category, region, site_name, address, contacts_json, notes, work_status, work_status_other
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            category, region, site_name, address, contacts_json, notes, work_status, work_status_other, visit_schedule
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
     $recordInsert->execute([
         $visitDate,
@@ -959,6 +986,7 @@ try {
         $record['notes'],
         $record['work_status'],
         $record['work_status_other'],
+        $record['visit_schedule'],
     ]);
     $recordId = (int) $database->lastInsertId();
     recordActivity($database, 'create', $recordId, [
@@ -979,6 +1007,7 @@ try {
         'notes' => $record['notes'],
         'work_status' => $record['work_status'],
         'work_status_other' => $record['work_status_other'],
+        'visit_schedule' => $record['visit_schedule'],
     ]);
     $database->commit();
 

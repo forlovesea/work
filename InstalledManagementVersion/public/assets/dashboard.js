@@ -251,6 +251,11 @@ async function openInstallationPopup(device, statusName) {
                     badge.className = 'popup-status';
                     badge.textContent = value;
                     cell.append(badge);
+                    if (record.work_status === '방문예정') {
+                        const schedule = document.createElement('p');
+                        schedule.textContent = visitScheduleDisplay(record);
+                        cell.append(schedule);
+                    }
                 } else cell.textContent = value;
                 if (index === 1) {
                     const rackButton = document.createElement('button');

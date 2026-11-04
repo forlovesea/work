@@ -12,7 +12,8 @@ const context = vm.createContext({
     deviceSelect: { value: '', options: [], replaceChildren() { this.options = []; }, append(option) { this.options.push(option); } },
     customDeviceField: {}, customDeviceName: {}, existingVersionInput: {},
     siteCategoryInput: {}, siteRegionInput: {}, siteNameInput: {}, siteAddressInput: {}, notesInput: {}, workStatusInput: {}, workStatusOtherInput: {},
-    updateWorkStatusField() {}, contactList: { replaceChildren() {} }, addContactButton: {}, addContact() {},
+    editingRecordId: null,
+    updateWorkStatusField() {}, fillVisitSchedule() {}, contactList: { children: [], querySelectorAll() { return []; }, replaceChildren() {} }, addContactButton: {}, addContact() {},
 });
 for (const name of ['versionDisplay', 'fillAdditionalFields', 'renderDevices', 'updateCustomDeviceField', 'applyDeviceVersionDefault']) {
     const start = source.indexOf(`function ${name}(`);

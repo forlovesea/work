@@ -1,3 +1,10 @@
+document.querySelectorAll('.page-reload').forEach(link => {
+    link.addEventListener('click', event => {
+        event.preventDefault();
+        window.location.reload();
+    });
+});
+
 const siteCategoryInput = document.querySelector('#siteCategory');
 const siteRegionInput = document.querySelector('#siteRegion');
 const recordForm = document.querySelector('#recordForm');
@@ -15,6 +22,7 @@ function updateWorkStatusField() {
     workStatusOtherField.hidden = !isOther;
     workStatusOtherInput.disabled = !isOther;
     workStatusOtherInput.required = isOther;
+    updateVisitSchedule();
 }
 
 function addContact(contact = {}) {
@@ -69,11 +77,15 @@ function fillAdditionalFields(record = {}) {
     notesInput.value = record.notes || '';
     workStatusInput.value = record.work_status || '방문예정';
     workStatusOtherInput.value = record.work_status_other || '';
+    fillVisitSchedule(record);
     updateWorkStatusField();
     contactList.replaceChildren();
     addContactButton.disabled = false;
-    const contacts = record.contacts || [];
+    const contacts = record.contacts_masked && editingRecordId === null ? [] : (record.contacts || []);
     (contacts.length ? contacts : [{}]).forEach(addContact);
+    const locked = record.contacts_masked && editingRecordId !== null;
+    contactList.querySelectorAll('input, button').forEach(input => { input.disabled = !!locked; });
+    addContactButton.disabled = !!locked || contactList.children.length >= 20;
 }
 
 function versionDisplay(record, key) {
@@ -93,10 +105,16 @@ function additionalRecordDetails(record) {
         ['주소', record.address],
         ['담당자 정보', (record.contacts || []).map((contact) => `${contact.name} (${contact.phone})`).join(', ')],
         ['작업상태', record.work_status === '기타' ? `기타: ${record.work_status_other || ''}` : record.work_status],
+        ['방문 일정', visitScheduleDisplay(record)],
         ['비고', record.notes],
     ].filter(([, value]) => value);
 }
 
+for (const id of ['visitStartHour', 'visitEndHour']) {
+    const select = document.getElementById(id);
+    for (let hour = 0; hour < 24; hour++) select.add(new Option(`${String(hour).padStart(2, '0')}시`, hour));
+}
+document.querySelector('#visitSchedule').addEventListener('change', updateVisitSchedule);
 workStatusInput.addEventListener('change', updateWorkStatusField);
 addContactButton.addEventListener('click', () => {
     addContact();
@@ -224,6 +242,19 @@ async function deleteActivityLog(all = false) {
 }
 
 function showLogin(message = '', isError = false) {
+    setContactPrivacy(true);
+    requestSequence++;
+    displayedRecords = [];
+    savedRecords = [];
+    pendingImportRecords = [];
+    importValidationErrors = [];
+    importReadSequence++;
+    importFile.value = '';
+    importPreview.hidden = true;
+    importRows.replaceChildren();
+    historyList.replaceChildren();
+    printReport.replaceChildren();
+    resetEntryForm();
     closeInstallationPopup();
     activityRequestSequence += 1;
     activityIds = [];
@@ -267,6 +298,7 @@ async function bootstrapSession() {
         }
         csrfToken = result.csrf_token;
         setActivityPermission(result.can_delete_activity);
+        setContactPrivacy(result.contacts_restricted);
         loginPanel.hidden = true;
         appShell.hidden = false;
         loadData();
@@ -1393,7 +1425,7 @@ async function applyImport() {
     }
 }
 
-function exportExcel() {
+function exportExcel(filename = exportBaseName()) {
     const rows = exportRows();
     const sheetRows = rows.map((row, rowIndex) => {
         const cells = row.map((value, columnIndex) => {
@@ -1432,7 +1464,7 @@ function exportExcel() {
             content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols><col min="1" max="1" width="15" customWidth="1"/><col min="2" max="4" width="22" customWidth="1"/><col min="5" max="5" width="14" customWidth="1"/><col min="6" max="6" width="48" customWidth="1"/></cols><sheetData>${sheetRows}</sheetData><autoFilter ref="A1:K${rows.length}"/></worksheet>`,
         },
     ];
-    downloadBlob(createZip(files), `${exportBaseName()}.xlsx`);
+    downloadBlob(createZip(files), `${filename}.xlsx`);
 }
 
 function addReportElement(parent, tagName, className, text) {
@@ -1755,6 +1787,7 @@ function buildQueryString() {
 }
 
 async function loadData() {
+    closeContactReveal();
     const requestId = ++requestSequence;
     const queryParams = buildQueryString();
     isLoadingRecords = true;
@@ -2068,6 +2101,7 @@ loginForm.addEventListener('submit', async (event) => {
         }
         csrfToken = result.csrf_token;
         setActivityPermission(result.can_delete_activity);
+        setContactPrivacy(result.contacts_restricted);
         loginPasswordInput.value = '';
         loginMessage.textContent = '';
         loginPanel.hidden = true;
@@ -2309,6 +2343,7 @@ recordForm.addEventListener('submit', async (event) => {
             })).filter((contact) => contact.name || contact.phone),
             notes: notesInput.value.trim(),
             work_status: workStatusInput.value,
+            visit_schedule: visitScheduleValue(),
             work_status_other: workStatusInput.value === '기타' ? workStatusOtherInput.value.trim() : '',
         };
         if (isEditing) {

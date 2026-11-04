@@ -16,6 +16,7 @@ function setContactPrivacy(restricted) {
     pendingContactApproval = null;
     closeContactReveal();
     document.getElementById('contactPrivacyPanel').hidden = !contactPrivacyRestricted;
+    document.getElementById('contactPrivacyPanel').open = false;
     document.getElementById('consumeContactApproval').disabled = true;
 }
 

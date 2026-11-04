@@ -1818,6 +1818,9 @@ h2 {
 
 .visit-schedule { min-width: 0; padding: 14px; border: 1px solid #d8e2ef; border-radius: 12px; background: #f5f8fd; }
 .contact-reveal-dialog { width: min(720px, 92vw); max-height: 80vh; overflow: auto; border: 1px solid #d8e2ef; border-radius: 16px; padding: 24px; }
+.contact-privacy-panel > summary { cursor: pointer; color: #2e4d7a; font-weight: 600; padding: 4px 0; }
+.contact-privacy-panel > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
+.contact-privacy-panel[open] > summary { margin-bottom: 12px; }
 .contact-reveal-dialog::backdrop { background: #17203388; }
 @media print { .contact-reveal-dialog { display: none !important; } }
 .visit-schedule-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }

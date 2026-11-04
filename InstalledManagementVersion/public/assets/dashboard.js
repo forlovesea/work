@@ -142,6 +142,55 @@ function renderInstallationDashboard(rows, devices = []) {
     get('statusTable').append(table);
 }
 
+function appendInstallationReportChart(parent, selectedDevice = '') {
+    const source = document.getElementById('deviceStatusChart');
+    const section = document.createElement('section');
+    section.className = 'print-status-dashboard';
+    const heading = document.createElement('h2');
+    heading.className = 'print-section-title';
+    heading.textContent = '장치별 작업 현황';
+    const caption = document.createElement('p');
+    caption.className = 'print-status-caption';
+    caption.textContent = `전체 등록 기간 기준 · ${selectedDevice || '전체 장비'} · 작업상태 비율`;
+    section.append(heading, caption);
+    const legend = document.createElement('div');
+    legend.className = 'status-legend';
+    for (const item of document.getElementById('statusLegend').children) legend.append(item.cloneNode(true));
+    section.append(legend);
+    // Clone the displayed dashboard so counts, colors and rounding match the screen.
+    const columns = [...source.querySelectorAll('.device-column')].filter(column =>
+        !selectedDevice || column.querySelector('.device-axis-label strong').textContent === selectedDevice);
+    if (!columns.length) {
+        const empty = document.createElement('p');
+        empty.textContent = '표시할 작업 현황이 없습니다.';
+        section.append(empty);
+    }
+    // Keep every device visible on paper instead of clipping a horizontal scroll area.
+    for (let offset = 0; offset < columns.length; offset += 4) {
+        const group = columns.slice(offset, offset + 4);
+        const plot = document.createElement('div');
+        plot.className = 'device-chart';
+        plot.style.setProperty('--device-count', group.length);
+        plot.append(source.querySelector('.chart-grid').cloneNode(true));
+        const row = document.createElement('div');
+        row.className = 'chart-columns';
+        for (const column of group) {
+            const copy = column.cloneNode(true);
+            for (const button of copy.querySelectorAll('button')) {
+                const label = document.createElement('div');
+                label.className = button.className;
+                label.style.cssText = button.style.cssText;
+                while (button.firstChild) label.append(button.firstChild);
+                button.replaceWith(label);
+            }
+            row.append(copy);
+        }
+        plot.append(row);
+        section.append(plot);
+    }
+    parent.append(section);
+}
+
 let installationPopupSequence = 0;
 
 function closeInstallationPopup() {

@@ -1498,6 +1498,7 @@ function buildPrintableReport(isCustomerReport) {
         'print-title',
         isCustomerReport ? '축전지 시스템 설치 버전 변경 보고서' : '설치 정보 조회 결과',
     );
+    appendInstallationReportChart(printReport, displayedFilterParams.device || '');
     addReportElement(
         printReport,
         'p',

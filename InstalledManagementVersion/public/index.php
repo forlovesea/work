@@ -374,7 +374,7 @@ try {
             </div>
 
             <section id="contactPrivacyPanel" class="visit-schedule" aria-label="담당자 개인정보 공개" hidden>
-                <p>담당자 이름과 연락처는 기본적으로 가려집니다. 현재 조회 목록(최대 500건)을 원문으로 확인하려면 관리자 forlovesea@gmail.com의 이메일 승인이 필요합니다.</p>
+                <p>담당자 이름과 연락처는 기본적으로 가려집니다. 현재 조회 목록(최대 500건)을 원문으로 확인하려면 관리자의 이메일 승인이 필요합니다.</p>
                 <div class="export-controls">
                     <label class="field"><span>1회 공개 용도</span><select id="contactApprovalPurpose"><option value="view">웹 조회 1회</option><option value="excel">Excel 추출 1회</option></select></label>
                     <button id="requestContactApproval" type="button" class="secondary-button">이메일 승인 요청</button>

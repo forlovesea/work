@@ -44,7 +44,7 @@ function approvalEscape(string $value): string { return htmlspecialchars($value,
 <noscript>이메일 승인 링크를 확인하려면 JavaScript를 활성화해 주세요.</noscript>
 <?php if ($approval): ?>
 <p>요청 번호: <?= approvalEscape($approval['id']) ?></p>
-<p>관리자 forlovesea@gmail.com에게 발송된 승인 링크입니다. 요청 내용을 확인한 경우에만 인증 완료를 클릭하세요. 요청 후 15분이 지나면 만료됩니다.</p>
+<p>관리자에게 발송된 승인 링크입니다. 요청 내용을 확인한 경우에만 인증 완료를 클릭하세요. 요청 후 15분이 지나면 만료됩니다.</p>
 <form method="post" action="approve-contacts.php"><input type="hidden" name="token" value="<?= approvalEscape($token) ?>"><button type="submit">인증 완료</button></form>
 <?php endif; ?>
 </main></body></html>

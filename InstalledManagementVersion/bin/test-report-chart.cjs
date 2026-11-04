@@ -45,7 +45,7 @@ assert.equal(filtered.querySelectorAll('.device-column').length, 1);
 assert.equal(filtered.querySelector('.device-axis-label strong').textContent, 'B');
 assert.equal(filtered.querySelector('.status-segment').style.background, '#a8dfcc');
 assert.equal(nodes.get('deviceStatusChart').querySelectorAll('.device-column').length, 5);
-assert.equal(nodes.get('deviceStatusChart').querySelectorAll('button').length, 5);
+assert.equal(nodes.get('deviceStatusChart').querySelectorAll('button').length, 10);
 context.renderInstallationDashboard([], []);
 const empty = new Node();
 context.appendInstallationReportChart(empty);

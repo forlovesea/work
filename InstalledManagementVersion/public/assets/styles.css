@@ -1518,7 +1518,14 @@ h2 {
 .status-segment { width: 100%; padding: 0; border: 0; border-top: 1px solid #ffffff80; border-radius: 0; min-height: 0; }
 .status-segment:hover { filter: brightness(.96); }
 .status-segment:focus-visible { outline: 3px solid #3856a0; outline-offset: -3px; }
-.small-status-label { display: block; width: 100%; min-height: 44px; background: transparent; border: 0; padding: 6px 2px; font-size: 11px; }
+.device-chart { min-width: calc(48px + var(--device-count) * 230px); }
+.device-stack { position: relative; overflow: visible; }
+.small-status-label { position: absolute; right: calc(100% + 5px); transform: translateY(50%); display: block; white-space: nowrap; width: auto; min-height: 18px; border: 0; border-radius: 4px; padding: 2px 4px; font-size: 10px; line-height: 1.2; z-index: 1; }
+.device-count-summary { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 4px 6px; margin-top: 6px; }
+.device-count-summary .device-total-count, .device-count-summary span { display: inline; margin: 0; font-size: 10px; color: #526079; white-space: nowrap; }
+.device-status-count { display: inline-flex; align-items: center; gap: 3px; min-height: 24px; padding: 2px 0; border: 0; border-radius: 0; background: transparent; }
+.device-status-count i { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
+.device-status-count:focus-visible, .small-status-label:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .small-status-label:hover { text-decoration: underline; }
 .installation-popup-open { overflow: hidden; }
 .installation-popup { width: min(720px, calc(100% - 32px)); max-height: min(80vh, 780px); max-height: min(80dvh, 780px); margin: auto; padding: 0; border: 1px solid #ffffff; border-radius: 24px; color: var(--ink); background: #fff; box-shadow: 0 24px 80px #1a294438; overflow: auto; }
@@ -1637,7 +1644,9 @@ h2 {
     .print-status-dashboard .status-segment { padding: 0; min-height: 0; width: 100%; border-radius: 0; }
     .print-status-dashboard .device-axis-label { min-height: 0; padding: 3mm 2mm 0; }
     .print-status-dashboard .device-axis-label strong { font-size: 8pt; }
-    .print-status-dashboard .small-status-label { font-size: 7pt; padding: 1mm 0; }
+    .print-status-dashboard .small-status-label { font-size: 7pt; padding: 1px 2px; right: calc(100% + 2px); }
+    .print-status-dashboard .device-count-summary { gap: 1mm; }
+    .print-status-dashboard .device-status-count { min-height: 0; }
 
     .print-meta {
         display: grid;

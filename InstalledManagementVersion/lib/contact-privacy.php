@@ -55,6 +55,42 @@ function maskContactPayload(array $payload): array
     return $payload;
 }
 
+function resolveContactEdits($submitted, array $original, array &$errors): array
+{
+    if (!is_array($submitted) || count($submitted) > 20) {
+        $errors[] = '담당자 정보는 최대 20명까지 입력해 주세요.';
+        return [];
+    }
+    $result = [];
+    foreach ($submitted as $contact) {
+        if (!is_array($contact)) { $errors[] = '담당자 입력 형식을 확인해 주세요.'; continue; }
+        $reference = $contact['original_contact'] ?? null;
+        $old = null;
+        if ($reference !== null) {
+            if (!is_array($reference) || !is_int($reference['index'] ?? null) || !isset($original[$reference['index']])) {
+                $errors[] = '담당자 정보가 변경되었습니다. 다시 조회한 후 수정해 주세요.';
+                continue;
+            }
+            $old = $original[$reference['index']];
+            if (($reference['name'] ?? null) !== maskContactName($old['name']) || ($reference['phone'] ?? null) !== maskContactPhone($old['phone'])) {
+                $errors[] = '담당자 정보가 변경되었습니다. 다시 조회한 후 수정해 주세요.';
+                continue;
+            }
+        }
+        $resolved = [];
+        foreach (['name', 'phone'] as $key) {
+            $value = $contact[$key] ?? '';
+            if (!is_string($value)) { $errors[] = '담당자 이름과 연락처를 문자로 입력해 주세요.'; continue; }
+            $value = trim($value);
+            if ($old !== null && $value === $reference[$key]) $resolved[$key] = $old[$key];
+            elseif (strpos($value, '*') !== false) $errors[] = '수정할 이름 또는 연락처는 * 없이 전체 값을 입력해 주세요. 변경하지 않은 항목은 그대로 두세요.';
+            else $resolved[$key] = $value;
+        }
+        $result[] = $resolved;
+    }
+    return $result;
+}
+
 function contactApprovalDatabase(): PDO
 {
     $database = new PDO('sqlite:' . dirname(__DIR__) . '/data/installed-management.sqlite');

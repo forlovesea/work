@@ -29,6 +29,7 @@ function addContact(contact = {}) {
     if (contactList.children.length >= 20) return;
     const row = document.createElement('div');
     row.className = 'contact-row';
+    if (contact.original_contact) row.originalContact = contact.original_contact;
     for (const [key, label, maxLength] of [['name', '이름', 100], ['phone', '연락처', 50]]) {
         const field = document.createElement('label');
         field.className = 'field';
@@ -82,10 +83,12 @@ function fillAdditionalFields(record = {}) {
     contactList.replaceChildren();
     addContactButton.disabled = false;
     const contacts = record.contacts_masked && editingRecordId === null ? [] : (record.contacts || []);
-    (contacts.length ? contacts : [{}]).forEach(addContact);
-    const locked = record.contacts_masked && editingRecordId !== null;
-    contactList.querySelectorAll('input, button').forEach(input => { input.disabled = !!locked; });
-    addContactButton.disabled = !!locked || contactList.children.length >= 20;
+    (contacts.length ? contacts : [{}]).forEach((contact, index) => addContact(
+        record.contacts_masked && editingRecordId !== null && contacts.length
+            ? { ...contact, original_contact: { index, name: contact.name, phone: contact.phone } }
+            : contact,
+    ));
+    addContactButton.disabled = contactList.children.length >= 20;
 }
 
 function versionDisplay(record, key) {
@@ -2339,6 +2342,7 @@ recordForm.addEventListener('submit', async (event) => {
             site_name: siteNameInput.value.trim(),
             address: siteAddressInput.value.trim(),
             contacts: [...contactList.children].map((row) => ({
+                ...(row.originalContact ? { original_contact: row.originalContact } : {}),
                 name: row.querySelector('[data-contact-field="name"]').value.trim(),
                 phone: row.querySelector('[data-contact-field="phone"]').value.trim(),
             })).filter((contact) => contact.name || contact.phone),

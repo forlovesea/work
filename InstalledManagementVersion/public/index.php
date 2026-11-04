@@ -198,7 +198,7 @@ try {
                         <h3 id="contacts-title">담당자 정보</h3>
                         <button id="addContactButton" class="secondary-button" type="button">+추가</button>
                     </div>
-                    <p class="contacts-hint">담당자는 최대 20명까지 추가할 수 있습니다. 입력 시 이름과 연락처를 함께 작성해 주세요.</p>
+                    <p class="contacts-hint">담당자는 최대 20명까지 추가할 수 있습니다. 입력 시 이름과 연락처를 함께 작성해 주세요. 수정 화면의 가려진 값은 그대로 두면 유지됩니다. 변경할 항목은 * 없이 전체 값을 입력해 주세요.</p>
                     <div id="contactList"></div>
                 </section>
                 <div class="form-grid">

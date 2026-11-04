@@ -643,19 +643,6 @@ try {
         if (!is_int($recordId) || $recordId < 1) {
             respond(422, ['error' => '수정할 기록을 확인해 주세요.']);
         }
-        if (contactsRestricted()) {
-            // Never overwrite original contacts with masked values supplied by a restricted client.
-            $contactQuery = $database->prepare('SELECT contacts_json FROM records WHERE id = ?');
-            $contactQuery->execute([$recordId]);
-            $originalContacts = $contactQuery->fetchColumn();
-            if ($originalContacts === false) respond(404, ['error' => '수정할 기록이 없습니다.']);
-            $input['contacts'] = json_decode($originalContacts, true, 512, JSON_THROW_ON_ERROR);
-        }
-        $validated = validateBulkRecord($input);
-        if ($validated['errors'] !== []) {
-            respond(422, ['error' => implode(' ', $validated['errors'])]);
-        }
-
         $database->beginTransaction();
         $exists = $database->prepare(
             'SELECT visit_date, device_name, existing_version, upgrade_version, door_existing_version, door_upgrade_version, rack_count, module_counts, rack_names,
@@ -669,7 +656,19 @@ try {
             respond(404, ['error' => '수정할 설치 기록을 찾을 수 없습니다. 새로고침 후 다시 시도해 주세요.']);
         }
         $oldRecord = activityRecordData($oldRecord);
-        if (contactsRestricted()) $validated['record']['contacts'] = $oldRecord['contacts'];
+        if (contactsRestricted()) {
+            $contactErrors = [];
+            $input['contacts'] = resolveContactEdits($input['contacts'] ?? [], $oldRecord['contacts'], $contactErrors);
+            if ($contactErrors !== []) {
+                $database->rollBack();
+                respond(422, ['error' => implode(' ', $contactErrors)]);
+            }
+        }
+        $validated = validateBulkRecord($input);
+        if ($validated['errors'] !== []) {
+            $database->rollBack();
+            respond(422, ['error' => implode(' ', $validated['errors'])]);
+        }
         $newRecord = activityRecordData($validated['record']);
         $fieldLabels = [
             'visit_date' => '현장방문날짜',

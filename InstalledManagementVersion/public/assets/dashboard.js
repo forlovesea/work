@@ -86,6 +86,8 @@ function renderInstallationDashboard(rows, devices = []) {
         stack.setAttribute('aria-label', `${group.name}: ${group.total ? description : '등록 기록 없음'}`);
         stack.title = `${group.name} · ${group.total}건\n${description}`;
         if (!group.total) stack.append(element('span', 'device-no-records', '기록 없음'));
+        const callouts = [];
+        let cumulative = 0;
         group.counts.forEach((count, index) => {
             if (!count) return;
             const status = installationStatuses[index];
@@ -99,19 +101,48 @@ function renderInstallationDashboard(rows, devices = []) {
             segment.setAttribute('aria-haspopup', 'dialog');
             segment.addEventListener('click', () => openInstallationPopup(group.name, status.name));
             if (group.percentages[index] >= 8) segment.append(element('strong', '', format(group.percentages[index])));
+            else callouts.push({ index, center: cumulative + count / group.total * 50 });
+            cumulative += count / group.total * 100;
             stack.append(segment);
         });
-        const label = element('div', 'device-axis-label');
-        label.append(element('strong', '', group.name), element('span', '', `${group.total.toLocaleString()}건`));
-        group.counts.forEach((count, index) => {
-            if (!count || group.percentages[index] >= 8) return;
-            const small = element('button', 'small-status-label', `${installationStatuses[index].name} ${format(group.percentages[index])}`);
+        // Reserve readable positions for thin slices, including several adjacent slices.
+        callouts.forEach((item, index) => { item.position = Math.max(item.center, index ? callouts[index - 1].position + 11 : 5); });
+        for (let index = callouts.length - 1; index >= 0; index--) {
+            callouts[index].position = Math.min(callouts[index].position, index === callouts.length - 1 ? 95 : callouts[index + 1].position - 11);
+        }
+        for (const item of callouts) {
+            const status = installationStatuses[item.index];
+            const small = element('button', 'small-status-label', `→${format(group.percentages[item.index])}`);
             small.type = 'button';
+            small.style.bottom = `${item.position}%`;
+            small.style.color = status.ink;
+            small.style.background = status.color;
+            small.title = `${status.name} ${group.counts[item.index]}건`;
+            small.setAttribute('aria-label', `${group.name} ${status.name} ${format(group.percentages[item.index])} 목록 보기`);
             small.setAttribute('aria-haspopup', 'dialog');
-            small.addEventListener('click', () => openInstallationPopup(group.name, installationStatuses[index].name));
-            small.style.color = installationStatuses[index].ink;
-            label.append(small);
+            small.addEventListener('click', () => openInstallationPopup(group.name, status.name));
+            stack.append(small);
+        }
+        const label = element('div', 'device-axis-label');
+        label.append(element('strong', '', group.name));
+        const counts = element('div', 'device-count-summary');
+        counts.append(element('span', 'device-total-count', `${group.total.toLocaleString()}건${group.total ? ' =' : ''}`));
+        group.counts.forEach((count, index) => {
+            if (!count) return;
+            const status = installationStatuses[index];
+            const item = element('button', 'device-status-count');
+            item.type = 'button';
+            item.title = `${status.name} ${count}건`;
+            item.setAttribute('aria-label', `${group.name} ${status.name} ${count}건 목록 보기`);
+            item.setAttribute('aria-haspopup', 'dialog');
+            const dot = element('i');
+            dot.style.background = status.color;
+            dot.setAttribute('aria-hidden', 'true');
+            item.append(dot, element('span', '', `${count.toLocaleString()}건`));
+            item.addEventListener('click', () => openInstallationPopup(group.name, status.name));
+            counts.append(item);
         });
+        label.append(counts);
         column.append(stack, label);
         columns.append(column);
     }

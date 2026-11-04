@@ -121,9 +121,19 @@ def main():
                 assert contacts == [{'name': '홍*동', 'phone': '010-****-5678'}, {'name': '김*', 'phone': '02-***-4567'}]
                 assert '홍길동' not in json.dumps(data, ensure_ascii=False)
                 assert data['input_history'][0]['contacts'] == contacts
-                restricted.call(payload=dict(record, action='update_record', id=record_id,
-                                             contacts=[{'name': 'overwrite', 'phone': '123'}]))
+                editable = [dict(contact, original_contact=dict(contact, index=index)) for index, contact in enumerate(contacts)]
+                restricted.call(payload=dict(record, action='update_record', id=record_id, contacts=editable))
                 assert admin.call()['records'][0]['contacts'] == record['contacts']
+                changed = [dict(contact) for contact in editable]
+                changed[0]['name'] = '이수진'
+                changed[1]['phone'] = '02-555-6789'
+                restricted.call(payload=dict(record, action='update_record', id=record_id, contacts=changed))
+                assert admin.call()['records'][0]['contacts'] == [{'name': '이수진', 'phone': '010-1234-5678'}, {'name': '김철', 'phone': '02-555-6789'}]
+                restricted.call(payload=dict(record, action='update_record', id=record_id, contacts=editable), expected=422)
+                restricted.call(payload=dict(record, action='update_record', id=record_id, contacts=[{'name': '홍*동', 'phone': '010-****-5678'}]), expected=422)
+                restricted.call(payload=dict(record, action='update_record', id=record_id, contacts=[{'name': '새담당', 'phone': '010-9999-0000'}]))
+                assert len(admin.call()['records'][0]['contacts']) == 1
+                admin.call(payload=dict(record, action='update_record', id=record_id))
                 activity = restricted.call('api.php?action=activity')
                 assert '홍길동' not in json.dumps(activity, ensure_ascii=False)
                 database_path = work / 'data' / 'installed-management.sqlite'

@@ -19,6 +19,16 @@ for (const name of ['importToday', 'importFallback', 'importNotes', 'xmlEscape',
 }
 vm.runInContext('downloadImportTemplate(true)', context);
 const headers = context.legacyImportTemplateHeaders();
+for (const extended of [false, true]) {
+    context.downloadImportTemplate(extended);
+    const guidance = context.files.find(file => file.name === 'xl/worksheets/sheet2.xml').content;
+    for (const site of ['강남선릉통합국', '용인외사통합국', '부산덕천2통합국', '부산안락통합국', '보라매사옥', '춘천후평통합국', '구미오태통합국', '예천호명통합국', '청도고수통합국', '광주상무통합국', '광주첨단3통합국', '순창남계통합국', '세종조치원통합국', '계룡엄사2통합국', '부산생곡 2층']) {
+        assert.equal(guidance.split(site).length - 1, 1);
+    }
+    assert.ok(guidance.includes('기지국 등'));
+    assert.ok(guidance.includes('설치장소(국소) 열'));
+    assert.ok(guidance.includes('<mergeCells'));
+}
 assert.equal(headers.length, 23);
 assert.equal(headers[21], 'Door LCD 기존 설치 버전');
 assert.equal(headers[22], 'Door LCD 업그레이드 버전');

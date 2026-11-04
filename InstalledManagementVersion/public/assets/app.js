@@ -777,7 +777,7 @@ function downloadImportTemplate(extended = false) {
     ].join('');
     const instructionRows = !extended ? [
         ['작성 안내', '내용'],
-        ['입력 방법', '설치 정보 시트의 2행부터 현장별로 한 줄씩 입력하세요. 기본 항목 7개만 사용합니다.'],
+        ['입력 방법', '설치 정보 시트의 2행부터 현장별로 한 줄씩 입력하세요. 구분·지역을 포함한 기본 항목 9개를 사용합니다.'],
         ['작업상태', '목록에서 선택하세요. 빈 값은 방문예정으로 등록합니다.'],
         ['담당자', '담당자 이름과 연락처를 함께 입력하세요. 연락처는 앞자리 0을 유지합니다.'],
         ['현장방문날짜', 'YYYY-MM-DD 형식의 실제 날짜를 입력하세요.'],
@@ -805,6 +805,33 @@ function downloadImportTemplate(extended = false) {
         ['등록 제한', '한 번 업로드할 때 최대 100개 현장을 등록합니다. 빈 행과 Rack 기본값만 남은 행은 무시합니다.'],
         ['주의', '열 제목을 수정하거나 삭제하지 마세요. 업로드 전에 화면에서 모든 행의 검증 결과를 확인합니다.'],
     ];
+    instructionRows.push(
+        ['국소 참고표', '아래 15개 국소의 구분·지역·국소명을 참고하세요. 국소명은 설치 정보 시트의 설치장소(국소) 열에 입력합니다.'],
+        ['구분·지역 표기', '구분은 통합국, 사옥, 기지국 등으로 입력합니다. 동부(부산), 동부(대구), 중부(강원)는 괄호까지 그대로 입력하고, 중부는 중부(강원)와 구분합니다.'],
+    );
+    const siteReference = [
+        ['구분', '지역', '국소명'],
+        ['통합국', '수도권', '강남선릉통합국'],
+        ['통합국', '수도권', '용인외사통합국'],
+        ['통합국', '동부(부산)', '부산덕천2통합국'],
+        ['통합국', '동부(부산)', '부산안락통합국'],
+        ['사옥', '수도권', '보라매사옥'],
+        ['통합국', '중부(강원)', '춘천후평통합국'],
+        ['통합국', '동부(대구)', '구미오태통합국'],
+        ['통합국', '동부(대구)', '예천호명통합국'],
+        ['통합국', '동부(대구)', '청도고수통합국'],
+        ['통합국', '서부', '광주상무통합국'],
+        ['통합국', '서부', '광주첨단3통합국'],
+        ['통합국', '서부', '순창남계통합국'],
+        ['통합국', '중부', '세종조치원통합국'],
+        ['통합국', '중부', '계룡엄사2통합국'],
+        ['기지국 등', '동부(부산)', '부산생곡 2층'],
+    ];
+    const referenceRows = siteReference.map((row, index) => {
+        const rowNumber = instructionRows.length + 2 + index;
+        return `<row r="${rowNumber}" ht="26" customHeight="1">${row.map((value, column) => createTemplateCell(`${columnName(column)}${rowNumber}`, value, index === 0 ? '1' : '2')).join('')}</row>`;
+    }).join('');
+    const guidanceMerges = instructionRows.map((_, index) => `<mergeCell ref="B${index + 1}:C${index + 1}"/>`).join('');
     const guidanceRows = instructionRows.map((row, rowIndex) => (
         `<row r="${rowIndex + 1}" ht="${rowIndex === 0 ? 28 : 34}" customHeight="1">${
             row.map((value, columnIndex) => createTemplateCell(
@@ -841,7 +868,7 @@ function downloadImportTemplate(extended = false) {
         },
         {
             name: 'xl/worksheets/sheet2.xml',
-            content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><cols><col min="1" max="1" width="22" customWidth="1"/><col min="2" max="2" width="82" customWidth="1"/></cols><sheetData>${guidanceRows}</sheetData></worksheet>`,
+            content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><cols><col min="1" max="2" width="22" customWidth="1"/><col min="3" max="3" width="60" customWidth="1"/></cols><sheetData>${guidanceRows}${referenceRows}</sheetData><mergeCells count="${instructionRows.length}">${guidanceMerges}</mergeCells></worksheet>`,
         },
     ];
     files.push({

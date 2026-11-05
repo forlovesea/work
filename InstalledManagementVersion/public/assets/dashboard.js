@@ -222,6 +222,13 @@ function appendInstallationReportChart(parent, selectedDevice = '') {
     parent.append(section);
 }
 
+function popupCurrentVersion(record) {
+    const main = record.upgrade_version || record.existing_version || '미입력';
+    if (record.device_name !== 'SMU02C + Door LCD') return main;
+    const door = record.door_upgrade_version || record.door_existing_version || '미입력';
+    return `SMU02C: ${main} / Door LCD: ${door}`;
+}
+
 let installationPopupSequence = 0;
 
 function closeInstallationPopup() {
@@ -279,7 +286,7 @@ async function openInstallationPopup(device, statusName) {
         dialog.id = 'installationPopup';
         dialog.className = 'installation-popup';
         dialog.setAttribute('aria-labelledby', 'installationPopupTitle');
-        dialog.innerHTML = '<header class="popup-heading"><div><p class="eyebrow">INSTALLATION LIST</p><h2 id="installationPopupTitle"></h2><p class="popup-subtitle"></p></div><button class="popup-close" type="button" aria-label="목록 닫기" autofocus>×</button></header><p class="popup-message" role="status" aria-live="polite"></p><div class="popup-table-wrap"><table><thead><tr><th scope="col">장비명</th><th scope="col">설치장소(국소)</th><th scope="col">작업상태</th></tr></thead><tbody></tbody></table></div>';
+        dialog.innerHTML = '<header class="popup-heading"><div><p class="eyebrow">INSTALLATION LIST</p><h2 id="installationPopupTitle"></h2><p class="popup-subtitle"></p></div><button class="popup-close" type="button" aria-label="목록 닫기" autofocus>×</button></header><p class="popup-message" role="status" aria-live="polite"></p><div class="popup-table-wrap"><table><thead><tr><th scope="col">장비명</th><th scope="col">설치장소(국소)</th><th scope="col">작업상태</th><th scope="col">현재 설치된 버전</th></tr></thead><tbody></tbody></table></div>';
         document.body.append(dialog);
         const rackDetail = document.createElement('section');
         rackDetail.className = 'popup-rack-detail';
@@ -324,7 +331,8 @@ async function openInstallationPopup(device, statusName) {
         if (!response.ok || !Array.isArray(data.records)) throw new Error(data.error || '목록을 불러오지 못했습니다.');
         for (const record of data.records) {
             const row = document.createElement('tr');
-            for (const [index, value] of [record.device_name, record.site_name || '미입력', record.work_status].entries()) {
+            const currentVersion = popupCurrentVersion(record);
+            for (const [index, value] of [record.device_name, record.site_name || '미입력', record.work_status, currentVersion].entries()) {
                 const cell = document.createElement('td');
                 if (index === 2) {
                     const badge = document.createElement('span');

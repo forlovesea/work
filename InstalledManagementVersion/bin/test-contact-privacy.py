@@ -112,6 +112,14 @@ def main():
                           'work_status': '방문예정', 'contacts': [{'name': '홍길동', 'phone': '010-1234-5678'},
                                                                {'name': '김철', 'phone': '02-123-4567'}]}
                 record_id = admin.call(payload=record, expected=201)['record_id']
+                # Legacy generated notes are hidden without removing user-authored lines.
+                with closing(sqlite3.connect(work / 'data' / 'installed-management.sqlite')) as db, db:
+                    db.execute('UPDATE records SET notes = ? WHERE id = ?', ['사용자 메모\n[엑셀 임시값] 현장방문날짜: 2026-11-04', record_id])
+                assert admin.call()['records'][0]['notes'] == '사용자 메모'
+                assert admin.call()['input_history'][0]['notes'] == '사용자 메모'
+                popup = admin.call('api.php?action=dashboard_records&device=Door%20LCD&work_status=' + urllib.parse.quote('방문예정'))
+                assert popup['records'][0]['existing_version'] == '1'
+                assert popup['records'][0]['upgrade_version'] == '2'
                 restricted = Client(base)
                 assert restricted.login('pantech')['contacts_restricted'] is True
                 outsider = Client(base)

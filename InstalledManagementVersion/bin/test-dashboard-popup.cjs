@@ -29,7 +29,11 @@ const reply = (request, records, ok = true) => request.resolve({ ok, json: async
     assert.equal(query.get('work_status'), '작업완료');
     reply(pending[0], [{ device_name: '<장비>', site_name: '', work_status: '작업완료', rack_count: 2, rack_names: ['메인 Rack', '보조 Rack'], module_counts: [10, 4] }]);
     await first;
-    assert.equal(fields.get('tbody').children[0].children.length, 3);
+    assert.equal(fields.get('tbody').children[0].children.length, 4);
+    assert.equal(fields.get('tbody').children[0].children[3].textContent, '미입력');
+    assert.equal(context.popupCurrentVersion({ upgrade_version: 'v2', existing_version: 'v1' }), 'v2');
+    assert.equal(context.popupCurrentVersion({ existing_version: 'v1' }), 'v1');
+    assert.equal(context.popupCurrentVersion({ device_name: 'SMU02C + Door LCD', upgrade_version: 'v2', door_existing_version: 'd1' }), 'SMU02C: v2 / Door LCD: d1');
     assert.equal(fields.get('tbody').children[0].children[0].textContent, '<장비>');
     assert.equal(fields.get('tbody').children[0].children[1].textContent, '미입력');
     const rackButton = fields.get('tbody').children[0].children[1].children[0];
@@ -60,5 +64,5 @@ const reply = (request, records, ok = true) => request.resolve({ ok, json: async
     const failed = context.openInstallationPopup('D', '작업보류');
     reply(pending[4], null, false); await failed;
     assert.equal(fields.get('.popup-message').textContent, '서버 오류');
-    console.log('PASS: popup filters, three safe text columns, empty/error states and stale/closed response handling');
+    console.log('PASS: popup filters, four safe text columns with current versions, empty/error states and stale/closed response handling');
 })().catch(error => { console.error(error); process.exitCode = 1; });

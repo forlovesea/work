@@ -1540,9 +1540,12 @@ h2 {
 .popup-table-wrap { padding: 0 20px 24px; }
 .popup-table-wrap table { width: 100%; table-layout: fixed; border-spacing: 0 8px; }
 .popup-table-wrap th { text-align: left; padding: 8px 12px; font-size: 12px; color: #758198; font-weight: 500; }
-.popup-table-wrap th:nth-child(1) { width: 32%; }
-.popup-table-wrap th:nth-child(2) { width: 43%; }
-.popup-table-wrap th:nth-child(3) { width: 25%; }
+.popup-table-wrap th:nth-child(1) { width: 22%; }
+.popup-table-wrap th:nth-child(2) { width: 28%; }
+.popup-table-wrap th:nth-child(3) { width: 20%; }
+.popup-table-wrap th:nth-child(4) { width: 30%; }
+.popup-table-wrap { overflow-x: auto; }
+.popup-table-wrap table { min-width: 600px; }
 .popup-table-wrap td { padding: 16px 12px; font-size: 13px; line-height: 1.6; background: #f0f5fc; overflow-wrap: anywhere; }
 .popup-table-wrap tr:nth-child(even) td { background: #f3f0fa; }
 .popup-table-wrap tr:nth-child(3n) td { background: #eef7f3; }

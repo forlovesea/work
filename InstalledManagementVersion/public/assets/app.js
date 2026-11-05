@@ -199,6 +199,7 @@ let displayedFilterParams = {};
 let isLoadingRecords = false;
 let isMutatingRecords = false;
 let editingRecordId = null;
+let editReturnPosition = null;
 let csrfToken = '';
 let canDeleteActivity = false;
 let deletingActivity = false;
@@ -793,14 +794,14 @@ function downloadImportTemplate(extended = false) {
         ['버전', '기존 설치 버전과 업그레이드 버전을 입력하세요. 통합 장비의 앞 두 버전은 SMU02C용이며 바로 옆의 Door LCD 버전 두 열도 필수입니다. 단일 장비는 Door LCD 전용 열을 비워 두세요.'],
         ['Rack 수', '기본 1개입니다. 필요하면 1~100 사이의 정수로 수정하세요.'],
         ['Rack별 모듈 수', '각 Rack의 모듈 수는 기본 10개입니다. 필요하면 1~10을 선택하세요. Rack 수를 줄이면 사용하지 않는 Rack의 이름과 모듈 수를 비워 주세요.'],
-        ['빈칸 처리', '선택 항목은 비워 둡니다. 빈 필수값은 장비명·버전: 미입력, 날짜: 업로드 당일(한국 시간), Rack: 1개, 모듈: 10개로 보완하며 비고에 표시합니다. 담당자는 한쪽만 입력하면 나머지를 미입력으로 보완합니다.'],
+        ['빈칸 처리', '선택 항목은 비워 둡니다. 빈 필수값은 장비명·버전: 미입력, 날짜: 업로드 당일(한국 시간), Rack: 1개, 모듈: 10개로 보완합니다. 비고는 사용자가 입력한 내용만 저장하고, 입력하지 않으면 공란으로 둡니다.'],
         ['설치 정보', '구분, 지역, 설치장소(국소), 주소, 비고를 입력하세요. 작업상태가 비어 있으면 방문예정으로 등록합니다.'],
         ['작업상태', '목록에서 선택하세요. 기타 작업상태 열은 사용하지 않습니다. 필요한 설명은 비고에 적어 주세요.'],
         ['담당자', '기본 1인입니다. 추가 시 현장방문날짜 열 앞에 번호 순서대로 이름/연락처 열을 삽입하세요(최대 20명). 연락처는 앞자리 0을 유지합니다.'],
         ['버전 기본값', '장비 선택 시 SMU02C(통합 포함)는 V100R024C10SPC235, iIoT Gateway는 V100R024C10SPC265로 자동 표시합니다. 직접 덮어써서 수정할 수 있습니다. 업그레이드 버전은 직접 입력하세요.'],
         ['조건부 입력', '통합 장비일 때만 Door LCD 버전 두 열을 입력하세요. 단일 장비일 때는 회색으로 표시됩니다. 일반 xlsx에서는 행마다 열을 숨길 수 없어 회색 표시로 구분합니다.'],
         ['Rack 이름', 'Rack 수만큼 입력하세요. 빈 이름은 Rack 01 등의 기본 이름을 사용합니다. 추가 시 비고 열 앞에 번호 순서대로 이름/모듈 수 열을 삽입하세요(최대 100개).'],
-        ['빈칸 처리', '선택 항목은 비워 둡니다. 장비명이 없으면 미입력, 날짜가 없으면 업로드 당일(한국 시간)을 넣고 비고에 표시합니다. 담당자는 한쪽만 입력하면 나머지를 미입력으로 보완합니다.'],
+        ['비고', '입력하지 않으면 공란으로 저장합니다. 엑셀 임시값 안내는 자동으로 추가하지 않습니다.'],
         ['선택 항목', '장비명과 버전은 목록에서 선택하거나 새 값을 직접 입력할 수 있습니다.'],
         ['등록 제한', '한 번 업로드할 때 최대 100개 현장을 등록합니다. 빈 행과 Rack 기본값만 남은 행은 무시합니다.'],
         ['주의', '열 제목을 수정하거나 삭제하지 마세요. 업로드 전에 화면에서 모든 행의 검증 결과를 확인합니다.'],
@@ -1087,7 +1088,7 @@ function importFallback(value, label, defaults, fallback = '미입력') {
 }
 
 function importNotes(notes, defaults) {
-    return [notes, defaults.length ? `[엑셀 임시값] ${defaults.join(' / ')}` : ''].filter(Boolean).join('\n');
+    return (notes || '').split(/\r\n|\r|\n/).filter(line => !/^\s*\[엑셀 임시값\]/.test(line)).join('\n').trim();
 }
 
 function parseBasicImportRows(rows, sharedStrings, includeLocation = false) {
@@ -1744,7 +1745,9 @@ function setEditMode(recordId = null) {
     cancelEditButton.hidden = !isEditing;
 }
 
-function startEditingRecord(record) {
+function startEditingRecord(record, returnToQuery = false) {
+    const card = returnToQuery ? historyList.querySelector(`[data-record-id="${record.id}"]`) : null;
+    editReturnPosition = returnToQuery ? { id: record.id, scrollY: window.scrollY, offset: card?.getBoundingClientRect().top ?? 0 } : null;
     if (![...deviceSelect.options].some((option) => option.value === record.device_name)) {
         const option = document.createElement('option');
         option.value = record.device_name;
@@ -1766,7 +1769,19 @@ function startEditingRecord(record) {
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
+function restoreEditedRecordPosition(position) {
+    setActiveTab('query', false);
+    requestAnimationFrame(() => {
+        const card = historyList.querySelector(`[data-record-id="${position.id}"]`);
+        const top = card ? window.scrollY + card.getBoundingClientRect().top - position.offset : position.scrollY;
+        window.scrollTo({ top: Math.max(0, top), behavior: 'instant' });
+        card?.querySelector('[data-action="edit"]')?.focus({ preventScroll: true });
+        setRecordActionMessage(card ? '수정 내용을 저장했습니다.' : '수정 내용을 저장했습니다. 해당 기록은 현재 조회 조건에 포함되지 않습니다.');
+    });
+}
+
 function resetEntryForm() {
+    editReturnPosition = null;
     recordForm.reset();
     fillAdditionalFields();
     visitDateInput.value = today();
@@ -2024,7 +2039,7 @@ async function loadActivityLog() {
     }
 }
 
-function setActiveTab(tab) {
+function setActiveTab(tab, refresh = true) {
     const showQuery = tab === 'query';
     const showActivity = tab === 'activity';
     entryTab.classList.toggle('is-active', !showQuery && !showActivity);
@@ -2039,9 +2054,9 @@ function setActiveTab(tab) {
     entryPanel.hidden = showQuery || showActivity;
     queryPanel.hidden = !showQuery;
     activityPanel.hidden = !showActivity;
-    if (showQuery) {
+    if (showQuery && refresh) {
         loadData();
-    } else if (showActivity) {
+    } else if (showActivity && refresh) {
         loadActivityLog();
     }
 }
@@ -2230,7 +2245,7 @@ historyList.addEventListener('click', (event) => {
     const recordId = Number(event.target.closest('.record-card')?.dataset.recordId);
     const record = displayedRecords.find((item) => item.id === recordId);
     if (record) {
-        startEditingRecord(record);
+        startEditingRecord(record, true);
     }
 });
 exportFormat.addEventListener('change', () => {
@@ -2416,9 +2431,11 @@ recordForm.addEventListener('submit', async (event) => {
                 : '기록을 저장하지 못했습니다.'));
         }
 
+        const returnPosition = isEditing ? editReturnPosition : null;
         resetEntryForm();
         setFormMessage(isEditing ? '설치 기록을 수정했습니다.' : '방문 기록을 저장했습니다.');
         await loadData();
+        if (returnPosition) restoreEditedRecordPosition(returnPosition);
     } catch (error) {
         setFormMessage(error.message, true);
     } finally {

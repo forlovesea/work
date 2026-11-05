@@ -189,8 +189,7 @@ for (const extended of [false, true]) {
     assert.equal(record.contacts[0].phone, '미입력');
     assert.equal(record.rack_count, 1);
     assert.equal(record.module_counts.join(','), '10');
-    assert.match(record.notes, /엑셀 임시값/);
-    assert.match(record.notes, /현장방문날짜/);
+    assert.equal(record.notes, '');
     assert.equal(parse(newHeaders.map(() => ''), false, newHeaders).records.length, 0);
 }
 const partialModules = [...values];

@@ -139,6 +139,11 @@ function decodedRackNames(array $record): array
     return $result;
 }
 
+function userNotes(string $notes): string
+{
+    return trim(implode("\n", array_filter(preg_split('/\r\n|\r|\n/', $notes), static fn($line) => !preg_match('/^\s*\[엑셀 임시값\]/u', $line))));
+}
+
 function activityRecordData(array $record): array
 {
     $moduleCounts = $record['module_counts'];
@@ -165,7 +170,7 @@ function activityRecordData(array $record): array
         'site_name' => $record['site_name'] ?? '',
         'address' => $record['address'] ?? '',
         'contacts' => array_values($contacts),
-        'notes' => $record['notes'] ?? '',
+        'notes' => userNotes($record['notes'] ?? ''),
         'work_status' => $record['work_status'] ?? '방문예정',
         'work_status_other' => $record['work_status_other'] ?? '',
         'visit_schedule' => $record['visit_schedule'] ?? '{}',
@@ -212,6 +217,7 @@ function loadData(PDO $database, array $filters): array
     $records = $recordQuery->fetchAll();
 
     foreach ($records as &$record) {
+        $record['notes'] = userNotes($record['notes'] ?? '');
         $record['id'] = (int) $record['id'];
         $record['rack_count'] = (int) $record['rack_count'];
         $record['module_counts'] = json_decode($record['module_counts'], true, 512, JSON_THROW_ON_ERROR);
@@ -243,6 +249,7 @@ function loadData(PDO $database, array $filters): array
     )->fetchAll();
 
     foreach ($inputHistory as &$record) {
+        $record['notes'] = userNotes($record['notes'] ?? '');
         $record['id'] = (int) $record['id'];
         $record['rack_count'] = (int) $record['rack_count'];
         $record['module_counts'] = json_decode($record['module_counts'], true, 512, JSON_THROW_ON_ERROR);
@@ -398,7 +405,7 @@ function validateAdditionalFields(array $input, bool $requireVersions = true): a
         if ($length === false || $length > $maxLength) {
             $errors[] = $label . '은(는) ' . $maxLength . '자 이내로 입력해 주세요.';
         }
-        $record[$key] = $value;
+        $record[$key] = $key === 'notes' ? userNotes($value) : $value;
     }
 
     foreach (['door_existing_version', 'door_upgrade_version'] as $key) {
@@ -576,7 +583,7 @@ try {
         if (($_GET['action'] ?? '') === 'dashboard_records') {
             $filters = validatedFilters($_GET);
             if ($filters['device'] === '' || $filters['work_status'] === '') respond(422, ['error' => '장비와 작업상태를 선택해 주세요.']);
-            $query = $database->prepare('SELECT device_name, site_name, work_status, visit_schedule, rack_count, rack_names, module_counts FROM records WHERE device_name = ? AND work_status = ? ORDER BY visit_date DESC, id DESC');
+            $query = $database->prepare('SELECT device_name, site_name, work_status, visit_schedule, rack_count, rack_names, module_counts, existing_version, upgrade_version, door_existing_version, door_upgrade_version FROM records WHERE device_name = ? AND work_status = ? ORDER BY visit_date DESC, id DESC');
             $query->execute([$filters['device'], $filters['work_status']]);
             $records = $query->fetchAll();
             foreach ($records as &$record) {
@@ -853,9 +860,6 @@ try {
                         $row[$key] = $value;
                         $defaults[] = $label . ': ' . $value;
                     }
-                }
-                if ($defaults !== [] && (!isset($row['notes']) || is_string($row['notes']))) {
-                    $row['notes'] = trim(($row['notes'] ?? '') . "\n[엑셀 임시값] " . implode(' / ', $defaults));
                 }
             }
             $validated = validateBulkRecord($row, $basic);

@@ -365,7 +365,7 @@ function validateAdditionalFields(array $input, bool $requireVersions = true): a
     $errors = [];
     $storedModuleCount = $input['stored_module_count'] ?? 0;
     if (!is_int($storedModuleCount) || $storedModuleCount < 0 || $storedModuleCount > 50) {
-        $errors[] = '보관 모듈 수는 0~50대 사이의 정수로 선택해 주세요.';
+        $errors[] = '보관 축전지 모듈 수는 0~50대 사이의 정수로 선택해 주세요.';
         $storedModuleCount = 0;
     }
     $rackNames = $input['rack_names'] ?? null;
@@ -703,7 +703,7 @@ try {
             'work_status' => '작업상태',
             'work_status_other' => '기타 작업상태',
             'visit_schedule' => '방문 일정',
-            'stored_module_count' => '보관 모듈 수',
+            'stored_module_count' => '보관 축전지 모듈 수',
         ];
         $changes = [];
         foreach ($fieldLabels as $field => $label) {

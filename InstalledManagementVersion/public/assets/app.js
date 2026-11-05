@@ -110,7 +110,7 @@ function additionalRecordDetails(record) {
         ['담당자 정보', (record.contacts || []).map((contact) => `${contact.name} (${contact.phone})`).join(', ')],
         ['작업상태', record.work_status === '기타' ? `기타: ${record.work_status_other || ''}` : record.work_status],
         ['방문 일정', visitScheduleDisplay(record)],
-        ['보관 모듈 수', `${record.stored_module_count ?? 0}대`],
+        ['보관 축전지 모듈 수', `${record.stored_module_count ?? 0}대`],
         ['비고', record.notes],
     ].filter(([, value]) => value);
 }
@@ -569,7 +569,7 @@ function csvCell(value) {
 function exportRows() {
     return [
         ['현장방문날짜', '장비명', '기존 설치 버전', '현재 설치 버전', '축전지 Rack 수', 'Rack별 모듈 수',
-            '구분', '지역', '설치장소(국소)', '주소', '담당자 정보', '작업상태', '비고', '보관 모듈 수'],
+            '구분', '지역', '설치장소(국소)', '주소', '담당자 정보', '작업상태', '비고', '보관 축전지 모듈 수'],
         ...displayedRecords.map((record) => [
             record.visit_date,
             record.device_name,

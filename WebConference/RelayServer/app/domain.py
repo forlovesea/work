@@ -151,6 +151,7 @@ class Store:
 
 def minutes_markdown(room: Room, entries: list[dict]) -> str:
     """Extractive organization; never invent agreements or assigned work."""
+    entries = sorted(entries, key=lambda e: (e["at"], e.get("id", 0)))
     def clean(value: str) -> str:
         return value.replace("\r", " ").replace("\n", " ").replace("<", "&lt;").replace(">", "&gt;")
 

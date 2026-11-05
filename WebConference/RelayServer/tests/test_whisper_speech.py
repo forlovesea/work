@@ -27,8 +27,8 @@ async def test_inference_off_event_loop_and_original_timestamp():
             assert options["beam_size"] == 5
             def segments():
                 assert threading.get_ident() != main_thread
-                yield SimpleNamespace(text=" recognized ", avg_logprob=-0.2, no_speech_prob=0.1)
-                yield SimpleNamespace(text="hallucination", avg_logprob=-2, no_speech_prob=0.9)
+                yield SimpleNamespace(text=" recognized ", avg_logprob=-0.2, no_speech_prob=0.1, compression_ratio=1.2)
+                yield SimpleNamespace(text="hallucination", avg_logprob=-2, no_speech_prob=0.9, compression_ratio=1.2)
             return segments(), None
 
     speech = WhisperSpeechService("", model=Model())

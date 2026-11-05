@@ -66,3 +66,70 @@ def test_api_formats_authorization_and_default(tmp_path):
         assert "회의록 요약" not in response.text
         assert client.get(url, params={"format": "exe"}, headers=headers).status_code == 422
         assert client.get(url, params={"summary": "invalid"}, headers=headers).status_code == 422
+
+
+def test_summary_preserves_late_negation_and_identical_speakers_utterances():
+    original = entries(2)
+    text = "축전지 교체 조건을 논의했습니다. " * 30 + "그러나 교체하지 않기로 했습니다."
+    for e in original:
+        e["text"] = text
+    blocks = document_blocks("검토", original[0]["at"], original, True)
+    summary = blocks[:blocks.index(("h1", "전체 대화 및 기록"))]
+    excerpts = [text for kind, text in summary if "출처:" in text]
+    assert len(excerpts) == 2
+    assert all("그러나 교체하지 않기로 했습니다." in excerpt for excerpt in excerpts)
+    assert "[기록 1] 민수" in excerpts[0]
+    assert "[기록 2] 지현" in excerpts[1]
+    assert all("_reference" not in e for e in original)
+
+
+def test_summary_includes_latest_topic_update_and_reports_omissions():
+    original = entries(7)
+    for i, e in enumerate(original):
+        e["text"] = f"축전지 전압 점검 발언 {i}"
+    original[-1]["text"] = "축전지 전압 점검은 보류합니다."
+    blocks = document_blocks("검토", original[0]["at"], original, True)
+    summary = blocks[:blocks.index(("h1", "전체 대화 및 기록"))]
+    text = "\n".join(text for _, text in summary)
+    assert "축전지 전압 점검은 보류합니다." in text
+    assert "[기록 7]" in text
+    assert "발언 7건 중 3건 발췌" in text
+    assert "생략된 발언 4건" in text
+
+
+def test_summary_without_keywords_keeps_source_and_latest_utterance():
+    original = entries(4)
+    for e in original:
+        e["text"] = "네"
+    blocks = document_blocks("검토", original[0]["at"], original, True)
+    summary = blocks[:blocks.index(("h1", "전체 대화 및 기록"))]
+    excerpts = [text for _, text in summary if "출처:" in text]
+    assert len(excerpts) == 3
+    assert "[기록 4] 지현" in excerpts[-1]
+    assert "2026-10-17 10:03:00 KST" in excerpts[-1]
+
+
+def test_summary_references_match_chronological_transcript():
+    original = entries(2)
+    original[1]["kind"] = "action"
+    blocks = document_blocks("검토", original[0]["at"], list(reversed(original)), True)
+    summary = blocks[:blocks.index(("h1", "전체 대화 및 기록"))]
+    assert any("기록: [기록 2] 지현" in text for _, text in summary)
+    sources = [text for kind, text in blocks if kind == "speaker"]
+    assert "[기록 1]" in sources[0] and "민수" in sources[0]
+    assert "[기록 2]" in sources[1] and "지현" in sources[1]
+
+
+def test_legacy_timestamp_is_utc():
+    from app.minutes_export import stamp
+    assert stamp("2026-10-17T01:00:00") == "2026-10-17 10:00:00"
+    assert stamp("2026-10-17T10:00:00+09:00") == "2026-10-17 10:00:00"
+
+
+def test_markdown_orders_delayed_transcripts_and_ties():
+    from app.domain import Room, minutes_markdown
+    original = entries(3)
+    original[2]["at"] = original[1]["at"]
+    room = Room("r", "CODE", "회의", "meeting", "p", False)
+    text = minutes_markdown(room, list(reversed(original))).split("## 시간순 원문")[1]
+    assert text.index("기록0000") < text.index("기록0001") < text.index("기록0002")

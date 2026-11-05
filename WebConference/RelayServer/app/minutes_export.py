@@ -21,7 +21,11 @@ def clean(text):
 
 def stamp(value):
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        # Legacy timestamps without an offset are stored as UTC, not host time.
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(
             timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M:%S")
     except ValueError:
         return clean(value)
@@ -39,14 +43,12 @@ def terms(text):
 def summary_blocks(entries):
     blocks = [("h1", "회의록 요약"), ("note", "전체 저장 기록에서 주요 키워드와 대표 발언을 발췌한 요약입니다. 자동 전사의 오인식과 생략된 맥락은 아래 전체 대화에서 확인하세요.")]
     sentences = []
-    seen = set()
     for e in entries:
         if e["kind"] != "speech":
             continue
         # Keep each utterance together so follow-up sentences retain their topic.
         sentence = clean(e["text"]).strip()
-        if sentence and sentence not in seen:
-            seen.add(sentence)
+        if sentence:
             sentences.append((sentence, terms(sentence), e))
     frequency = Counter(t for _, ts, _ in sentences for t in ts)
     first_seen = {}
@@ -54,6 +56,14 @@ def summary_blocks(entries):
         for token in tokens:
             first_seen.setdefault(token, (i, text.find(token)))
     remaining = set(range(len(sentences)))
+    included = set()
+
+    def add_utterance(i):
+        text, _, entry = sentences[i]
+        # Never cut an utterance: its final clause may negate the earlier text.
+        reference = f"[기록 {entry['_reference']}] " if "_reference" in entry else ""
+        blocks.append(("body", f"{text}\n출처: {reference}{entry['speaker']} · {stamp(entry['at'])} KST"))
+        included.add(i)
     blocks.append(("h2", "주요 주제와 내용"))
     if not sentences:
         blocks.append(("body", "저장된 음성 발언이 없습니다. 아래 방장 기록을 확인하세요."))
@@ -63,23 +73,30 @@ def summary_blocks(entries):
             break
         topic = sorted(counts, key=lambda t: (-counts[t], -frequency[t], first_seen[t], t))[0]
         matches = [i for i in sorted(remaining) if topic in sentences[i][1]]
-        # Prefer sentences covering recurring terms, retain source order for reading.
-        ranked = sorted(matches, key=lambda i: (-sum(frequency[t] for t in sentences[i][1]) / max(1, len(sentences[i][1])), i))[:3]
+        # Include the beginning and latest contribution, then a representative
+        # middle utterance. Later corrections must have a chance to be shown.
+        ranked = {matches[0], matches[-1]}
+        for i in sorted(matches, key=lambda i: (-sum(frequency[t] for t in sentences[i][1]) / max(1, len(sentences[i][1])), i)):
+            if len(ranked) >= 3:
+                break
+            ranked.add(i)
         related = Counter(t for i in matches for t in sentences[i][1] if t != topic)
         companion = sorted(related, key=lambda t: (-related[t], first_seen[t], t))[:1]
         blocks.append(("h3", " · ".join([topic, *companion])))
         for i in sorted(ranked):
-            text, _, e = sentences[i]
-            excerpt = text if len(text) <= 400 else text[:400] + "…"
-            blocks.append(("body", f"{excerpt}\n출처: {e['speaker']} · {stamp(e['at'])}"))
+            add_utterance(i)
         remaining.difference_update(matches)
     if sentences and not frequency:
-        for text, _, e in sentences[:3]:
-            blocks.append(("body", f"{text[:400]} — {e['speaker']}"))
+        for i in sorted({0, min(1, len(sentences) - 1), len(sentences) - 1}):
+            add_utterance(i)
+    if sentences:
+        blocks.append(("note", f"발언 {len(sentences)}건 중 {len(included)}건 발췌 · 요약에서 생략된 발언 {len(sentences) - len(included)}건. 전체 대화 및 기록에서 조건·반대 의견·후속 정정을 확인하세요."))
     for kind, heading in [("decision", "확정 결정"), ("action", "실행 항목"), ("note", "추가 메모")]:
         blocks.append(("h2", heading))
         selected = [e for e in entries if e["kind"] == kind]
-        blocks.extend(("body", f"{e['text']}\n기록: {e['speaker']} · {stamp(e['at'])}") for e in selected)
+        for e in selected:
+            reference = f"[기록 {e['_reference']}] " if "_reference" in e else ""
+            blocks.append(("body", f"{e['text']}\n기록: {reference}{e['speaker']} · {stamp(e['at'])} KST"))
         if not selected:
             blocks.append(("body", "방장이 확정하여 기록한 항목 없음" if kind != "note" else "추가 메모 없음"))
     return blocks
@@ -87,6 +104,7 @@ def summary_blocks(entries):
 
 def document_blocks(title, created_at, entries, include_summary=False):
     entries = sorted(entries, key=lambda e: (e["at"], e.get("id", 0)))
+    entries = [dict(e, _reference=i) for i, e in enumerate(entries, 1)]
     speakers = list(dict.fromkeys(e["speaker"] for e in entries))
     blocks = [("title", f"{title} 회의록"), ("note", f"회의 시작: {stamp(created_at)} KST\n저장 기록: {len(entries)}건 · 발언 및 기록자: {', '.join(speakers) or '없음'}"),
               ("note", "자동 기록이 켜진 동안 서버에 저장된 전체 발언과 수동 기록을 수록합니다. 음성 인식 결과는 실제 발언과 다를 수 있습니다.")]
@@ -96,7 +114,7 @@ def document_blocks(title, created_at, entries, include_summary=False):
     if not entries:
         blocks.append(("body", "저장된 대화 및 기록이 없습니다."))
     for e in entries:
-        blocks.append(("speaker", f"{stamp(e['at'])} KST | {e['speaker']} | {KINDS.get(e['kind'], e['kind'])}"))
+        blocks.append(("speaker", f"[기록 {e['_reference']}] {stamp(e['at'])} KST | {e['speaker']} | {KINDS.get(e['kind'], e['kind'])}"))
         blocks.append(("body", e["text"]))
     return [(kind, clean(text)) for kind, text in blocks]
 

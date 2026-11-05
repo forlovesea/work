@@ -97,6 +97,7 @@ class SpeechService:
         epoch = None
         resampler = AudioResampler(format="s16", layout="mono", rate=16000)
         pending = bytearray()
+        resampler_used = False
 
         async def blocking(fn, *args):
             # Cancellation must not run FinalResult concurrently with AcceptWaveform.
@@ -116,10 +117,17 @@ class SpeechService:
                 await emit(room, participant, text)
 
         async def flush():
+            nonlocal resampler_used
             if recognizer is not None:
+                if resampler_used:
+                    for audio in resampler.resample(None):
+                        pending.extend(audio.to_ndarray().astype("<i2", copy=False).tobytes())
+                    resampler_used = False
                 if pending:
-                    await blocking(recognizer.AcceptWaveform, bytes(pending))
+                    complete = await blocking(recognizer.AcceptWaveform, bytes(pending))
                     pending.clear()
+                    if complete:
+                        await result()
                 await result(final=True)
 
         try:
@@ -135,8 +143,9 @@ class SpeechService:
                     epoch = current
                 if recognizer is None:
                     continue
+                resampler_used = True
                 for audio in resampler.resample(frame):
-                    pending.extend(audio.to_ndarray().tobytes())
+                    pending.extend(audio.to_ndarray().astype("<i2", copy=False).tobytes())
                 if len(pending) >= 6400:
                     data = bytes(pending)
                     pending.clear()

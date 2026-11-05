@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import logging
+import math
 import os
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
@@ -69,8 +70,14 @@ class WhisperSpeechService:
             compression_ratio_threshold=2.4,
         )
         # Consume the lazy generator on the inference thread, not the event loop.
-        return " ".join(s.text.strip() for s in segments
-                        if s.text.strip() and s.avg_logprob >= -1.0 and s.no_speech_prob < 0.6)
+        return " ".join(
+            s.text.strip() for s in segments
+            if s.text.strip()
+            and all(math.isfinite(value) for value in
+                    (s.avg_logprob, s.no_speech_prob, s.compression_ratio))
+            and s.avg_logprob >= -1.0 and s.no_speech_prob < 0.6
+            and s.compression_ratio <= 2.4
+        )
 
     async def submit(self, pcm, room, participant, emit, at):
         if not pcm:
@@ -125,6 +132,15 @@ class WhisperSpeechService:
         epoch = None
         at = None
         resampler = AudioResampler(format="s16", layout="mono", rate=16000)
+        resampler_used = False
+
+        async def finish_audio():
+            nonlocal resampler_used
+            if resampler_used:
+                for audio in resampler.resample(None):
+                    await collect(audio)
+                resampler_used = False
+            await flush()
 
         async def flush():
             nonlocal quiet, at
@@ -139,42 +155,49 @@ class WhisperSpeechService:
             quiet = 0
             at = None
 
+        async def collect(audio):
+            nonlocal at, quiet
+            pcm = audio.to_ndarray().astype("<i2", copy=False).tobytes()
+            values = np.frombuffer(pcm, dtype="<i2").astype(np.float32)
+            # Only reject near-digital-silence here; Silero VAD does speech detection.
+            audible = bool(values.size and np.sqrt(np.mean(values * values)) > 32)
+            if not buffer and not audible:
+                preroll.extend(pcm)
+                del preroll[:-6400]  # 200 ms context before speech onset
+                return
+            if not buffer:
+                at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                buffer.extend(preroll)
+                preroll.clear()
+                self.buffered[room.id] += 1
+                await self.status(room)
+            buffer.extend(pcm)
+            quiet = 0 if audible else quiet + len(pcm) // 2
+            if len(buffer) // 2 >= self.chunk_samples or (quiet >= 12800 and len(buffer) >= 96000):
+                await flush()
+
         try:
             while True:
                 frame = await track.recv()
                 permitted = room.minutes_enabled and room.can_speak(participant.id)
                 current = room.epoch if permitted else None
                 if current != epoch:
-                    await flush()
+                    await finish_audio()
                     preroll.clear()
                     resampler = AudioResampler(format="s16", layout="mono", rate=16000)
                     epoch = current
                 if not permitted:
                     continue
+                resampler_used = True
                 for audio in resampler.resample(frame):
-                    pcm = audio.to_ndarray().astype("<i2", copy=False).tobytes()
-                    values = np.frombuffer(pcm, dtype="<i2").astype(np.float32)
-                    # Only reject near-digital-silence here; Silero VAD does speech detection.
-                    audible = bool(values.size and np.sqrt(np.mean(values * values)) > 32)
-                    if not buffer and not audible:
-                        preroll.extend(pcm)
-                        del preroll[:-6400]  # 200 ms context before speech onset
-                        continue
-                    if not buffer:
-                        at = datetime.now(timezone.utc).isoformat(timespec="seconds")
-                        buffer.extend(preroll)
-                        preroll.clear()
-                        self.buffered[room.id] += 1
-                        await self.status(room)
-                    buffer.extend(pcm)
-                    quiet = 0 if audible else quiet + len(pcm) // 2
-                    if len(buffer) // 2 >= self.chunk_samples or (quiet >= 12800 and len(buffer) >= 96000):
-                        await flush()
+                    await collect(audio)
         except (MediaStreamError, asyncio.CancelledError):
             pass
         except Exception:
             log.exception("Audio capture for Whisper failed")
             await emit(room, participant, "", error="음성 수집이 중단되었습니다. 다시 입장하세요.")
         finally:
-            await flush()
-            track.stop()
+            try:
+                await finish_audio()
+            finally:
+                track.stop()

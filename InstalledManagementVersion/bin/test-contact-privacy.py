@@ -112,6 +112,13 @@ def main():
                           'work_status': '방문예정', 'contacts': [{'name': '홍길동', 'phone': '010-1234-5678'},
                                                                {'name': '김철', 'phone': '02-123-4567'}]}
                 record_id = admin.call(payload=record, expected=201)['record_id']
+                assert admin.call()['records'][0]['stored_module_count'] == 0
+                record['stored_module_count'] = 50
+                admin.call(payload=dict(record, action='update_record', id=record_id))
+                assert admin.call()['records'][0]['stored_module_count'] == 50
+                assert admin.call()['input_history'][0]['stored_module_count'] == 50
+                for invalid in [-1, 51, 1.5, '5']:
+                    admin.call(payload=dict(record, action='update_record', id=record_id, stored_module_count=invalid), expected=422)
                 # Legacy generated notes are hidden without removing user-authored lines.
                 with closing(sqlite3.connect(work / 'data' / 'installed-management.sqlite')) as db, db:
                     db.execute('UPDATE records SET notes = ? WHERE id = ?', ['사용자 메모\n[엑셀 임시값] 현장방문날짜: 2026-11-04', record_id])

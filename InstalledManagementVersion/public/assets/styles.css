@@ -214,6 +214,10 @@ button {
     outline-offset: 4px;
 }
 
+.stored-module-field { margin-top: 18px; max-width: 420px; }
+.stored-module-field select { max-width: 160px; }
+.stored-module-field small { color: var(--muted); font-weight: 400; }
+
 .brand-mark {
     display: grid;
     width: 104px;
@@ -1519,6 +1523,11 @@ h2 {
 .status-segment:hover { filter: brightness(.96); }
 .status-segment:focus-visible { outline: 3px solid #3856a0; outline-offset: -3px; }
 .device-chart { min-width: calc(48px + var(--device-count) * 230px); }
+@media screen and (max-width: 767px) {
+    #deviceStatusChart .device-column-empty { display: none; }
+    #deviceStatusChart .device-chart { min-width: calc(40px + var(--populated-device-count) * 230px); }
+    #deviceStatusChart .chart-columns { grid-template-columns: repeat(var(--populated-device-count), minmax(0, 1fr)); }
+}
 .device-stack { position: relative; overflow: visible; }
 .small-status-label { position: absolute; right: calc(100% + 5px); transform: translateY(50%); display: block; white-space: nowrap; width: auto; min-height: 18px; border: 0; border-radius: 4px; padding: 2px 4px; font-size: 10px; line-height: 1.2; z-index: 1; }
 .device-count-summary { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 4px 6px; margin-top: 6px; }

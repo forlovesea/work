@@ -86,6 +86,7 @@ function connectDatabase(): PDO
         'work_status' => "TEXT NOT NULL DEFAULT '방문예정'",
         'work_status_other' => "TEXT NOT NULL DEFAULT ''",
         'visit_schedule' => "TEXT NOT NULL DEFAULT '{}'",
+        'stored_module_count' => 'INTEGER NOT NULL DEFAULT 0 CHECK (stored_module_count BETWEEN 0 AND 50)',
     ];
     foreach ($additionalColumns as $column => $definition) {
         if (!in_array($column, $existingColumns, true)) {
@@ -174,6 +175,7 @@ function activityRecordData(array $record): array
         'work_status' => $record['work_status'] ?? '방문예정',
         'work_status_other' => $record['work_status_other'] ?? '',
         'visit_schedule' => $record['visit_schedule'] ?? '{}',
+        'stored_module_count' => (int) ($record['stored_module_count'] ?? 0),
     ];
 }
 
@@ -205,7 +207,7 @@ function loadData(PDO $database, array $filters): array
 
     $sql = 'SELECT id, visit_date, device_name, existing_version, upgrade_version, door_existing_version, door_upgrade_version,
                    rack_count, module_counts, rack_names, category, region, site_name, address, contacts_json, notes,
-                   work_status, work_status_other, visit_schedule, created_at
+                   work_status, work_status_other, visit_schedule, stored_module_count, created_at
             FROM records';
     if ($conditions !== []) {
         $sql .= ' WHERE ' . implode(' AND ', $conditions);
@@ -242,7 +244,7 @@ function loadData(PDO $database, array $filters): array
     $inputHistory = $database->query(
         'SELECT id, visit_date, device_name, existing_version, upgrade_version, door_existing_version, door_upgrade_version,
                 rack_count, module_counts, rack_names, category, region, site_name, address, contacts_json, notes,
-                work_status, work_status_other, visit_schedule
+                work_status, work_status_other, visit_schedule, stored_module_count
          FROM records
          ORDER BY visit_date DESC, id DESC
          LIMIT 100'
@@ -361,6 +363,11 @@ function requiredText(array $input, string $key, int $maxLength): string
 function validateAdditionalFields(array $input, bool $requireVersions = true): array
 {
     $errors = [];
+    $storedModuleCount = $input['stored_module_count'] ?? 0;
+    if (!is_int($storedModuleCount) || $storedModuleCount < 0 || $storedModuleCount > 50) {
+        $errors[] = '보관 모듈 수는 0~50대 사이의 정수로 선택해 주세요.';
+        $storedModuleCount = 0;
+    }
     $rackNames = $input['rack_names'] ?? null;
     $rackCount = $input['rack_count'] ?? 0;
     $normalizedNames = [];
@@ -392,7 +399,7 @@ function validateAdditionalFields(array $input, bool $requireVersions = true): a
         'notes' => ['비고', 2000],
         'work_status_other' => ['기타 작업상태', 100],
     ];
-    $record = ['rack_names' => $normalizedNames];
+    $record = ['rack_names' => $normalizedNames, 'stored_module_count' => $storedModuleCount];
     foreach ($fields as $key => [$label, $maxLength]) {
         $value = $input[$key] ?? '';
         if (!is_string($value)) {
@@ -583,7 +590,7 @@ try {
         if (($_GET['action'] ?? '') === 'dashboard_records') {
             $filters = validatedFilters($_GET);
             if ($filters['device'] === '' || $filters['work_status'] === '') respond(422, ['error' => '장비와 작업상태를 선택해 주세요.']);
-            $query = $database->prepare('SELECT device_name, site_name, work_status, visit_schedule, rack_count, rack_names, module_counts, existing_version, upgrade_version, door_existing_version, door_upgrade_version FROM records WHERE device_name = ? AND work_status = ? ORDER BY visit_date DESC, id DESC');
+            $query = $database->prepare('SELECT device_name, site_name, work_status, visit_schedule, stored_module_count, rack_count, rack_names, module_counts, existing_version, upgrade_version, door_existing_version, door_upgrade_version FROM records WHERE device_name = ? AND work_status = ? ORDER BY visit_date DESC, id DESC');
             $query->execute([$filters['device'], $filters['work_status']]);
             $records = $query->fetchAll();
             foreach ($records as &$record) {
@@ -653,7 +660,7 @@ try {
         $database->beginTransaction();
         $exists = $database->prepare(
             'SELECT visit_date, device_name, existing_version, upgrade_version, door_existing_version, door_upgrade_version, rack_count, module_counts, rack_names,
-                    category, region, site_name, address, contacts_json, notes, work_status, work_status_other, visit_schedule
+                    category, region, site_name, address, contacts_json, notes, work_status, work_status_other, visit_schedule, stored_module_count
              FROM records WHERE id = ?'
         );
         $exists->execute([$recordId]);
@@ -696,6 +703,7 @@ try {
             'work_status' => '작업상태',
             'work_status_other' => '기타 작업상태',
             'visit_schedule' => '방문 일정',
+            'stored_module_count' => '보관 모듈 수',
         ];
         $changes = [];
         foreach ($fieldLabels as $field => $label) {
@@ -723,7 +731,7 @@ try {
             'UPDATE records
              SET visit_date = ?, device_name = ?, existing_version = ?, upgrade_version = ?, door_existing_version = ?, door_upgrade_version = ?,
                  rack_count = ?, module_counts = ?, rack_names = ?, category = ?, region = ?, site_name = ?, address = ?, contacts_json = ?,
-                 notes = ?, work_status = ?, work_status_other = ?, visit_schedule = ?
+                 notes = ?, work_status = ?, work_status_other = ?, visit_schedule = ?, stored_module_count = ?
              WHERE id = ?'
         );
         $recordUpdate->execute([
@@ -745,6 +753,7 @@ try {
             $validated['record']['work_status'],
             $validated['record']['work_status_other'],
             $validated['record']['visit_schedule'],
+            $validated['record']['stored_module_count'],
             $recordId,
         ]);
         if ($changes !== []) {
@@ -774,7 +783,7 @@ try {
             $recordsQuery = $database->prepare(
                 'SELECT id, visit_date, device_name, existing_version, upgrade_version, door_existing_version, door_upgrade_version,
                         rack_count, module_counts, rack_names, category, region, site_name, address, contacts_json, notes,
-                        work_status, work_status_other, visit_schedule
+                        work_status, work_status_other, visit_schedule, stored_module_count
                  FROM records WHERE id IN (' . $placeholders . ')'
             );
             $recordsQuery->execute($idChunk);
@@ -800,7 +809,7 @@ try {
         $sql = 'DELETE FROM records';
         $selectSql = 'SELECT id, visit_date, device_name, existing_version, upgrade_version, door_existing_version, door_upgrade_version,
                              rack_count, module_counts, rack_names, category, region, site_name, address, contacts_json, notes,
-                             work_status, work_status_other, visit_schedule FROM records';
+                             work_status, work_status_other, visit_schedule, stored_module_count FROM records';
         if ($conditions !== []) {
             $sql .= ' WHERE ' . implode(' AND ', $conditions);
             $selectSql .= ' WHERE ' . implode(' AND ', $conditions);
@@ -888,8 +897,8 @@ try {
         $recordInsert = $database->prepare(
             'INSERT INTO records (
                 visit_date, device_name, existing_version, upgrade_version, door_existing_version, door_upgrade_version, rack_count, module_counts, rack_names,
-                category, region, site_name, address, contacts_json, notes, work_status, work_status_other, visit_schedule
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                category, region, site_name, address, contacts_json, notes, work_status, work_status_other, visit_schedule, stored_module_count
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         foreach ($validatedRecords as $record) {
             $deviceInsert->execute([$record['device_name']]);
@@ -912,6 +921,7 @@ try {
                 $record['work_status'],
                 $record['work_status_other'],
                 $record['visit_schedule'],
+                $record['stored_module_count'],
             ]);
             recordActivity(
                 $database,
@@ -968,8 +978,8 @@ try {
     $recordInsert = $database->prepare(
         'INSERT INTO records (
             visit_date, device_name, existing_version, upgrade_version, door_existing_version, door_upgrade_version, rack_count, module_counts, rack_names,
-            category, region, site_name, address, contacts_json, notes, work_status, work_status_other, visit_schedule
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            category, region, site_name, address, contacts_json, notes, work_status, work_status_other, visit_schedule, stored_module_count
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
     $recordInsert->execute([
         $visitDate,
@@ -990,6 +1000,7 @@ try {
         $record['work_status'],
         $record['work_status_other'],
         $record['visit_schedule'],
+        $record['stored_module_count'],
     ]);
     $recordId = (int) $database->lastInsertId();
     recordActivity($database, 'create', $recordId, [
@@ -1011,6 +1022,7 @@ try {
         'work_status' => $record['work_status'],
         'work_status_other' => $record['work_status_other'],
         'visit_schedule' => $record['visit_schedule'],
+        'stored_module_count' => $record['stored_module_count'],
     ]);
     $database->commit();
 

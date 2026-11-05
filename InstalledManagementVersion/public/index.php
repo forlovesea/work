@@ -260,6 +260,15 @@ try {
                         </label>
                     </div>
                     <div id="rackModules" class="rack-list"></div>
+                    <label class="field stored-module-field">
+                        <span>보관 모듈 수</span>
+                        <select id="storedModuleCount" name="stored_module_count" required>
+                            <?php for ($count = 0; $count <= 50; $count++): ?>
+                                <option value="<?php echo $count; ?>"><?php echo $count; ?>대</option>
+                            <?php endfor; ?>
+                        </select>
+                        <small>Rack에 설치하지 않고 현장에 별도로 보관 중인 모듈입니다.</small>
+                    </label>
                 </section>
 
                 <label class="field notes-field">

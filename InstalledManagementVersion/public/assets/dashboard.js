@@ -68,6 +68,7 @@ function renderInstallationDashboard(rows, devices = []) {
     get('statusDetails').hidden = false;
     const plot = element('div', 'device-chart');
     plot.style.setProperty('--device-count', summary.groups.length);
+    plot.style.setProperty('--populated-device-count', summary.groups.filter(group => group.total > 0).length);
     const grid = element('div', 'chart-grid');
     grid.setAttribute('aria-hidden', 'true');
     for (const percent of [100, 75, 50, 25, 0]) {
@@ -79,7 +80,7 @@ function renderInstallationDashboard(rows, devices = []) {
     plot.append(grid);
     const columns = element('div', 'chart-columns');
     for (const group of summary.groups) {
-        const column = element('div', 'device-column');
+        const column = element('div', group.total ? 'device-column' : 'device-column device-column-empty');
         const stack = element('div', 'device-stack');
         stack.setAttribute('role', 'group');
         const description = group.counts.map((count, i) => `${installationStatuses[i].name} ${count}건 (${format(group.percentages[i])})`).join(', ');
@@ -275,6 +276,9 @@ function showInstallationRacks(dialog, record, trigger) {
     }
     message.textContent = `Rack ${record.rack_count}식 · Rack별 모듈 구성`;
     detail.append(back, heading, list);
+    const stored = document.createElement('p');
+    stored.textContent = `보관 모듈 수: ${record.stored_module_count ?? 0}대`;
+    detail.append(stored);
     dialog.scrollTop = 0;
     back.focus({ preventScroll: true });
 }

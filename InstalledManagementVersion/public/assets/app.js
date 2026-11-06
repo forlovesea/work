@@ -97,7 +97,7 @@ function versionDisplay(record, key) {
     return `SMU02C: ${record[key]} / Door LCD: ${record[`door_${key}`] || ''}`;
 }
 
-function additionalRecordDetails(record) {
+function additionalRecordDetails(record, includeStoredModules = true) {
     return [
         ['SMU02C 기존 설치 버전', record.device_name === 'SMU02C + Door LCD' ? record.existing_version : ''],
         ['SMU02C 업그레이드 버전', record.device_name === 'SMU02C + Door LCD' ? record.upgrade_version : ''],
@@ -110,7 +110,7 @@ function additionalRecordDetails(record) {
         ['담당자 정보', (record.contacts || []).map((contact) => `${contact.name} (${contact.phone})`).join(', ')],
         ['작업상태', record.work_status === '기타' ? `기타: ${record.work_status_other || ''}` : record.work_status],
         ['방문 일정', visitScheduleDisplay(record)],
-        ['보관 축전지 모듈 수', `${record.stored_module_count ?? 0}대`],
+        ['보관 축전지 모듈 수', includeStoredModules ? `${record.stored_module_count ?? 0}대` : ''],
         ['비고', record.notes],
     ].filter(([, value]) => value);
 }
@@ -1696,7 +1696,7 @@ function createRecordCard(record, index = 0) {
         document.createTextNode(versionDisplay(record, 'upgrade_version')),
     );
     main.append(titleRow, versions);
-    for (const [label, value] of additionalRecordDetails(record)) {
+    for (const [label, value] of additionalRecordDetails(record, false)) {
         const detail = document.createElement('p');
         detail.className = 'record-site-detail';
         detail.textContent = `${label}: ${value}`;
@@ -1712,7 +1712,7 @@ function createRecordCard(record, index = 0) {
     moduleSummary.className = 'module-summary';
     moduleSummary.textContent = record.module_counts
         .map((count, index) => `${recordRackName(record, index)} ${count}대`)
-        .join(' · ');
+        .join(' · ') + `, 보관 축전지 모듈 수: ${record.stored_module_count ?? 0}대`;
     const editButton = document.createElement('button');
     editButton.className = 'record-edit-button';
     editButton.type = 'button';

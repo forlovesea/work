@@ -1,16 +1,16 @@
 :root {
     color-scheme: light;
-    font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif;
-    color: #172033;
-    background: #f4f7fb;
+    font-family: "Pretendard", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", -apple-system, BlinkMacSystemFont, sans-serif;
+    color: #35394b;
+    background: #f7f6fb;
     font-synthesis: none;
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
-    --ink: #172033;
-    --muted: #758198;
-    --line: #e5eaf2;
-    --accent: #3d65d8;
-    --accent-dark: #2d50b7;
+    --ink: #35394b;
+    --muted: #687083;
+    --line: #e5e2ed;
+    --accent: #74639e;
+    --accent-dark: #5d4b86;
 }
 
 * {
@@ -1845,3 +1845,75 @@ h2 {
 .visit-schedule-grid small { grid-column: 1 / -1; }
 #visitSchedulePreview { margin: 12px 0 0; color: #2e4d7a; overflow-wrap: anywhere; }
 @media (max-width: 540px) { .visit-schedule-grid { grid-template-columns: minmax(0, 1fr); } }
+
+/* Soft lavender, mint and cream surfaces shared across the application. */
+@media screen {
+    body { background: linear-gradient(135deg, #f6f3fb 0%, #f7faf8 55%, #fcf8f3 100%); line-height: 1.6; letter-spacing: -.015em; }
+    h1, h2, h3 { color: var(--ink); word-break: keep-all; }
+    .eyebrow { color: #817393; letter-spacing: .1em; }
+    .panel { border-color: var(--line); border-radius: 22px; background: #ffffffed; box-shadow: 0 8px 28px #51416e07; }
+    .status-dashboard { background: linear-gradient(120deg, #fff, #f8f5fc); }
+    .main-tabs { background: #eeebf4; border-color: #e5dfef; border-radius: 17px; padding: 6px; }
+    .main-tab { border-radius: 12px; color: #666078; font-weight: 600; transition: background .18s ease, box-shadow .18s ease; }
+    .main-tab.is-active { background: #fff; color: #655083; box-shadow: 0 3px 10px #67528512; }
+    .main-tab:not(.is-active):hover { background: #ffffff80; }
+    .primary-button, .secondary-button, .danger-button, .record-edit-button,
+    .popup-rack-button, .popup-rack-back, .popup-close {
+        border-radius: 12px;
+        font-weight: 600;
+        transition: background .18s ease, border-color .18s ease, box-shadow .18s ease, transform .18s ease;
+    }
+    .primary-button { background: #e4dbf4; color: #4e3c70; border: 1px solid #d7c9ec; box-shadow: 0 3px 8px #69518310; }
+    .primary-button:hover:not(:disabled) { background: #d9cbed; box-shadow: 0 5px 12px #69518319; }
+    .secondary-button, .record-edit-button, .popup-rack-button, .popup-rack-back {
+        background: #f4f1fa; color: #605174; border: 1px solid #e1d9ee; box-shadow: 0 2px 5px #69518306;
+    }
+    .secondary-button:hover:not(:disabled), .record-edit-button:hover:not(:disabled),
+    .popup-rack-button:hover, .popup-rack-back:hover { background: #eae3f4; border-color: #cec0e2; }
+    .danger-button { background: #fff1f1; color: #934f5b; border-color: #edcfd5; }
+    .danger-button:hover:not(:disabled) { background: #f9e1e5; }
+    button:active:not(:disabled) { transform: translateY(1px); }
+    button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+        outline: 3px solid #8b77b4; outline-offset: 3px;
+    }
+    button:disabled { cursor: not-allowed; box-shadow: none; }
+    .field input, .field select, .field textarea, .rack-name, .module-select {
+        border-color: #dedbe6; border-radius: 11px; background-color: #fdfcfe; color: var(--ink);
+    }
+    .field input:focus, .field select:focus, .field textarea:focus, .rack-name:focus {
+        border-color: #a18bbf; box-shadow: 0 0 0 3px #ece5f6;
+    }
+    input::placeholder, textarea::placeholder { color: #7e7b89; }
+    input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
+    .rack-card { background: #faf8fd; border-color: #e8e1ef; border-radius: 14px; }
+    .visit-schedule { background: #f1f7f4; border-color: #d7e8df; border-radius: 15px; }
+    #visitSchedulePreview { color: #44695c; }
+    .record-card { --record-background: #f4f0fa; --record-border: #e5dcef; --record-accent: #b9a4d2; border-radius: 18px; }
+    .record-card:nth-child(3n + 2) { --record-background: #eff7f3; --record-border: #dbe9e1; --record-accent: #a0c8b4; }
+    .record-card:nth-child(3n) { --record-background: #fcf5ec; --record-border: #eee1d0; --record-accent: #ddbf98; }
+    .record-racks { background: #ffffffa6; border-color: #ffffff; border-radius: 14px; }
+    .rack-total { background: #eae3f4; color: #655080; border-radius: 8px; }
+    .module-summary { color: #626174; font-size: 12px; }
+    .dashboard-total { background: #ece6f5; color: #66517f; }
+    .dashboard-message { background: #f5f2f9; color: var(--muted); }
+    .completion-ring-face { background: conic-gradient(from -90deg, #abd6c2 0 var(--completion), #eee8f4 var(--completion) 100%); box-shadow: 0 4px 0 #dbd6e3, 0 8px 16px #74648212; }
+    .completion-ring-face::after { background: #faf8fc; box-shadow: inset 0 2px 5px #74648210; }
+    .session-controls { padding: 10px; border: 1px solid #e7e0ef; border-radius: 16px; background: #ffffff99; }
+    .session-remaining { color: #6b607b; }
+    #extendSessionButton { background: #e7f2ec; color: #416452; border-color: #d3e6db; }
+    #extendSessionButton:hover:not(:disabled) { background: #d7eade; }
+    .installation-popup, .location-match-dialog, .contact-reveal-dialog { border-color: #e6deef; border-radius: 22px; box-shadow: 0 20px 70px #4c3d6626; }
+    .popup-heading { background: linear-gradient(120deg, #f3eef9, #fff); }
+    .popup-close { background: #f5f1fa; color: #6a587e; border-color: #e4dced; }
+}
+
+@media screen and (max-width: 767px) {
+    .session-controls { padding: 7px; max-width: 132px; gap: 5px; }
+    .session-remaining { font-size: 10px; }
+    .panel { border-radius: 18px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    button, .main-tab, .record-card { transition: none !important; }
+    button:active:not(:disabled) { transform: none; }
+}

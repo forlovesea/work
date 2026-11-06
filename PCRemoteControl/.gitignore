@@ -1,0 +1,8 @@
+**/bin/
+**/obj/
+**/__pycache__/
+release/
+*.pfx
+*.pem
+relay.env
+docs/qa/

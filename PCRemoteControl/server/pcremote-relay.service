@@ -1,0 +1,22 @@
+[Unit]
+Description=PCRemoteControl TLS Relay (TCP 61000)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pcremote
+Group=pcremote
+EnvironmentFile=/etc/pcremote/relay.env
+ExecStart=/usr/bin/python3 /opt/pcremote/relay.py --port 61000 --cert /etc/pcremote/fullchain.pem --key /etc/pcremote/privkey.pem
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+MemoryMax=512M
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

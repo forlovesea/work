@@ -73,7 +73,23 @@ function ensurePasswordHash(bool $secondary = false): string
 
 function isAppAuthenticated(): bool
 {
-    return isset($_SESSION['app_authenticated']) && $_SESSION['app_authenticated'] === true;
+    if (($_SESSION['app_authenticated'] ?? false) !== true) return false;
+    if (!isset($_SESSION['app_expires_at'])) extendAppSession();
+    if ($_SESSION['app_expires_at'] <= time()) {
+        $_SESSION = [];
+        return false;
+    }
+    return true;
+}
+
+function extendAppSession(): void
+{
+    $_SESSION['app_expires_at'] = time() + max(1, (int) ini_get('session.gc_maxlifetime'));
+}
+
+function appSessionRemaining(): int
+{
+    return isAppAuthenticated() ? max(0, $_SESSION['app_expires_at'] - time()) : 0;
 }
 
 function canDeleteActivity(): bool

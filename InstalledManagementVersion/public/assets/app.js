@@ -132,6 +132,48 @@ const loginButton = document.querySelector('#loginButton');
 const loginMessage = document.querySelector('#loginMessage');
 const appShell = document.querySelector('#appShell');
 const logoutButton = document.querySelector('#logoutButton');
+const extendSessionButton = document.querySelector('#extendSessionButton');
+const sessionRemaining = document.querySelector('#sessionRemaining');
+const sessionMessage = document.querySelector('#sessionMessage');
+let sessionTimer = null;
+let sessionDeadline = 0;
+
+function updateSessionTimer(seconds) {
+    clearInterval(sessionTimer);
+    sessionDeadline = Date.now() + Math.max(0, Number(seconds) || 0) * 1000;
+    const render = () => {
+        const remaining = Math.max(0, Math.ceil((sessionDeadline - Date.now()) / 1000));
+        sessionRemaining.textContent = `${String(Math.floor(remaining / 60)).padStart(2, '0')}:${String(remaining % 60).padStart(2, '0')}`;
+        if (remaining === 0) {
+            clearInterval(sessionTimer);
+            // 다른 탭에서 연장했을 수 있으므로 서버 상태를 다시 확인합니다.
+            bootstrapSession();
+        }
+    };
+    sessionTimer = setInterval(render, 1000);
+    render();
+}
+
+extendSessionButton.addEventListener('click', async () => {
+    extendSessionButton.disabled = true;
+    sessionMessage.textContent = '';
+    try {
+        const response = await authenticatedFetch('api.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ action: 'extend_session' }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || '세션을 연장하지 못했습니다.');
+        if (!loginPanel.hidden) return;
+        updateSessionTimer(result.session_remaining);
+        sessionMessage.textContent = '세션이 연장되었습니다.';
+    } catch (error) {
+        sessionMessage.textContent = error.message;
+    } finally {
+        extendSessionButton.disabled = false;
+    }
+});
 const visitDateInput = document.querySelector('#visitDate');
 const deviceSelect = document.querySelector('#deviceSelect');
 const customDeviceField = document.querySelector('#customDeviceField');
@@ -248,6 +290,9 @@ async function deleteActivityLog(all = false) {
 }
 
 function showLogin(message = '', isError = false) {
+    clearInterval(sessionTimer);
+    sessionRemaining.textContent = '--:--';
+    sessionMessage.textContent = '';
     setContactPrivacy(true);
     requestSequence++;
     displayedRecords = [];
@@ -299,7 +344,7 @@ async function bootstrapSession() {
             throw new Error(result.error || '로그인 상태를 확인하지 못했습니다.');
         }
         if (!result.authenticated) {
-            showLogin();
+            showLogin(csrfToken ? '로그인 세션이 만료되었습니다. 다시 로그인해 주세요.' : '', Boolean(csrfToken));
             return;
         }
         csrfToken = result.csrf_token;
@@ -307,6 +352,7 @@ async function bootstrapSession() {
         setContactPrivacy(result.contacts_restricted);
         loginPanel.hidden = true;
         appShell.hidden = false;
+        updateSessionTimer(result.session_remaining);
         loadData();
     } catch (error) {
         showLogin(error.message, true);
@@ -2155,6 +2201,7 @@ loginForm.addEventListener('submit', async (event) => {
         loginMessage.textContent = '';
         loginPanel.hidden = true;
         appShell.hidden = false;
+        updateSessionTimer(result.session_remaining);
         loadData();
     } catch (error) {
         loginMessage.textContent = error.message;

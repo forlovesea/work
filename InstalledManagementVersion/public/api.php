@@ -545,6 +545,7 @@ try {
         ensurePasswordHash();
         respond(200, [
             'authenticated' => isAppAuthenticated(),
+            'session_remaining' => appSessionRemaining(),
             'can_delete_activity' => canDeleteActivity(),
             'contacts_restricted' => contactsRestricted(),
             'csrf_token' => isAppAuthenticated() ? csrfToken() : null,
@@ -564,17 +565,22 @@ try {
             }
             session_regenerate_id(true);
             $_SESSION['app_authenticated'] = true;
+            extendAppSession();
             $_SESSION['account_role'] = password_verify($password, $secondaryHash) ? 'secondary' : 'primary';
             unset($_SESSION['contact_approval_owner']);
             $_SESSION['can_delete_activity'] = password_verify($password, $passwordHash) && hash_equals(DEFAULT_APP_PASSWORD, $password);
             unset($_SESSION['app_csrf_token']);
-            respond(200, ['csrf_token' => csrfToken(), 'can_delete_activity' => canDeleteActivity(), 'contacts_restricted' => contactsRestricted()]);
+            respond(200, ['csrf_token' => csrfToken(), 'can_delete_activity' => canDeleteActivity(), 'contacts_restricted' => contactsRestricted(), 'session_remaining' => appSessionRemaining()]);
         }
 
         if (!isAppAuthenticated()) {
             respond(401, ['error' => '로그인이 필요합니다.']);
         }
         verifyCsrfToken();
+        if ($requestAction === 'extend_session') {
+            extendAppSession();
+            respond(200, ['session_remaining' => appSessionRemaining()]);
+        }
         if ($requestAction === 'logout') {
             $_SESSION = [];
             session_regenerate_id(true);

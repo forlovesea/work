@@ -62,7 +62,12 @@ try {
                 </div>
                 <div class="completion-copy"><strong>전체 설치 현황</strong><p id="completionCounts">불러오는 중…</p><span>작업완료 기준 · 전체 기간</span></div>
             </section>
-            <button id="logoutButton" class="secondary-button logout-button" type="button">로그아웃</button>
+            <div class="session-controls">
+                <button id="logoutButton" class="secondary-button logout-button" type="button">로그아웃</button>
+                <p class="session-remaining">세션남은 시간: <span id="sessionRemaining" role="timer">--:--</span></p>
+                <button id="extendSessionButton" class="secondary-button" type="button">세션 연장</button>
+                <p id="sessionMessage" class="session-message" role="status"></p>
+            </div>
         </header>
 
         <section class="panel status-dashboard" aria-labelledby="statusDashboardTitle">

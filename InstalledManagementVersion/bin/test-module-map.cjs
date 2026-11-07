@@ -25,3 +25,21 @@ assert.equal(data.get('주소 미분류').total, 5);
 assert.equal([...data.values()].reduce((sum, group) => sum + group.total, 0), 45);
 assert.equal(context.moduleMapData([]).get('서울').total, 0);
 console.log('PASS: address aliases, ambiguous city names, installation + storage, duplicate addresses, unknown addresses and empty data');
+const sites = context.moduleMapData([
+    { address: '서울 강남구', site_name: '강남국소', installed: 10, stored: 44, module_counts: [10], rack_names: ['Rack 01'] },
+    { address: '서울 강남구', site_name: '별도국소', installed: 15, stored: 0, module_counts: [10, 5], rack_names: ['주 Rack', '보조 Rack'] },
+]);
+const items = [...sites.get('서울').addresses.values()];
+assert.equal(items.length, 2);
+assert.equal(items[0].siteName, '강남국소');
+assert.equal(context.moduleMapItemSummary(items[0]), '총 54개 (Rack 01 10대, Rack 외 보관 모듈 수: 44대)');
+assert.equal(context.moduleMapItemSummary(items[1]), '총 15개 (주 Rack 10대, 보조 Rack 5대, Rack 외 보관 모듈 수: 0대)');
+assert.equal(sites.get('서울').total, 69);
+const repeated = context.moduleMapData([
+    { address: '', site_name: '', installed: 10, stored: 2, module_counts: [10] },
+    { address: '', site_name: '', installed: 5, stored: 3, module_counts: [5] },
+]);
+const repeatedItem = [...repeated.get('주소 미분류').addresses.values()][0];
+assert.equal(repeatedItem.siteName, '국소명 미입력');
+assert.equal(context.moduleMapItemSummary(repeatedItem), '총 20개 (Rack 01 15대, Rack 외 보관 모듈 수: 5대)');
+console.log('PASS: site separation, rack names, rack totals, stored totals and missing site/name fallbacks');

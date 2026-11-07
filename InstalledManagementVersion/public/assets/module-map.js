@@ -36,14 +36,26 @@ function moduleMapData(records) {
         group.stored += stored;
         group.total += installed + stored;
         group.records += 1;
-        const item = group.addresses.get(address) || { address, installed: 0, stored: 0, total: 0, records: 0 };
+        const siteName = String(record.site_name || '').trim() || '국소명 미입력';
+        const key = JSON.stringify([address, siteName]);
+        const item = group.addresses.get(key) || { address, siteName, racks: new Map(), installed: 0, stored: 0, total: 0, records: 0 };
+        (record.module_counts || []).forEach((count, index) => {
+            const rackName = record.rack_names?.[index] || `Rack ${String(index + 1).padStart(2, '0')}`;
+            item.racks.set(rackName, (item.racks.get(rackName) || 0) + Math.max(0, Number(count) || 0));
+        });
         item.installed += installed;
         item.stored += stored;
         item.total += installed + stored;
         item.records += 1;
-        group.addresses.set(address, item);
+        group.addresses.set(key, item);
     }
     return groups;
+}
+
+function moduleMapItemSummary(item) {
+    const format = value => value.toLocaleString('ko-KR');
+    const racks = [...item.racks].map(([name, count]) => `${name} ${format(count)}대`);
+    return `총 ${format(item.total)}개 (${[...racks, `Rack 외 보관 모듈 수: ${format(item.stored)}대`].join(', ')})`;
 }
 
 function renderModuleMap(records) {
@@ -74,11 +86,13 @@ function renderModuleMap(records) {
         list.replaceChildren();
         for (const item of [...group.addresses.values()].sort((a, b) => b.total - a.total || a.address.localeCompare(b.address, 'ko'))) {
             const row = document.createElement('p');
-            const address = document.createElement('strong');
+            const site = document.createElement('strong');
+            site.textContent = item.siteName;
+            const address = document.createElement('span');
             address.textContent = item.address;
             const count = document.createElement('span');
-            count.textContent = `총 ${format(item.total)}개 (설치 ${format(item.installed)} + 보관 ${format(item.stored)}) · ${item.records}건`;
-            row.append(address, count);
+            count.textContent = moduleMapItemSummary(item);
+            row.append(site, address, count);
             list.append(row);
         }
         if (!group.records) list.textContent = '이 지역에 등록된 기록이 없습니다.';

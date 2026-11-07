@@ -23,6 +23,7 @@ try {
     <link rel="stylesheet" href="assets/styles.css?v=<?php echo filemtime(__DIR__ . '/assets/styles.css'); ?>">
     <script src="assets/visit-schedule.js?v=<?php echo filemtime(__DIR__ . '/assets/visit-schedule.js'); ?>" defer></script>
     <script src="assets/dashboard.js?v=<?php echo filemtime(__DIR__ . '/assets/dashboard.js'); ?>" defer></script>
+    <script src="assets/module-map.js?v=<?php echo filemtime(__DIR__ . '/assets/module-map.js'); ?>" defer></script>
     <script src="assets/contact-privacy.js?v=<?php echo filemtime(__DIR__ . '/assets/contact-privacy.js'); ?>" defer></script>
     <script src="assets/app.js?v=<?php echo filemtime(__DIR__ . '/assets/app.js'); ?>" defer></script>
 </head>
@@ -68,6 +69,14 @@ try {
                 <button id="extendSessionButton" class="secondary-button" type="button">세션 연장</button>
                 <p id="sessionMessage" class="session-message" role="status"></p>
             </div>
+            <section class="module-map-panel" aria-labelledby="moduleMapTitle">
+                <div class="module-map-heading"><h2 id="moduleMapTitle">전국 모듈 현황</h2><strong id="moduleMapTotal">— 개</strong></div>
+                <p class="module-map-caption">설치 + 보관 · 전체 등록 기록 · 주소의 시·도 기준</p>
+                <div id="moduleMapCanvas" class="module-map-canvas" role="group" aria-label="남한 지역별 모듈 수, 지역을 선택하면 주소별 수량 표시"></div>
+                <p id="moduleMapMessage" class="module-map-message" role="status">불러오는 중…</p>
+                <button id="moduleMapUnknown" class="module-map-unknown" type="button" hidden></button>
+                <details id="moduleMapDetails" class="module-map-details" hidden><summary id="moduleMapSelection">지역별 상세</summary><div id="moduleMapAddresses"></div></details>
+            </section>
         </header>
 
         <section class="panel status-dashboard" aria-labelledby="statusDashboardTitle">

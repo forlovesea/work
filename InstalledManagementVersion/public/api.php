@@ -241,6 +241,15 @@ function loadData(PDO $database, array $filters): array
         'SELECT device_name, work_status, COUNT(*) AS record_count
          FROM records GROUP BY device_name, work_status'
     )->fetchAll();
+    $moduleMapRecords = $database->query(
+        'SELECT address, module_counts, stored_module_count FROM records'
+    )->fetchAll();
+    foreach ($moduleMapRecords as &$mapRecord) {
+        $mapRecord['installed'] = array_sum(json_decode($mapRecord['module_counts'], true, 512, JSON_THROW_ON_ERROR));
+        $mapRecord['stored'] = (int) $mapRecord['stored_module_count'];
+        unset($mapRecord['module_counts'], $mapRecord['stored_module_count']);
+    }
+    unset($mapRecord);
     $inputHistory = $database->query(
         'SELECT id, visit_date, device_name, existing_version, upgrade_version, door_existing_version, door_upgrade_version,
                 rack_count, module_counts, rack_names, category, region, site_name, address, contacts_json, notes,
@@ -269,6 +278,7 @@ function loadData(PDO $database, array $filters): array
         'upgrade_versions' => $upgradeVersions,
         'input_history' => $inputHistory,
         'installation_summary' => $installationSummary,
+        'module_map_records' => $moduleMapRecords,
     ];
 }
 

@@ -1907,6 +1907,7 @@ async function loadData() {
 
         renderDevices(data.devices);
         renderInstallationDashboard(data.installation_summary, data.devices);
+        renderModuleMap(data.module_map_records);
         renderInputHistory(data.input_history, data.existing_versions, data.upgrade_versions);
         fillSelect(deviceFilter, data.devices, '전체 장비');
         fillSelect(versionFilter, data.current_versions, '전체 버전');
@@ -1935,6 +1936,7 @@ async function loadData() {
         }
         recordCount.textContent = '기록을 불러오지 못했습니다.';
         renderInstallationDashboard(null);
+        renderModuleMap(null);
         displayedRecords = [];
         selectedRecordIds.clear();
         exportButton.disabled = true;

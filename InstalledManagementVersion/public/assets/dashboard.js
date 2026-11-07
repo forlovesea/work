@@ -277,7 +277,7 @@ function showInstallationRacks(dialog, record, trigger) {
     message.textContent = `Rack ${record.rack_count}식 · Rack별 모듈 구성`;
     detail.append(back, heading, list);
     const stored = document.createElement('p');
-    stored.textContent = `보관 축전지 모듈 수: ${record.stored_module_count ?? 0}대`;
+    stored.textContent = `Rack 외 보관 모듈 수: ${record.stored_module_count ?? 0}대`;
     detail.append(stored);
     dialog.scrollTop = 0;
     back.focus({ preventScroll: true });

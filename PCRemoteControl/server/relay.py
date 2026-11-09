@@ -7,6 +7,29 @@ import os
 import ssl
 import struct
 import time
+import secrets
+import smtplib
+from email.message import EmailMessage
+
+AUTH_EMAIL = 'forlovesea@gmail.com'
+AUTH_SECONDS = 300
+
+def send_auth_email(code):
+    host = os.environ.get('PCREMOTE_SMTP_HOST')
+    user = os.environ.get('PCREMOTE_SMTP_USER')
+    password = os.environ.get('PCREMOTE_SMTP_PASSWORD')
+    sender = os.environ.get('PCREMOTE_SMTP_FROM') or user
+    if not all((host, user, password, sender)):
+        raise ValueError('SMTP is not configured')
+    message = EmailMessage()
+    message['Subject'] = 'PCRemoteControl verification code'
+    message['From'] = sender
+    message['To'] = AUTH_EMAIL
+    message.set_content('Your PCRemoteControl verification code: ' + code + '\nExpires in 5 minutes. Do not share this code.')
+    with smtplib.SMTP(host, int(os.environ.get('PCREMOTE_SMTP_PORT', '587')), timeout=15) as smtp:
+        smtp.starttls(context=ssl.create_default_context())
+        smtp.login(user, password)
+        smtp.send_message(message)
 
 MAX_MESSAGE = 8 * 1024 * 1024
 
@@ -37,8 +60,12 @@ class Peer:
             await asyncio.wait_for(self.writer.drain(), 10)
 
 class Relay:
-    def __init__(self, password):
+    def __init__(self, password, mail_sender=send_auth_email):
         self.password = password
+        self.mail_sender = mail_sender
+        self.mail_times = {}
+        self.last_mail = float('-inf')
+
         self.targets = {}
         self.peers = set()
         self.failures = {}
@@ -76,6 +103,24 @@ class Relay:
             p.role = hello.get('role')
             if hello.get('type') != 'hello' or p.role not in ('target', 'host'):
                 raise ValueError('Invalid hello')
+            now = time.monotonic()
+            self.mail_times = {ip: ts for ip, ts in self.mail_times.items() if now - ts < 60}
+            if address in self.mail_times or now - self.last_mail < 5:
+                await p.send({'type': 'error', 'message': 'Email request limit; wait 60 seconds.'})
+                return
+            self.mail_times[address] = self.last_mail = now
+            code = '{:06d}'.format(secrets.randbelow(1000000))
+            try:
+                await asyncio.wait_for(asyncio.get_running_loop().run_in_executor(None, self.mail_sender, code), 25)
+            except Exception:
+                await p.send({'type': 'error', 'message': 'Verification email could not be sent. Check server SMTP settings.'})
+                return
+            await p.send({'type': 'email_required', 'email': AUTH_EMAIL, 'expires_in': AUTH_SECONDS})
+            verification = await read_message(reader, AUTH_SECONDS)
+            supplied = verification.get('code')
+            if verification.get('type') != 'verify_email' or not isinstance(supplied, str) or not hmac.compare_digest(supplied.encode(), code.encode()):
+                await p.send({'type': 'error', 'message': 'Email verification failed. Reconnect to request a new code.'})
+                return
             if p.role == 'target':
                 p.id, p.name = hello.get('id'), hello.get('name')
                 if not isinstance(p.id, str) or not 1 <= len(p.id) <= 80 or not isinstance(p.name, str) or not 1 <= len(p.name) <= 80:

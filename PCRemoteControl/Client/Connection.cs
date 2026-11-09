@@ -4,12 +4,14 @@ using System.Net.Sockets;
 using System.Text.Json;
 
 namespace PCRemoteControl;
+sealed class LoginException(string message) : IOException(message);
+
 sealed class Connection : IDisposable
 {
     readonly TcpClient tcp = new() { NoDelay = true };
     readonly SemaphoreSlim gate = new(1);
     SslStream stream = null!;
-    public async Task Open(string host, int port, object hello, CancellationToken token)
+    public async Task Open(string host, int port, object hello, Func<CancellationToken, string?> requestCode, CancellationToken token)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
         timeout.CancelAfter(TimeSpan.FromSeconds(15));
@@ -17,9 +19,18 @@ sealed class Connection : IDisposable
         stream = new SslStream(tcp.GetStream(), false);
         await stream.AuthenticateAsClientAsync(new SslClientAuthenticationOptions { TargetHost = host }, timeout.Token);
         await Send(hello, timeout.Token);
-        var answer = await Read(timeout.Token);
+        var answer = await Read(token);
+        if (answer.GetProperty("type").GetString() != "email_required")
+            throw new LoginException(answer.TryGetProperty("message", out var error) ? error.GetString() ?? "인증 실패" : "이메일 인증을 지원하는 서버로 업데이트하세요.");
+        using var verification = CancellationTokenSource.CreateLinkedTokenSource(token);
+        verification.CancelAfter(TimeSpan.FromSeconds(295));
+        var code = requestCode(verification.Token);
+        if (code == null || verification.IsCancellationRequested)
+            throw new LoginException("이메일 인증이 취소되었거나 만료되었습니다. 서버 연결을 다시 눌러주세요.");
+        await Send(new { type = "verify_email", code }, verification.Token);
+        answer = await Read(verification.Token);
         if (answer.GetProperty("type").GetString() != "ok")
-            throw new IOException(answer.GetProperty("message").GetString());
+            throw new LoginException(answer.GetProperty("message").GetString() ?? "이메일 인증 실패");
     }
     public async Task Send(object message, CancellationToken token)
     {

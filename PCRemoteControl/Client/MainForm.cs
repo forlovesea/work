@@ -13,16 +13,16 @@ sealed class MainForm : Form
     readonly TextBox password = new() { Text = "jjh1234", UseSystemPasswordChar = true, Width = 100 };
     readonly TextBox targetName = new() { Text = Environment.MachineName, Width = 150, MaxLength = 80 };
     readonly ComboBox role = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 100 };
-    readonly Button start = new() { Text = "서버 연결", AutoSize = true };
-    readonly Button stop = new() { Text = "연결 중지", AutoSize = true, Enabled = false };
-    readonly Button refresh = new() { Text = "목록 새로고침", AutoSize = true };
-    readonly Button connect = new() { Text = "원격접속", AutoSize = true };
-    readonly Button disconnect = new() { Text = "원격접속 종료", AutoSize = true };
-    readonly Button full = new() { Text = "전체 화면 (F11)", AutoSize = true };
+    readonly PastelButton start = new() { Text = "서버 연결", AutoSize = true };
+    readonly PastelButton stop = new() { Text = "연결 중지", AutoSize = true, Enabled = false };
+    readonly PastelButton refresh = new() { Text = "목록 새로고침", AutoSize = true };
+    readonly PastelButton connect = new() { Text = "원격접속", AutoSize = true };
+    readonly PastelButton disconnect = new() { Text = "원격접속 종료", AutoSize = true };
+    readonly PastelButton full = new() { Text = "전체 화면 (F11)", AutoSize = true };
     readonly Label status = new() { Dock = DockStyle.Bottom, Height = 32, Text = "서버 주소를 입력하세요.", Padding = new Padding(8) };
     readonly ListBox targets = new() { Dock = DockStyle.Fill, DisplayMember = "Label" };
     readonly Panel side = new() { Dock = DockStyle.Left, Width = 250 };
-    readonly FlowLayoutPanel settings = new() { Dock = DockStyle.Top, Height = 76, Padding = new Padding(6) };
+    readonly FlowLayoutPanel settings = new() { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(10) };
     readonly RemoteView view = new() { Dock = DockStyle.Fill, BackColor = Color.FromArgb(25, 28, 34), SizeMode = PictureBoxSizeMode.Zoom };
     readonly System.Windows.Forms.Timer heartbeat = new() { Interval = 10000 };
     readonly System.Windows.Forms.Timer capture = new() { Interval = 125 };
@@ -51,7 +51,7 @@ sealed class MainForm : Form
     {
         this.watchdogFolder = watchdogFolder;
         fixedTarget = target;
-        Text = "PCRemoteControl · Windows HOST / TARGET";
+        Text = "PCRemoteControl v0.1.1 · Windows HOST / TARGET";
         Size = new Size(1180, 780); MinimumSize = new Size(800, 500); KeyPreview = true;
         role.Items.AddRange(new object[] { "HOST", "TARGET" }); role.SelectedIndex = target ? 1 : 0;
         LoadSettings();
@@ -64,10 +64,16 @@ sealed class MainForm : Form
         WriteHealth("paused"); health.Start();
         Shown += async (_, _) => { if (target && autoConnect) await Start(); };
         settings.Controls.AddRange(new Control[] { new Label { Text = "Relay 주소", AutoSize = true }, server, port, role, new Label { Text = "비밀번호", AutoSize = true }, password, new Label { Text = "TARGET 이름", AutoSize = true }, targetName, start, stop });
-        var actions = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 76, Padding = new Padding(6) };
+        var actions = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(10) };
         actions.Controls.AddRange(new Control[] { refresh, connect, disconnect, full });
+        actions.FlowDirection = FlowDirection.TopDown; actions.WrapContents = false;
+        side.Padding = new Padding(10);
         side.Controls.Add(targets); side.Controls.Add(actions);
         Controls.Add(view); Controls.Add(side); Controls.Add(settings); Controls.Add(status);
+        PastelTheme.Apply(this);
+        status.Height = 46; status.BackColor = PastelTheme.Mint;
+        view.BackColor = Color.FromArgb(240, 237, 245);
+        foreach (Control action in actions.Controls) action.Width = 205;
         start.Click += async (_, _) => await Start();
         stop.Click += (_, _) => Stop();
         refresh.Click += async (_, _) => await Send(new { type = "list" });
@@ -137,18 +143,25 @@ sealed class MainForm : Form
             try
             {
                 status.Text = "Relay 서버 연결 중…";
-                await c.Open(server.Text.Trim(), (int)port.Value, new { type = "hello", role = targetMode ? "target" : "host", password = password.Text, id, name = targetName.Text }, token);
+                await c.Open(server.Text.Trim(), (int)port.Value, new { type = "hello", role = targetMode ? "target" : "host", password = password.Text, id, name = targetName.Text }, RequestEmailCode, token);
                 connection = c; heartbeat.Start(); listing.Start(); capture.Start(); UpdateControls();
                 status.Text = targetMode ? "TARGET 연결 유지 중 · HOST 접속 시 화면과 키보드/마우스 제어가 허용됩니다." : "인증 완료 · TARGET을 선택하고 원격접속을 누르세요.";
                 if (!targetMode) await c.Send(new { type = "list" }, token);
                 while (!token.IsCancellationRequested) HandleMessage(await c.Read(token));
             }
+            catch (LoginException ex) { lifetime.Cancel(); WriteHealth("paused"); status.Text = ex.Message; }
             catch (Exception ex) { if (!token.IsCancellationRequested) status.Text = "연결 종료: " + ex.Message + (targetMode ? " · 5초 후 재연결" : ""); }
             finally { connection = null; heartbeat.Stop(); listing.Stop(); capture.Stop(); EndSession(); UpdateControls(); }
             if (!targetMode || token.IsCancellationRequested) break;
             try { await Task.Delay(5000, token); } catch (OperationCanceledException) { break; }
         } while (!token.IsCancellationRequested);
         running = false; UpdateControls();
+    }
+    string? RequestEmailCode(CancellationToken token)
+    {
+        status.Text = "비밀번호 확인 완료 · 이메일 인증 대기 중";
+        using var dialog = new EmailVerificationDialog(token);
+        return dialog.ShowDialog(this) == DialogResult.OK ? dialog.Code : null;
     }
     void Stop()
     {

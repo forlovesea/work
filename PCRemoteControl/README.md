@@ -1,5 +1,27 @@
 # PCRemoteControl
 
+## 이메일 인증 (필수)
+
+HOST와 TARGET 모두 **비밀번호 확인 → `forlovesea@gmail.com`으로 전송된 6자리 코드 입력 → 서버 연결 완료** 순서로 접속합니다. 인증 통신을 위한 TLS 연결은 먼저 열리지만, 이메일 인증 전에는 TARGET 등록·목록 조회·원격제어가 허용되지 않습니다. 코드 유효시간은 5분이며 해당 연결에서 한 번만 사용할 수 있습니다. 잘못 입력하거나 취소·만료된 경우 서버 연결을 다시 눌러 새 코드를 요청하세요. 발송은 IP당 60초에 한 번, 서버 전체에서 최소 5초 간격으로 제한합니다.
+
+서버와 클라이언트를 함께 업데이트해야 합니다. 새 클라이언트는 이메일 인증이 없는 이전 서버에 연결하지 않습니다. 새 서버에서도 이전 클라이언트는 인증을 완료할 수 없습니다. SMTP 설정 누락이나 발송 실패 시 연결을 허용하지 않습니다.
+
+서버의 `/etc/pcremote/relay.env`에 기존 `PCREMOTE_PASSWORD`를 유지하면서 아래 값을 추가하세요. STARTTLS를 지원하는 SMTP 서버와 발송 계정을 사용합니다. 수신 주소는 서버 코드에 고정되어 있으며 클라이언트에서 바꿀 수 없습니다.
+
+```ini
+PCREMOTE_SMTP_HOST=smtp.example.com
+PCREMOTE_SMTP_PORT=587
+PCREMOTE_SMTP_USER=sender@example.com
+PCREMOTE_SMTP_PASSWORD="replace-with-smtp-credential"
+PCREMOTE_SMTP_FROM=sender@example.com
+```
+
+`PCREMOTE_SMTP_FROM`을 생략하면 발송 계정 주소를 사용합니다. SMTP 비밀값은 서버 환경 파일에만 넣고 저장소나 클라이언트에 넣지 마세요. 설정 후 `sudo systemctl restart pcremote-relay`를 실행하세요. 설치 스크립트는 기존 환경 파일을 보존합니다. 실제 메일 수신 여부는 운영 SMTP 설정 후 확인해야 합니다.
+
+**자동 복구 동작 변경:** TARGET의 자동 시작·네트워크 재연결 때도 새 이메일 코드를 입력해야 하므로 완전한 무인 재연결은 지원하지 않습니다. 인증 오류나 취소 시 자동 재시도를 멈춥니다. 서버 연결 버튼으로 다시 시작하세요. 아래 기존 자동 복구 설명에도 이 조건이 적용됩니다.
+
+검증: `python -m unittest discover -s server -v` (실제 메일 발송 없이 테스트).
+
 Windows 10/11 PC 간 원격 화면 보기 및 키보드·마우스 제어 프로그램입니다. HOST와 TARGET은 동일 실행 파일에서 역할을 선택합니다. 기존 `RemoteControl` 파일이나 서비스를 변경하지 않습니다.
 
 ## 구성
@@ -17,16 +39,16 @@ Windows 10/11 PC 간 원격 화면 보기 및 키보드·마우스 제어 프로
 ## 실행
 
 1. 공인 Relay를 아래 절차로 설치합니다.
-2. TARGET PC에서 `PCRemoteControl.exe`를 실행하고 TARGET 역할, Relay 인증서에 맞는 DNS 주소, 포트 `61000`, 비밀번호, PC 이름을 입력합니다.
+2. TARGET PC에서 `PCRemoteControl-v0.1.1.exe`를 실행하고 TARGET 역할, Relay 인증서에 맞는 DNS 주소, 포트 `61000`, 비밀번호, PC 이름을 입력합니다.
 3. **서버 연결**을 누릅니다. 이 동작은 인증된 HOST의 화면 보기와 입력 제어를 허용합니다. TARGET 창에 접속 상태가 표시됩니다.
 4. HOST PC에서 같은 프로그램을 HOST 역할로 실행하고 같은 주소·포트·비밀번호로 연결합니다.
 5. 목록에서 TARGET을 선택하고 **원격접속**을 누릅니다.
 
-`PCRemoteControl.exe --target`으로 TARGET 역할을 바로 선택할 수 있습니다. 앱은 사용자가 로그인한 데스크톱에서 실행해야 합니다. 로그인 전 Windows 서비스, 자동 시작 등록, 절전 방지는 구현하지 않았습니다. 서버 주소·PC 이름·기기 ID는 `%LOCALAPPDATA%/PCRemoteControl/settings.json`에 보관합니다. 기본 서버 주소는 `61.105.141.21`이며 변경 가능합니다. IP 직접 접속 시 인증서에 해당 IP SAN이 필요합니다.
+`PCRemoteControl-v0.1.1.exe --target`으로 TARGET 역할을 바로 선택할 수 있습니다. 앱은 사용자가 로그인한 데스크톱에서 실행해야 합니다. 로그인 전 Windows 서비스, 자동 시작 등록, 절전 방지는 구현하지 않았습니다. 서버 주소·PC 이름·기기 ID는 `%LOCALAPPDATA%/PCRemoteControl/settings.json`에 보관합니다. 기본 서버 주소는 `61.105.141.21`이며 변경 가능합니다. IP 직접 접속 시 인증서에 해당 IP SAN이 필요합니다.
 
 ## TARGET 자동 복구 감시 프로그램
 
-배포 폴더의 **Start-TARGET.cmd** 또는 **PCRemoteControl.Watchdog.exe**를 실행하세요. 감시 프로그램이 같은 폴더의 TARGET을 실행하고 Relay 연결을 자동으로 시작합니다. 최초 실행 전 주소·비밀번호를 바꿔야 한다면 `PCRemoteControl.exe --target`으로 설정하고 서버 연결을 한 번 누른 후 종료하세요.
+배포 폴더의 **Start-TARGET.cmd** 또는 **PCRemoteControl.Watchdog-v0.1.1.exe**를 실행하세요. 감시 프로그램이 같은 폴더의 TARGET을 실행하고 Relay 연결을 자동으로 시작합니다. 최초 실행 전 주소·비밀번호를 바꿔야 한다면 `PCRemoteControl-v0.1.1.exe --target`으로 설정하고 서버 연결을 한 번 누른 후 종료하세요.
 
 - 프로세스와 UI heartbeat를 2초마다 확인합니다. UI heartbeat는 네트워크 연결 상태와 별개입니다.
 - 비정상 종료 시 5초 후 재실행합니다. 반복 장애 시 10/20/40/60초로 간격을 늘리며, 5분 정상 동작 후 초기화합니다.
@@ -37,7 +59,7 @@ Windows 10/11 PC 간 원격 화면 보기 및 키보드·마우스 제어 프로
 - TARGET 비밀번호는 자동 복구를 위해 `%LOCALAPPDATA%/PCRemoteControl/target-password.bin`에 Windows DPAPI로 암호화 저장합니다. 같은 Windows 사용자 계정에서만 복호화합니다. HOST 비밀번호는 저장하지 않습니다.
 - 로그: `%LOCALAPPDATA%/PCRemoteControl/watchdog.log` (512KB 순환). 비밀번호는 로그나 명령줄에 넣지 않습니다.
 
-감시 프로그램 자체의 장애, Windows 로그아웃/재부팅, 절전/전원 꺼짐은 복구 대상이 아닙니다. 로그인 시 자동 실행을 원하면 배포 폴더를 고정한 다음 `PCRemoteControl.Watchdog.exe`의 바로가기를 `shell:startup`에 직접 등록할 수 있습니다. 자동 시작 등록은 이번 작업에서 수행하지 않았습니다.
+감시 프로그램 자체의 장애, Windows 로그아웃/재부팅, 절전/전원 꺼짐은 복구 대상이 아닙니다. 로그인 시 자동 실행을 원하면 배포 폴더를 고정한 다음 `PCRemoteControl.Watchdog-v0.1.1.exe`의 바로가기를 `shell:startup`에 직접 등록할 수 있습니다. 자동 시작 등록은 이번 작업에서 수행하지 않았습니다.
 
 복구 정책/암호화 검사: `dotnet run --project RecoveryTests/RecoveryTests.csproj -c Release`. 실제 PC에서는 TARGET 연결 중 작업 관리자로 TARGET만 강제 종료한 뒤 재실행과 Relay 복구를 확인하고, 정상 종료와 연결 중지는 재실행되지 않는지 확인하세요. 이 UI/프로세스 실환경 검증은 아직 수행하지 않았습니다.
 
@@ -50,7 +72,7 @@ dotnet build .\Client\PCRemoteControl.csproj -c Release
 .\build.ps1
 ```
 
-배포 출력은 `release/win-x64/PCRemoteControl.exe`입니다. build.ps1의 자체 포함 배포에는 런타임 팩 다운로드가 필요할 수 있습니다. 일반 build 출력은 `.NET 8 Desktop Runtime x64`가 설치된 PC에서 실행합니다.
+배포 출력은 `release/v0.1.1/win-x64/PCRemoteControl-v0.1.1.exe`입니다. build.ps1의 자체 포함 배포에는 런타임 팩 다운로드가 필요할 수 있습니다. 일반 build 출력은 `.NET 8 Desktop Runtime x64`가 설치된 PC에서 실행합니다.
 
 ## Ubuntu Relay 설치
 

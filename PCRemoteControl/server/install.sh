@@ -17,7 +17,8 @@ if ! systemctl is-active --quiet pcremote-relay; then
         echo 'TCP 61000 is already in use. No service was changed.' >&2; exit 1
     fi
 fi
-getent passwd pcremote >/dev/null || useradd --system --no-create-home --shell /usr/sbin/nologin pcremote
+getent group pcremote >/dev/null || groupadd --system pcremote
+getent passwd pcremote >/dev/null || useradd --system --gid pcremote --no-create-home --shell /usr/sbin/nologin pcremote
 install -d -o root -g root -m 755 /opt/pcremote
 install -d -o root -g pcremote -m 750 /etc/pcremote
 if [ -f /opt/pcremote/relay.py ]; then cp -p /opt/pcremote/relay.py /opt/pcremote/relay.py.previous; fi
@@ -35,3 +36,4 @@ systemctl enable pcremote-relay
 systemctl restart pcremote-relay
 systemctl --no-pager --full status pcremote-relay
 echo 'Allow TCP 61000 in the server firewall and cloud security group. Existing RemoteControl is unchanged.'
+echo 'Email verification is required. Configure PCREMOTE_SMTP_HOST/PORT/USER/PASSWORD (optional FROM) in /etc/pcremote/relay.env, then restart pcremote-relay. See README.md.'

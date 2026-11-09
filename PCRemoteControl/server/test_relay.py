@@ -2,11 +2,32 @@ import asyncio
 import json
 import struct
 import unittest
-from relay import Relay, read_message
+from unittest.mock import patch
+from relay import Relay, read_message, send_auth_email
+
+class MailTests(unittest.TestCase):
+    def test_smtp_uses_tls_and_fixed_recipient(self):
+        settings = dict(PCREMOTE_SMTP_HOST='smtp.example.com', PCREMOTE_SMTP_USER='sender@example.com', PCREMOTE_SMTP_PASSWORD='test-secret')
+        with patch.dict('os.environ', settings, clear=True), patch('relay.smtplib.SMTP') as smtp:
+            send_auth_email('012345')
+            client = smtp.return_value.__enter__.return_value
+            client.starttls.assert_called_once()
+            client.login.assert_called_once_with('sender@example.com', 'test-secret')
+            message = client.send_message.call_args[0][0]
+            self.assertEqual(message['To'], 'forlovesea@gmail.com')
+            self.assertIn('012345', message.get_content())
+            self.assertLess([call[0] for call in client.mock_calls].index('starttls'), [call[0] for call in client.mock_calls].index('login'))
+
+    def test_missing_smtp_configuration_fails_closed(self):
+        with patch.dict('os.environ', {}, clear=True), patch('relay.smtplib.SMTP') as smtp:
+            with self.assertRaises(ValueError):
+                send_auth_email('012345')
+            smtp.assert_not_called()
 
 class RelayTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.relay = Relay('jjh1234')
+        self.codes = []
+        self.relay = Relay('jjh1234', self.codes.append)
         self.server = await asyncio.start_server(self.relay.handle, '127.0.0.1', 0)
         self.port = self.server.sockets[0].getsockname()[1]
         self.writers = []
@@ -24,11 +45,66 @@ class RelayTests(unittest.IsolatedAsyncioTestCase):
         w.write(struct.pack('!I', len(data)) + data)
         await w.drain()
 
-    async def peer(self, role, password='jjh1234', id='test'):
+    async def peer(self, role, password='jjh1234', id='test', verify=True, reset_limit=True):
+        if reset_limit:
+            self.relay.mail_times.clear()
+            self.relay.last_mail = float('-inf')
         r, w = await asyncio.open_connection('127.0.0.1', self.port)
         self.writers.append(w)
         await self.send(w, dict(type='hello', role=role, password=password, id=id, name='Test PC'))
-        return r, w, await read_message(r, 2)
+        reply = await read_message(r, 2)
+        if verify and reply['type'] == 'email_required':
+            await self.send(w, dict(type='verify_email', code=self.codes[-1]))
+            reply = await read_message(r, 2)
+        return r, w, reply
+
+    async def test_password_failure_sends_no_mail(self):
+        _, _, reply = await self.peer('host', 'wrong')
+        self.assertEqual(reply['type'], 'error')
+        self.assertEqual(self.codes, [])
+
+    async def test_email_required_before_target_registration(self):
+        r, w, reply = await self.peer('target', verify=False)
+        self.assertEqual(reply['email'], 'forlovesea@gmail.com')
+        self.assertEqual(self.relay.targets, {})
+        await self.send(w, dict(type='verify_email', code=self.codes[-1]))
+        self.assertEqual((await read_message(r))['type'], 'ok')
+        self.assertIn('test', self.relay.targets)
+
+    async def test_wrong_code_and_pre_auth_operations_are_rejected(self):
+        for message in [dict(type='verify_email', code='invalid'), dict(type='list'), dict(type='connect', id='test')]:
+            r, w, _ = await self.peer('host', verify=False)
+            await self.send(w, message)
+            self.assertEqual((await read_message(r))['type'], 'error')
+            self.assertEqual(await r.read(), b'')
+
+    async def test_code_cannot_be_reused_on_another_connection(self):
+        await self.peer('host')
+        old_code = self.codes[-1]
+        with patch('relay.secrets.randbelow', return_value=(int(old_code) + 1) % 1000000):
+            r, w, _ = await self.peer('host', verify=False)
+        await self.send(w, dict(type='verify_email', code=old_code))
+        self.assertEqual((await read_message(r))['type'], 'error')
+
+    async def test_expired_code_closes_connection(self):
+        with patch('relay.AUTH_SECONDS', 0.05):
+            r, _, _ = await self.peer('target', verify=False)
+            self.assertEqual(await asyncio.wait_for(r.read(), 2), b'')
+        self.assertEqual(self.relay.targets, {})
+
+    async def test_mail_rate_limit(self):
+        await self.peer('host')
+        _, _, reply = await self.peer('host', reset_limit=False)
+        self.assertEqual(reply['type'], 'error')
+        self.assertEqual(len(self.codes), 1)
+
+    async def test_mail_failure_denies_connection(self):
+        def fail(code):
+            raise OSError('SMTP unavailable')
+        self.relay.mail_sender = fail
+        _, _, reply = await self.peer('target')
+        self.assertEqual(reply['type'], 'error')
+        self.assertEqual(self.relay.targets, {})
 
     async def test_authentication_and_duplicate_id(self):
         _, _, reply = await self.peer('host', 'wrong')

@@ -11,14 +11,16 @@ sealed class MainForm : Form
     readonly TextBox server = new() { Width = 190, Text = "61.105.141.21", PlaceholderText = "relay.example.com" };
     readonly NumericUpDown port = new() { Minimum = 1, Maximum = 65535, Value = 61000, Width = 75 };
     readonly TextBox password = new() { Text = "jjh1234", UseSystemPasswordChar = true, Width = 100 };
+    readonly Button passwordEye = new() { AccessibleName = "비밀번호 표시", FlatStyle = FlatStyle.Flat };
+    readonly ToolTip passwordTip = new();
     readonly TextBox targetName = new() { Text = Environment.MachineName, Width = 150, MaxLength = 80 };
     readonly ComboBox role = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 100 };
-    readonly PastelButton start = new() { Text = "서버 연결", AutoSize = true };
-    readonly PastelButton stop = new() { Text = "연결 중지", AutoSize = true, Enabled = false };
-    readonly PastelButton refresh = new() { Text = "목록 새로고침", AutoSize = true };
-    readonly PastelButton connect = new() { Text = "원격접속", AutoSize = true };
-    readonly PastelButton disconnect = new() { Text = "원격접속 종료", AutoSize = true };
-    readonly PastelButton full = new() { Text = "전체 화면 (F11)", AutoSize = true };
+    readonly AppButton start = new() { Text = "서버 연결", AutoSize = true };
+    readonly AppButton stop = new() { Text = "연결 중지", AutoSize = true, Enabled = false };
+    readonly AppButton refresh = new() { Text = "목록 새로고침", AutoSize = true };
+    readonly AppButton connect = new() { Text = "원격접속", AutoSize = true };
+    readonly AppButton disconnect = new() { Text = "원격접속 종료", AutoSize = true };
+    readonly AppButton full = new() { Text = "전체 화면 (F11)", AutoSize = true };
     readonly Label status = new() { Dock = DockStyle.Bottom, Height = 32, Text = "서버 주소를 입력하세요.", Padding = new Padding(8) };
     readonly ListBox targets = new() { Dock = DockStyle.Fill, DisplayMember = "Label" };
     readonly Panel side = new() { Dock = DockStyle.Left, Width = 250 };
@@ -51,7 +53,7 @@ sealed class MainForm : Form
     {
         this.watchdogFolder = watchdogFolder;
         fixedTarget = target;
-        Text = "PCRemoteControl v0.1.1 · Windows HOST / TARGET";
+        Text = "PCRemoteControl v0.1.2 · Windows HOST / TARGET";
         Size = new Size(1180, 780); MinimumSize = new Size(800, 500); KeyPreview = true;
         role.Items.AddRange(new object[] { "HOST", "TARGET" }); role.SelectedIndex = target ? 1 : 0;
         LoadSettings();
@@ -63,16 +65,41 @@ sealed class MainForm : Form
         health.Tick += (_, _) => WriteHealth(running ? "running" : "paused");
         WriteHealth("paused"); health.Start();
         Shown += async (_, _) => { if (target && autoConnect) await Start(); };
-        settings.Controls.AddRange(new Control[] { new Label { Text = "Relay 주소", AutoSize = true }, server, port, role, new Label { Text = "비밀번호", AutoSize = true }, password, new Label { Text = "TARGET 이름", AutoSize = true }, targetName, start, stop });
+        var passwordGroup = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, Margin = Padding.Empty };
+        passwordGroup.Controls.AddRange(new Control[] { password, passwordEye });
+        settings.Controls.AddRange(new Control[] { new Label { Text = "Relay 주소", AutoSize = true }, server, port, role, new Label { Text = "비밀번호", AutoSize = true }, passwordGroup, new Label { Text = "TARGET 이름", AutoSize = true }, targetName, start, stop });
         var actions = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(10) };
         actions.Controls.AddRange(new Control[] { refresh, connect, disconnect, full });
         actions.FlowDirection = FlowDirection.TopDown; actions.WrapContents = false;
         side.Padding = new Padding(10);
         side.Controls.Add(targets); side.Controls.Add(actions);
         Controls.Add(view); Controls.Add(side); Controls.Add(settings); Controls.Add(status);
-        PastelTheme.Apply(this);
-        status.Height = 46; status.BackColor = PastelTheme.Mint;
-        view.BackColor = Color.FromArgb(240, 237, 245);
+        DarkTheme.Apply(this);
+        passwordEye.MinimumSize = Size.Empty;
+        passwordEye.Size = new Size(34, password.PreferredHeight);
+        passwordEye.Padding = Padding.Empty;
+        passwordEye.Margin = new Padding(0, password.Margin.Top, 3, 3);
+        passwordTip.SetToolTip(passwordEye, "비밀번호 표시");
+        passwordEye.Click += (_, _) =>
+        {
+            password.UseSystemPasswordChar = !password.UseSystemPasswordChar;
+            string action = password.UseSystemPasswordChar ? "비밀번호 표시" : "비밀번호 숨기기";
+            passwordEye.AccessibleName = action;
+            passwordTip.SetToolTip(passwordEye, action);
+            passwordEye.Invalidate();
+        };
+        passwordEye.Paint += (_, e) =>
+        {
+            e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            float x = passwordEye.ClientSize.Width / 2f, y = passwordEye.ClientSize.Height / 2f;
+            using var pen = new Pen(passwordEye.Enabled ? DarkTheme.Ink : SystemColors.GrayText, 1.6f);
+            e.Graphics.DrawBezier(pen, x - 10, y, x - 4, y - 9, x + 4, y - 9, x + 10, y);
+            e.Graphics.DrawBezier(pen, x - 10, y, x - 4, y + 9, x + 4, y + 9, x + 10, y);
+            e.Graphics.DrawEllipse(pen, x - 3, y - 3, 6, 6);
+            if (password.UseSystemPasswordChar) e.Graphics.DrawLine(pen, x - 10, y + 8, x + 10, y - 8);
+        };
+        status.Height = 46; status.BackColor = DarkTheme.Surface;
+        view.BackColor = DarkTheme.Editor;
         foreach (Control action in actions.Controls) action.Width = 205;
         start.Click += async (_, _) => await Start();
         stop.Click += (_, _) => Stop();
@@ -97,7 +124,7 @@ sealed class MainForm : Form
         view.LostFocus += async (_, _) => { if (paired && !targetMode) await Send(new { type = "input", action = "release" }); };
         Deactivate += async (_, _) => { if (paired && !targetMode) await Send(new { type = "input", action = "release" }); };
         FormClosing += (_, _) => { health.Stop(); Stop(); WriteHealth("stopped"); };
-        FormClosed += (_, _) => { health.Dispose(); heartbeat.Dispose(); capture.Dispose(); listing.Dispose(); view.Image?.Dispose(); };
+        FormClosed += (_, _) => { passwordTip.Dispose(); health.Dispose(); heartbeat.Dispose(); capture.Dispose(); listing.Dispose(); view.Image?.Dispose(); };
         role.SelectedIndexChanged += (_, _) => UpdateControls();
         UpdateControls();
     }
@@ -239,6 +266,11 @@ sealed class MainForm : Form
             oldBounds = Bounds; oldState = WindowState; WindowState = FormWindowState.Normal;
             FormBorderStyle = FormBorderStyle.None; Bounds = Screen.FromControl(this).Bounds;
             settings.Visible = side.Visible = false; fullScreen = true; view.Focus();
+            using var hint = new FullscreenHintDialog();
+            hint.ShowDialog(this);
+            if (IsDisposed || Disposing) return;
+            if (hint.ExitFullscreen && fullScreen) ToggleFull();
+            view.Focus();
         }
         else
         {

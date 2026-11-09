@@ -1,5 +1,15 @@
 # PCRemoteControl
 
+## v0.1.2 배포
+
+- VS Code 계열 다크 스타일: 짙은 회색 배경, Segoe UI 글꼴, 파란 강조색과 평면 버튼. 메인 화면과 이메일 인증창, 전체화면 안내창, Watchdog에 공통 적용합니다.
+- 단일 실행 파일: `release/v0.1.2/PCRemoteControl-v0.1.2.exe` (Windows x64, .NET 런타임 포함)
+- 개발 상세 설계서: `docs/PCRemoteControl-v0.1.2-개발상세설계서.docx`
+- 설계서 검토 상태: 내용 및 DOCX 구조 확인 완료. 현재 검토 환경의 Word 제품 인증 창과 렌더러 부재로 페이지 배치 시각 검토는 미완료입니다.
+- 비밀번호 눈 버튼으로 표시/숨김 전환. 기본은 숨김입니다.
+- 전체화면 진입 시 Esc/F11 복귀 안내를 표시하고 3초 뒤 자동으로 닫습니다. 확인 버튼으로도 닫을 수 있습니다.
+- SHA256 검증 파일: `release/v0.1.2/SHA256SUMS-v0.1.2.txt`
+
 ## 이메일 인증 (필수)
 
 HOST와 TARGET 모두 **비밀번호 확인 → `forlovesea@gmail.com`으로 전송된 6자리 코드 입력 → 서버 연결 완료** 순서로 접속합니다. 인증 통신을 위한 TLS 연결은 먼저 열리지만, 이메일 인증 전에는 TARGET 등록·목록 조회·원격제어가 허용되지 않습니다. 코드 유효시간은 5분이며 해당 연결에서 한 번만 사용할 수 있습니다. 잘못 입력하거나 취소·만료된 경우 서버 연결을 다시 눌러 새 코드를 요청하세요. 발송은 IP당 60초에 한 번, 서버 전체에서 최소 5초 간격으로 제한합니다.
@@ -39,16 +49,16 @@ Windows 10/11 PC 간 원격 화면 보기 및 키보드·마우스 제어 프로
 ## 실행
 
 1. 공인 Relay를 아래 절차로 설치합니다.
-2. TARGET PC에서 `PCRemoteControl-v0.1.1.exe`를 실행하고 TARGET 역할, Relay 인증서에 맞는 DNS 주소, 포트 `61000`, 비밀번호, PC 이름을 입력합니다.
+2. TARGET PC에서 `PCRemoteControl-v0.1.2.exe`를 실행하고 TARGET 역할, Relay 인증서에 맞는 DNS 주소, 포트 `61000`, 비밀번호, PC 이름을 입력합니다.
 3. **서버 연결**을 누릅니다. 이 동작은 인증된 HOST의 화면 보기와 입력 제어를 허용합니다. TARGET 창에 접속 상태가 표시됩니다.
 4. HOST PC에서 같은 프로그램을 HOST 역할로 실행하고 같은 주소·포트·비밀번호로 연결합니다.
 5. 목록에서 TARGET을 선택하고 **원격접속**을 누릅니다.
 
-`PCRemoteControl-v0.1.1.exe --target`으로 TARGET 역할을 바로 선택할 수 있습니다. 앱은 사용자가 로그인한 데스크톱에서 실행해야 합니다. 로그인 전 Windows 서비스, 자동 시작 등록, 절전 방지는 구현하지 않았습니다. 서버 주소·PC 이름·기기 ID는 `%LOCALAPPDATA%/PCRemoteControl/settings.json`에 보관합니다. 기본 서버 주소는 `61.105.141.21`이며 변경 가능합니다. IP 직접 접속 시 인증서에 해당 IP SAN이 필요합니다.
+`PCRemoteControl-v0.1.2.exe --target`으로 TARGET 역할을 바로 선택할 수 있습니다. 앱은 사용자가 로그인한 데스크톱에서 실행해야 합니다. 로그인 전 Windows 서비스, 자동 시작 등록, 절전 방지는 구현하지 않았습니다. 서버 주소·PC 이름·기기 ID는 `%LOCALAPPDATA%/PCRemoteControl/settings.json`에 보관합니다. 기본 서버 주소는 `61.105.141.21`이며 변경 가능합니다. IP 직접 접속 시 인증서에 해당 IP SAN이 필요합니다.
 
 ## TARGET 자동 복구 감시 프로그램
 
-배포 폴더의 **Start-TARGET.cmd** 또는 **PCRemoteControl.Watchdog-v0.1.1.exe**를 실행하세요. 감시 프로그램이 같은 폴더의 TARGET을 실행하고 Relay 연결을 자동으로 시작합니다. 최초 실행 전 주소·비밀번호를 바꿔야 한다면 `PCRemoteControl-v0.1.1.exe --target`으로 설정하고 서버 연결을 한 번 누른 후 종료하세요.
+Watchdog는 선택 구성입니다. `build.ps1 -IncludeWatchdog`로 생성한 **PCRemoteControl.Watchdog-v0.1.2.exe**를 같은 버전 클라이언트와 같은 폴더에 두고 실행하세요. 기본 단일 EXE 배포에는 Watchdog가 포함되지 않습니다. 감시 프로그램이 TARGET을 실행하고 Relay 연결을 자동으로 시작합니다. 최초 실행 전 주소·비밀번호를 바꿔야 한다면 `PCRemoteControl-v0.1.2.exe --target`으로 설정하고 서버 연결을 한 번 누른 후 종료하세요.
 
 - 프로세스와 UI heartbeat를 2초마다 확인합니다. UI heartbeat는 네트워크 연결 상태와 별개입니다.
 - 비정상 종료 시 5초 후 재실행합니다. 반복 장애 시 10/20/40/60초로 간격을 늘리며, 5분 정상 동작 후 초기화합니다.
@@ -59,7 +69,7 @@ Windows 10/11 PC 간 원격 화면 보기 및 키보드·마우스 제어 프로
 - TARGET 비밀번호는 자동 복구를 위해 `%LOCALAPPDATA%/PCRemoteControl/target-password.bin`에 Windows DPAPI로 암호화 저장합니다. 같은 Windows 사용자 계정에서만 복호화합니다. HOST 비밀번호는 저장하지 않습니다.
 - 로그: `%LOCALAPPDATA%/PCRemoteControl/watchdog.log` (512KB 순환). 비밀번호는 로그나 명령줄에 넣지 않습니다.
 
-감시 프로그램 자체의 장애, Windows 로그아웃/재부팅, 절전/전원 꺼짐은 복구 대상이 아닙니다. 로그인 시 자동 실행을 원하면 배포 폴더를 고정한 다음 `PCRemoteControl.Watchdog-v0.1.1.exe`의 바로가기를 `shell:startup`에 직접 등록할 수 있습니다. 자동 시작 등록은 이번 작업에서 수행하지 않았습니다.
+감시 프로그램 자체의 장애, Windows 로그아웃/재부팅, 절전/전원 꺼짐은 복구 대상이 아닙니다. 로그인 시 자동 실행을 원하면 배포 폴더를 고정한 다음 `PCRemoteControl.Watchdog-v0.1.2.exe`의 바로가기를 `shell:startup`에 직접 등록할 수 있습니다. 자동 시작 등록은 이번 작업에서 수행하지 않았습니다.
 
 복구 정책/암호화 검사: `dotnet run --project RecoveryTests/RecoveryTests.csproj -c Release`. 실제 PC에서는 TARGET 연결 중 작업 관리자로 TARGET만 강제 종료한 뒤 재실행과 Relay 복구를 확인하고, 정상 종료와 연결 중지는 재실행되지 않는지 확인하세요. 이 UI/프로세스 실환경 검증은 아직 수행하지 않았습니다.
 
@@ -72,7 +82,7 @@ dotnet build .\Client\PCRemoteControl.csproj -c Release
 .\build.ps1
 ```
 
-배포 출력은 `release/v0.1.1/win-x64/PCRemoteControl-v0.1.1.exe`입니다. build.ps1의 자체 포함 배포에는 런타임 팩 다운로드가 필요할 수 있습니다. 일반 build 출력은 `.NET 8 Desktop Runtime x64`가 설치된 PC에서 실행합니다.
+배포 출력은 `release/v0.1.2/PCRemoteControl-v0.1.2.exe`입니다. 기본 빌드는 압축된 자체 포함 클라이언트 EXE 한 개와 해시 파일을 생성합니다. 선택 감시 프로그램은 `.\build.ps1 -IncludeWatchdog`로 생성합니다. 런타임 팩 다운로드가 필요할 수 있습니다. 빌드 스크립트에서는 오프라인 빌드 중 NuGet 취약성 조회 실패를 피하려고 NuGetAudit를 비활성화하므로 보안 감사는 별도로 수행해야 합니다. 일반 build 출력은 `.NET 8 Desktop Runtime x64`가 설치된 PC에서 실행합니다.
 
 ## Ubuntu Relay 설치
 

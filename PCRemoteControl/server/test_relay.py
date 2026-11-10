@@ -148,6 +148,25 @@ class RelayTests(unittest.IsolatedAsyncioTestCase):
         await self.send(hw, dict(type='list'))
         self.assertEqual((await read_message(hr))['targets'], [])
 
+    async def test_capture_error_and_large_frame_recovery(self):
+        import base64
+        tr, tw, _ = await self.peer('target')
+        hr, hw, _ = await self.peer('host')
+        await self.send(hw, dict(type='connect', id='test'))
+        await read_message(hr)
+        await read_message(tr)
+        failure = dict(type='frame', data='', capture_error='Desktop is locked')
+        await self.send(tw, failure)
+        self.assertEqual(await read_message(hr), failure)
+        # Exercise a payload larger than the stream reader buffer and subsequent recovery.
+        frame = dict(type='frame', data=base64.b64encode(bytes(range(256)) * 2048).decode(), nearly_black=False)
+        await self.send(tw, frame)
+        self.assertEqual(await read_message(hr), frame)
+        await self.send(hw, dict(type='input', action='release'))
+        self.assertEqual((await read_message(tr))['action'], 'release')
+        await self.send(hw, dict(type='ping'))
+        self.assertEqual((await read_message(hr))['type'], 'pong')
+
     async def test_invalid_length_is_closed(self):
         r, w, _ = await self.peer('host')
         w.write(struct.pack('!I', 9 * 1024 * 1024))

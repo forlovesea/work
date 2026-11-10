@@ -1,5 +1,17 @@
 # PCRemoteControl
 
+## v0.1.3 화면 수신 개선
+
+- 최신 실행 파일: `release/v0.1.3/PCRemoteControl-v0.1.3.exe`. HOST와 TARGET 모두 이 버전으로 교체합니다.
+- 캡처와 축소 버퍼를 24비트 RGB로 통일하고 레이어 창 포함 BitBlt 캡처를 사용합니다. 레이어 캡처가 실패하면 기본 화면 복사를 시도합니다. 보안 데스크톱으로 전환하거나 잠금을 우회하지 않습니다.
+- 첫 화면 대기, TARGET 캡처 오류, 10초 화면 미수신을 화면 중앙에 표시합니다. 화면이 없거나 중단되면 입력 제어를 중지하고, 정상 프레임 도착 시 복구합니다.
+- TARGET은 전송 횟수, HOST는 수신 횟수와 해상도를 표시합니다. 거의 검은 프레임은 전송 자체의 실패와 구별해 안내합니다. 표본 픽셀 기반 진단이므로 실제로 어두운 화면에도 안내가 표시될 수 있습니다.
+- 진단 로그: `%LOCALAPPDATA%/PCRemoteControl/client.log` (512000바이트 초과 시 `.old`로 회전). 비밀번호, 인증코드, 화면 내용은 기록하지 않습니다.
+- 기존 Relay의 `frame` 중계를 그대로 사용하므로 서버 코드 변경은 필요하지 않습니다. 오류를 담은 프레임에는 `capture_error`가 추가되므로 HOST와 TARGET을 함께 업데이트하세요.
+- 화면 테스트: `dotnet run --project FrameTests/FrameTests.csproj -c Release`. 서버 테스트는 14개입니다.
+
+검은 화면이 계속되면 양쪽 상태 표시줄을 비교하세요. TARGET의 전송 횟수가 증가하지 않으면 캡처/송신 단계, TARGET 전송은 증가하지만 HOST 수신이 없으면 중계/수신 단계, 수신 횟수도 증가하지만 화면이 검으면 TARGET의 모니터·잠금·RDP 세션·캡처 환경을 확인합니다. 실제 장애 PC의 로그 없이 원인을 확정할 수는 없습니다.
+
 ## v0.1.2 배포
 
 - VS Code 계열 다크 스타일: 짙은 회색 배경, Segoe UI 글꼴, 파란 강조색과 평면 버튼. 메인 화면과 이메일 인증창, 전체화면 안내창, Watchdog에 공통 적용합니다.
@@ -49,16 +61,16 @@ Windows 10/11 PC 간 원격 화면 보기 및 키보드·마우스 제어 프로
 ## 실행
 
 1. 공인 Relay를 아래 절차로 설치합니다.
-2. TARGET PC에서 `PCRemoteControl-v0.1.2.exe`를 실행하고 TARGET 역할, Relay 인증서에 맞는 DNS 주소, 포트 `61000`, 비밀번호, PC 이름을 입력합니다.
+2. TARGET PC에서 `PCRemoteControl-v0.1.3.exe`를 실행하고 TARGET 역할, Relay 인증서에 맞는 DNS 주소, 포트 `61000`, 비밀번호, PC 이름을 입력합니다.
 3. **서버 연결**을 누릅니다. 이 동작은 인증된 HOST의 화면 보기와 입력 제어를 허용합니다. TARGET 창에 접속 상태가 표시됩니다.
 4. HOST PC에서 같은 프로그램을 HOST 역할로 실행하고 같은 주소·포트·비밀번호로 연결합니다.
 5. 목록에서 TARGET을 선택하고 **원격접속**을 누릅니다.
 
-`PCRemoteControl-v0.1.2.exe --target`으로 TARGET 역할을 바로 선택할 수 있습니다. 앱은 사용자가 로그인한 데스크톱에서 실행해야 합니다. 로그인 전 Windows 서비스, 자동 시작 등록, 절전 방지는 구현하지 않았습니다. 서버 주소·PC 이름·기기 ID는 `%LOCALAPPDATA%/PCRemoteControl/settings.json`에 보관합니다. 기본 서버 주소는 `61.105.141.21`이며 변경 가능합니다. IP 직접 접속 시 인증서에 해당 IP SAN이 필요합니다.
+`PCRemoteControl-v0.1.3.exe --target`으로 TARGET 역할을 바로 선택할 수 있습니다. 앱은 사용자가 로그인한 데스크톱에서 실행해야 합니다. 로그인 전 Windows 서비스, 자동 시작 등록, 절전 방지는 구현하지 않았습니다. 서버 주소·PC 이름·기기 ID는 `%LOCALAPPDATA%/PCRemoteControl/settings.json`에 보관합니다. 기본 서버 주소는 `61.105.141.21`이며 변경 가능합니다. IP 직접 접속 시 인증서에 해당 IP SAN이 필요합니다.
 
 ## TARGET 자동 복구 감시 프로그램
 
-Watchdog는 선택 구성입니다. `build.ps1 -IncludeWatchdog`로 생성한 **PCRemoteControl.Watchdog-v0.1.2.exe**를 같은 버전 클라이언트와 같은 폴더에 두고 실행하세요. 기본 단일 EXE 배포에는 Watchdog가 포함되지 않습니다. 감시 프로그램이 TARGET을 실행하고 Relay 연결을 자동으로 시작합니다. 최초 실행 전 주소·비밀번호를 바꿔야 한다면 `PCRemoteControl-v0.1.2.exe --target`으로 설정하고 서버 연결을 한 번 누른 후 종료하세요.
+Watchdog는 선택 구성입니다. `build.ps1 -IncludeWatchdog`로 생성한 **PCRemoteControl.Watchdog-v0.1.3.exe**를 같은 버전 클라이언트와 같은 폴더에 두고 실행하세요. 기본 단일 EXE 배포에는 Watchdog가 포함되지 않습니다. 감시 프로그램이 TARGET을 실행하고 Relay 연결을 자동으로 시작합니다. 최초 실행 전 주소·비밀번호를 바꿔야 한다면 `PCRemoteControl-v0.1.3.exe --target`으로 설정하고 서버 연결을 한 번 누른 후 종료하세요.
 
 - 프로세스와 UI heartbeat를 2초마다 확인합니다. UI heartbeat는 네트워크 연결 상태와 별개입니다.
 - 비정상 종료 시 5초 후 재실행합니다. 반복 장애 시 10/20/40/60초로 간격을 늘리며, 5분 정상 동작 후 초기화합니다.
@@ -69,7 +81,7 @@ Watchdog는 선택 구성입니다. `build.ps1 -IncludeWatchdog`로 생성한 **
 - TARGET 비밀번호는 자동 복구를 위해 `%LOCALAPPDATA%/PCRemoteControl/target-password.bin`에 Windows DPAPI로 암호화 저장합니다. 같은 Windows 사용자 계정에서만 복호화합니다. HOST 비밀번호는 저장하지 않습니다.
 - 로그: `%LOCALAPPDATA%/PCRemoteControl/watchdog.log` (512KB 순환). 비밀번호는 로그나 명령줄에 넣지 않습니다.
 
-감시 프로그램 자체의 장애, Windows 로그아웃/재부팅, 절전/전원 꺼짐은 복구 대상이 아닙니다. 로그인 시 자동 실행을 원하면 배포 폴더를 고정한 다음 `PCRemoteControl.Watchdog-v0.1.2.exe`의 바로가기를 `shell:startup`에 직접 등록할 수 있습니다. 자동 시작 등록은 이번 작업에서 수행하지 않았습니다.
+감시 프로그램 자체의 장애, Windows 로그아웃/재부팅, 절전/전원 꺼짐은 복구 대상이 아닙니다. 로그인 시 자동 실행을 원하면 배포 폴더를 고정한 다음 `PCRemoteControl.Watchdog-v0.1.3.exe`의 바로가기를 `shell:startup`에 직접 등록할 수 있습니다. 자동 시작 등록은 이번 작업에서 수행하지 않았습니다.
 
 복구 정책/암호화 검사: `dotnet run --project RecoveryTests/RecoveryTests.csproj -c Release`. 실제 PC에서는 TARGET 연결 중 작업 관리자로 TARGET만 강제 종료한 뒤 재실행과 Relay 복구를 확인하고, 정상 종료와 연결 중지는 재실행되지 않는지 확인하세요. 이 UI/프로세스 실환경 검증은 아직 수행하지 않았습니다.
 
@@ -82,7 +94,7 @@ dotnet build .\Client\PCRemoteControl.csproj -c Release
 .\build.ps1
 ```
 
-배포 출력은 `release/v0.1.2/PCRemoteControl-v0.1.2.exe`입니다. 기본 빌드는 압축된 자체 포함 클라이언트 EXE 한 개와 해시 파일을 생성합니다. 선택 감시 프로그램은 `.\build.ps1 -IncludeWatchdog`로 생성합니다. 런타임 팩 다운로드가 필요할 수 있습니다. 빌드 스크립트에서는 오프라인 빌드 중 NuGet 취약성 조회 실패를 피하려고 NuGetAudit를 비활성화하므로 보안 감사는 별도로 수행해야 합니다. 일반 build 출력은 `.NET 8 Desktop Runtime x64`가 설치된 PC에서 실행합니다.
+배포 출력은 `release/v0.1.3/PCRemoteControl-v0.1.3.exe`입니다. 기본 빌드는 압축된 자체 포함 클라이언트 EXE 한 개와 해시 파일을 생성합니다. 선택 감시 프로그램은 `.\build.ps1 -IncludeWatchdog`로 생성합니다. 런타임 팩 다운로드가 필요할 수 있습니다. 빌드 스크립트에서는 오프라인 빌드 중 NuGet 취약성 조회 실패를 피하려고 NuGetAudit를 비활성화하므로 보안 감사는 별도로 수행해야 합니다. 일반 build 출력은 `.NET 8 Desktop Runtime x64`가 설치된 PC에서 실행합니다.
 
 ## Ubuntu Relay 설치
 

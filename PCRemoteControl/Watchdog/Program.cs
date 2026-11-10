@@ -27,7 +27,7 @@ sealed class WatchdogForm : Form
     string HealthPath => Path.Combine(folder, "health");
     public WatchdogForm()
     {
-        Text = "PCRemoteControl v0.1.2 · TARGET 감시"; Size = new Size(540, 220);
+        Text = "PCRemoteControl v0.1.3 · TARGET 감시"; Size = new Size(540, 220);
         var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 64, Padding = new Padding(10) };
         var resume = new AppButton { Text = "감시 시작", AutoSize = true };
         var pause = new AppButton { Text = "감시 중지", AutoSize = true };
@@ -68,7 +68,7 @@ sealed class WatchdogForm : Form
                 if (!free) { enabled = false; Report("이미 TARGET이 실행 중입니다. 기존 TARGET을 닫고 감시 시작을 누르세요."); return; }
                 mutex.ReleaseMutex();
                 File.Delete(HealthPath);
-                var executable = Path.Combine(AppContext.BaseDirectory, "PCRemoteControl-v0.1.2.exe");
+                var executable = Path.Combine(AppContext.BaseDirectory, "PCRemoteControl-v0.1.3.exe");
                 var info = new ProcessStartInfo(executable) { UseShellExecute = false, WorkingDirectory = AppContext.BaseDirectory };
                 info.ArgumentList.Add("--target"); info.ArgumentList.Add("--auto-connect"); info.ArgumentList.Add("--watchdog-dir"); info.ArgumentList.Add(folder);
                 child = Process.Start(info) ?? throw new IOException("TARGET 실행 실패");

@@ -3,8 +3,17 @@ using System.Text.Json;
 namespace PCRemoteControl;
 sealed class RemoteView : PictureBox
 {
+    string message = "HOST에서 TARGET을 선택한 뒤 원격접속을 누르세요.";
+    public string Message { get => message; set { message = value; Invalidate(); } }
     public RemoteView() { SetStyle(ControlStyles.Selectable, true); TabStop = true; }
     protected override bool IsInputKey(Keys keyData) => true;
+    protected override void OnPaint(PaintEventArgs pe)
+    {
+        base.OnPaint(pe);
+        if (Image == null)
+            TextRenderer.DrawText(pe.Graphics, message, Font, Rectangle.Inflate(ClientRectangle, -24, -24),
+                DarkTheme.Ink, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
+    }
 }
 sealed class MainForm : Form
 {
@@ -37,6 +46,9 @@ sealed class MainForm : Form
     Rectangle oldBounds;
     FormWindowState oldState;
     long lastMove;
+    long lastFrameAt, pairedAt, receivedFrames, sentFrames, nextCaptureAt;
+    int sessionGeneration;
+    string? captureError;
     readonly System.Windows.Forms.Timer health = new() { Interval = 2000 };
     readonly string? watchdogFolder;
     readonly bool fixedTarget;
@@ -53,7 +65,7 @@ sealed class MainForm : Form
     {
         this.watchdogFolder = watchdogFolder;
         fixedTarget = target;
-        Text = "PCRemoteControl v0.1.2 · Windows HOST / TARGET";
+        Text = "PCRemoteControl v0.1.3 · Windows HOST / TARGET";
         Size = new Size(1180, 780); MinimumSize = new Size(800, 500); KeyPreview = true;
         role.Items.AddRange(new object[] { "HOST", "TARGET" }); role.SelectedIndex = target ? 1 : 0;
         LoadSettings();
@@ -62,7 +74,7 @@ sealed class MainForm : Form
             try { password.Text = TargetRecovery.Load() ?? password.Text; }
             catch (Exception) { autoConnect = false; status.Text = "저장 비밀번호 복구 실패 · 비밀번호를 다시 입력하세요."; }
         }
-        health.Tick += (_, _) => WriteHealth(running ? "running" : "paused");
+        health.Tick += (_, _) => { WriteHealth(running ? "running" : "paused"); CheckFrameHealth(); };
         WriteHealth("paused"); health.Start();
         Shown += async (_, _) => { if (target && autoConnect) await Start(); };
         var passwordGroup = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, Margin = Padding.Empty };
@@ -128,7 +140,7 @@ sealed class MainForm : Form
         role.SelectedIndexChanged += (_, _) => UpdateControls();
         UpdateControls();
     }
-    bool CanInput => paired && !targetMode && view.Focused;
+    bool CanInput => paired && !targetMode && view.Focused && view.Image != null;
     void UpdateControls()
     {
         bool isTarget = role.SelectedIndex == 1;
@@ -177,7 +189,7 @@ sealed class MainForm : Form
                 while (!token.IsCancellationRequested) HandleMessage(await c.Read(token));
             }
             catch (LoginException ex) { lifetime.Cancel(); WriteHealth("paused"); status.Text = ex.Message; }
-            catch (Exception ex) { if (!token.IsCancellationRequested) status.Text = "연결 종료: " + ex.Message + (targetMode ? " · 5초 후 재연결" : ""); }
+            catch (Exception ex) { if (!token.IsCancellationRequested) { DiagnosticLog.Write("connection", ex.GetType().Name + ": " + ex.Message); status.Text = "연결 종료: " + ex.Message + (targetMode ? " · 5초 후 재연결" : ""); } }
             finally { connection = null; heartbeat.Stop(); listing.Stop(); capture.Stop(); EndSession(); UpdateControls(); }
             if (!targetMode || token.IsCancellationRequested) break;
             try { await Task.Delay(5000, token); } catch (OperationCanceledException) { break; }
@@ -200,7 +212,7 @@ sealed class MainForm : Form
         var c = connection;
         if (c == null || lifetime == null) return;
         try { await c.Send(message, lifetime.Token); }
-        catch (Exception ex) { status.Text = "전송 실패: " + ex.Message; c.Dispose(); }
+        catch (Exception ex) { DiagnosticLog.Write("send", ex.GetType().Name + ": " + ex.Message); status.Text = "전송 실패: " + ex.Message; c.Dispose(); }
     }
     void HandleMessage(JsonElement m)
     {
@@ -215,13 +227,39 @@ sealed class MainForm : Form
                     targets.Items.Add(item); if (item.Id == selected) targets.SelectedItem = item;
                 }
                 targets.EndUpdate(); break;
-            case "paired": paired = true; status.Text = targetMode ? "● HOST 원격제어 중 · 연결 중지 버튼으로 즉시 차단" : "원격접속됨 · 화면 클릭 후 제어 · F11 전체 화면 / Esc 복귀"; UpdateControls(); break;
+            case "paired":
+                EndSession(); paired = true; pairedAt = Environment.TickCount64;
+                status.Text = targetMode ? "HOST 접속됨 · 첫 화면 캡처 중" : "TARGET 연결됨 · 첫 화면 수신 대기 중";
+                view.Message = targetMode ? "HOST에 화면 전송을 준비하고 있습니다." : "TARGET에 연결되었습니다.\n첫 화면을 기다리고 있습니다…";
+                DiagnosticLog.Write("paired", targetMode ? "TARGET" : "HOST");
+                UpdateControls();
+                if (targetMode) _ = CaptureFrame();
+                break;
             case "ended": EndSession(); status.Text = "원격접속 종료 · 서버 연결 유지 중"; UpdateControls(); break;
             case "error": status.Text = m.GetProperty("message").GetString(); break;
             case "frame" when !targetMode && paired:
-                using (var ms = new MemoryStream(m.GetProperty("data").GetBytesFromBase64()))
-                using (var decoded = Image.FromStream(ms))
-                { var old = view.Image; view.Image = new Bitmap(decoded); old?.Dispose(); }
+                if (m.TryGetProperty("capture_error", out var failure))
+                {
+                    string message = failure.GetString() ?? "TARGET 화면 캡처 실패";
+                    ShowFrameProblem("TARGET 화면 캡처 실패\n" + message);
+                    break;
+                }
+                try
+                {
+                    var bitmap = FrameCodec.Decode(m.GetProperty("data").GetBytesFromBase64());
+                    var old = view.Image; view.Image = bitmap; old?.Dispose(); view.Invalidate();
+                    lastFrameAt = Environment.TickCount64; receivedFrames++;
+                    if (receivedFrames == 1 || captureError != null)
+                        DiagnosticLog.Write("frame-received", $"{bitmap.Width}x{bitmap.Height}");
+                    captureError = null;
+                    bool dark = m.TryGetProperty("nearly_black", out var black) && black.ValueKind == JsonValueKind.True;
+                    status.Text = dark ? $"화면 수신 {receivedFrames}회 · TARGET 화면이 거의 검습니다. 잠금·모니터·RDP 상태를 확인하세요."
+                        : $"화면 수신 {receivedFrames}회 · {bitmap.Width}×{bitmap.Height} · 화면 클릭 후 제어 · F11 전체화면";
+                }
+                catch (Exception ex) when (ex is ArgumentException or IOException or InvalidOperationException or KeyNotFoundException or FormatException or System.Runtime.InteropServices.ExternalException)
+                {
+                    ShowFrameProblem("수신 화면 해석 실패\n" + ex.Message);
+                }
                 break;
             case "input" when targetMode && paired:
                 try { Desktop.Apply(m); } catch (Exception ex) { status.Text = "입력 처리 실패: " + ex.Message; }
@@ -230,20 +268,83 @@ sealed class MainForm : Form
     }
     void EndSession()
     {
+        sessionGeneration++;
+        lastFrameAt = pairedAt = receivedFrames = sentFrames = nextCaptureAt = 0;
+        captureError = null;
         paired = false; if (targetMode) Desktop.Release();
         var old = view.Image; view.Image = null; old?.Dispose();
+        view.Message = targetMode ? "TARGET 화면 공유 대기 중입니다." : "HOST에서 TARGET을 선택한 뒤 원격접속을 누르세요.";
+    }
+    void ShowFrameProblem(string message)
+    {
+        if (captureError != message)
+        {
+            DiagnosticLog.Write("frame-error", message);
+            _ = Send(new { type = "input", action = "release" });
+        }
+        captureError = message;
+        var old = view.Image; view.Image = null; old?.Dispose();
+        view.Message = message; status.Text = message.Replace('\n', ' ');
+    }
+    void CheckFrameHealth()
+    {
+        if (!paired || targetMode || captureError != null) return;
+        long age = Environment.TickCount64 - (lastFrameAt == 0 ? pairedAt : lastFrameAt);
+        if (age < 10000) return;
+        ShowFrameProblem(lastFrameAt == 0
+            ? "TARGET에 연결됐지만 10초 동안 화면이 도착하지 않았습니다.\nTARGET 상태 표시줄과 client.log를 확인하세요."
+            : "10초 동안 새 화면이 도착하지 않아 제어를 일시 중지했습니다.\nTARGET의 잠금·모니터·네트워크 상태를 확인하세요.");
     }
     async Task CaptureFrame()
     {
-        if (!targetMode || !paired || sendingFrame) return;
+        if (!targetMode || !paired || sendingFrame || Environment.TickCount64 < nextCaptureAt) return;
         sendingFrame = true;
         var c = connection;
+        int generation = sessionGeneration;
+        var token = lifetime?.Token ?? CancellationToken.None;
         try
         {
-            var frame = await Task.Run(Desktop.Capture);
-            if (paired && c != null && ReferenceEquals(c, connection)) await Send(new { type = "frame", data = frame });
+            CapturedFrame frame;
+            try
+            {
+                Rectangle bounds = Screen.PrimaryScreen?.Bounds ?? throw new IOException("활성 모니터를 찾을 수 없습니다.");
+                frame = await Task.Run(() => Desktop.Capture(bounds), token);
+            }
+            catch (Exception ex) when (!token.IsCancellationRequested)
+            {
+                if (!paired || c == null || !ReferenceEquals(c, connection) || generation != sessionGeneration) return;
+                string message = ex.Message;
+                if (captureError != message) DiagnosticLog.Write("capture-error", ex.GetType().Name + ": " + message);
+                captureError = message;
+                status.Text = "화면 캡처 실패: " + message;
+                view.Message = status.Text;
+                nextCaptureAt = Environment.TickCount64 + 2000;
+                // Existing relays forward frame envelopes unchanged, including optional diagnostic fields.
+                await c.Send(new { type = "frame", data = Array.Empty<byte>(), capture_error = message }, token);
+                return;
+            }
+            if (paired && c != null && ReferenceEquals(c, connection) && generation == sessionGeneration)
+            {
+                await c.Send(new { type = "frame", data = frame.Data, nearly_black = frame.NearlyBlack }, token);
+                if (generation != sessionGeneration || !ReferenceEquals(c, connection)) return;
+                sentFrames++;
+                if (sentFrames == 1 || captureError != null)
+                    DiagnosticLog.Write("frame-sent", $"{frame.Width}x{frame.Height} bytes={frame.Data.Length} nearlyBlack={frame.NearlyBlack}");
+                captureError = null;
+                status.Text = frame.NearlyBlack ? $"화면 전송 {sentFrames}회 · 캡처 결과가 거의 검습니다. 모니터·잠금·RDP 상태를 확인하세요."
+                    : $"화면 전송 {sentFrames}회 · {frame.Width}×{frame.Height} · 연결 중지 버튼으로 차단";
+                view.Message = status.Text;
+            }
         }
-        catch (Exception ex) { status.Text = "화면 캡처 실패: " + ex.Message; }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            if (generation == sessionGeneration && ReferenceEquals(c, connection))
+            {
+                DiagnosticLog.Write("frame-send-error", ex.GetType().Name + ": " + ex.Message);
+                status.Text = "화면 전송 실패: " + ex.Message; c?.Dispose();
+            }
+        }
         finally { sendingFrame = false; }
     }
     async Task Mouse(MouseEventArgs e, bool? down, int wheel = 0)

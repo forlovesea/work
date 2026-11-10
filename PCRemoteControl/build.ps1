@@ -1,6 +1,6 @@
-﻿param([switch]$IncludeWatchdog)
+param([switch]$IncludeWatchdog)
 $ErrorActionPreference = 'Stop'
-$version = '0.1.2'
+$version = '0.1.3'
 $releaseDir = Join-Path $PSScriptRoot "release/v$version"
 $publishDir = Join-Path $PSScriptRoot "Client/obj/publish-v$version"
 New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null

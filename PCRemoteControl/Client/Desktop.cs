@@ -1,6 +1,8 @@
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using System.ComponentModel;
+using System.Text;
 
 namespace PCRemoteControl;
 static class Desktop
@@ -10,6 +12,14 @@ static class Desktop
     [StructLayout(LayoutKind.Explicit)] struct InputUnion { [FieldOffset(0)] public MouseInput mouse; [FieldOffset(0)] public KeyInput key; }
     [StructLayout(LayoutKind.Sequential)] struct Input { public uint type; public InputUnion value; }
     [DllImport("user32.dll", SetLastError = true)] static extern uint SendInput(uint count, Input[] inputs, int size);
+    [DllImport("user32.dll", SetLastError = true)] static extern IntPtr GetDC(IntPtr hwnd);
+    [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr hwnd, IntPtr dc);
+    [DllImport("gdi32.dll", SetLastError = true)] static extern bool BitBlt(IntPtr destination, int x, int y, int width, int height, IntPtr source, int sourceX, int sourceY, uint operation);
+    [DllImport("user32.dll", SetLastError = true)] static extern IntPtr OpenInputDesktop(uint flags, bool inherit, uint access);
+    [DllImport("user32.dll")] static extern bool CloseDesktop(IntPtr desktop);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool GetUserObjectInformation(IntPtr handle, int index, StringBuilder name, int bytes, out int required);
+    [DllImport("user32.dll")] static extern IntPtr GetThreadDesktop(uint threadId);
+    [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
     static readonly HashSet<int> keys = new();
     static readonly HashSet<string> buttons = new();
     static void Send(Input input)
@@ -57,17 +67,41 @@ static class Desktop
             x = (int)((px - all.Left) * 65535L / Math.Max(1, all.Width - 1)),
             y = (int)((py - all.Top) * 65535L / Math.Max(1, all.Height - 1)), flags = flags, data = data } } });
     }
-    public static byte[] Capture()
+    public static CapturedFrame Capture(Rectangle bounds)
     {
-        Rectangle bounds = Screen.PrimaryScreen!.Bounds;
-        using var original = new Bitmap(bounds.Width, bounds.Height);
-        using (var g = Graphics.FromImage(original)) g.CopyFromScreen(bounds.Location, Point.Empty, bounds.Size);
-        double scale = Math.Min(1, 1600.0 / bounds.Width);
-        using var resized = new Bitmap(original, new Size((int)(bounds.Width * scale), (int)(bounds.Height * scale)));
-        using var buffer = new MemoryStream();
-        using var parameters = new EncoderParameters(1);
-        parameters.Param[0] = new EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 65L);
-        resized.Save(buffer, ImageCodecInfo.GetImageEncoders().First(c => c.FormatID == ImageFormat.Jpeg.Guid), parameters);
-        return buffer.ToArray();
+        if (bounds.Width <= 0 || bounds.Height <= 0) throw new IOException("활성 모니터를 찾을 수 없습니다.");
+        IntPtr input = OpenInputDesktop(0, false, 1); // Read desktop metadata only; never switch desktops.
+        if (input == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error(), "TARGET의 잠금 화면 또는 보안 화면을 해제하세요.");
+        try
+        {
+            var inputName = new StringBuilder(256);
+            var threadName = new StringBuilder(256);
+            if (!GetUserObjectInformation(input, 2, inputName, 512, out _) ||
+                !GetUserObjectInformation(GetThreadDesktop(GetCurrentThreadId()), 2, threadName, 512, out _))
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            if (!string.Equals(inputName.ToString(), threadName.ToString(), StringComparison.OrdinalIgnoreCase))
+                throw new IOException("TARGET의 잠금 화면 또는 UAC 보안 화면을 해제하세요.");
+        }
+        finally { CloseDesktop(input); }
+        using var original = FrameCodec.CreateSurface(bounds.Width, bounds.Height);
+        using (var g = Graphics.FromImage(original))
+        {
+            IntPtr source = GetDC(IntPtr.Zero);
+            if (source == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
+            try
+            {
+                IntPtr destination = g.GetHdc();
+                try
+                {
+                    const uint sourceCopy = 0x00CC0020, captureLayered = 0x40000000;
+                    if (!BitBlt(destination, 0, 0, bounds.Width, bounds.Height, source, bounds.X, bounds.Y, sourceCopy | captureLayered) &&
+                        !BitBlt(destination, 0, 0, bounds.Width, bounds.Height, source, bounds.X, bounds.Y, sourceCopy))
+                        throw new Win32Exception(Marshal.GetLastWin32Error(), "화면 캡처 실패. TARGET 로그인 상태와 모니터 연결을 확인하세요.");
+                }
+                finally { g.ReleaseHdc(destination); }
+            }
+            finally { ReleaseDC(IntPtr.Zero, source); }
+        }
+        return FrameCodec.Encode(original);
     }
 }

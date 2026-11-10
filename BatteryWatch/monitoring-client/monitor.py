@@ -1786,6 +1786,7 @@ class OperationDataRecordThread(QThread):
 class SNMPThread(QThread):
     event_sample_signal = Signal(bool, object, object)  # completed polling cycles only
     result_signal = Signal(bool, object)  # str → object (dict 전달 가능)
+    epo_support_signal = Signal(bool)
     soc_charge_limit_signal = Signal(bool, object)
     initial_load_complete_signal = Signal()
 
@@ -1814,9 +1815,64 @@ class SNMPThread(QThread):
         self.running = True
         self.once = once  # 최초 테스트 여부
         self.snmpEngine = None   # 🔴 멤버로 보관
+        self.epo_support_checked = False
         self.initial_ui_emitted = False
         self.initial_load_complete_emitted = False
         self.system_name = ""
+
+    def read_epo_support(self, snmp_engine):
+        # 준비 OID가 실제 테이블에 존재하고 정확한 GET도 성공해야 지원한다.
+        oid = EpoCutoffThread.EPO_PREPARE_OID
+        root = "1.3.6.1.4.1.2011.6.164.1.2.2.1"
+        def valid(binding):
+            return (str(binding[0]) == oid
+                    and binding[1].tagSet == Integer32.tagSet
+                    and int(binding[1]) != 2147483647)
+
+        def report(supported, reason):
+            print(f"[EPO SUPPORT] {self.ip}:{self.port} OID={oid} "
+                  f"supported={supported} {reason}", flush=True)
+            return supported
+
+        try:
+            self.tx_signal.emit()
+            found = False
+            for error, status, _, bindings in bulkCmd(
+                snmp_engine, CommunityData(self.community, mpModel=1),
+                UdpTransportTarget((self.ip, int(self.port)),
+                                   timeout=self.SNMP_TIMEOUT_SEC, retries=self.SNMP_RETRIES),
+                ContextData(), 0, 10, ObjectType(ObjectIdentity(root)),
+                lexicographicMode=False
+            ):
+                if not self.running or error or status:
+                    return report(False, f"table query failed: {error or status}")
+                self.rx_signal.emit()
+                if any(valid(binding) for binding in bindings):
+                    found = True
+                    break
+                # GETBULK는 요청 OID 대신 다음 OID를 반환하므로 정확히 비교한다.
+                if any(tuple(map(int, str(binding[0]).split('.'))) >
+                       tuple(map(int, oid.split('.'))) for binding in bindings):
+                    break
+            if not found:
+                return report(False, "prepare OID absent from table")
+
+            self.tx_signal.emit()
+            error, status, _, bindings = next(getCmd(
+                snmp_engine, CommunityData(self.community, mpModel=1),
+                UdpTransportTarget((self.ip, int(self.port)),
+                                   timeout=self.SNMP_TIMEOUT_SEC, retries=self.SNMP_RETRIES),
+                ContextData(), ObjectType(ObjectIdentity(oid))
+            ))
+            if not self.running or error or status or len(bindings) != 1:
+                return report(False, f"GET failed: {error or status}")
+            self.rx_signal.emit()
+            supported = valid(bindings[0])
+            return report(supported, f"GET oid={bindings[0][0]} "
+                          f"type={type(bindings[0][1]).__name__} value={bindings[0][1]}")
+        except Exception as exc:
+            return report(False, f"query exception: {exc}")
+
 
     def read_system_name(self, snmp_engine):
         # 선택 정보 조회 실패는 기존 접속 성공 여부에 영향을 주지 않는다.
@@ -1995,6 +2051,12 @@ class SNMPThread(QThread):
                 # MIB 트리 사이에 짧은 간격을 두어 장비 SNMP 처리 부하를 낮춘다.
                 self.msleep(self.BASE_OID_DELAY_MS)
 
+            # 접속 후 첫 정상 수집 시 한 번 지원 여부를 확인한다.
+            # 선택 OID의 조회 실패는 기본 감시 성공 여부에 영향을 주지 않는다.
+            if not self.epo_support_checked and not cycle_failed and result_data and self.running:
+                self.epo_support_checked = True
+                self.epo_support_signal.emit(self.read_epo_support(snmpEngine))
+
             # 기본 모듈 데이터 결과를 SOC 별도 조회보다 먼저 UI에 전달한다.
             # 실패한 주기의 부분 데이터는 폐기해 마지막 정상 UI를 유지한다.
             self.event_sample_signal.emit(not cycle_failed and bool(result_data), dict(result_data), datetime.now())
@@ -2115,6 +2177,7 @@ class BatteryMonitorUI(QMainWindow):
         # 🔥 3. 공통 상태 변수 초기화 (UI보다 먼저!)
         # =========================
         self.is_connected = False
+        self.epo_supported = False
         
         # 🔥 SNMP 응답 실패 카운트
         self.snmp_fail_count = 0
@@ -3198,7 +3261,9 @@ class BatteryMonitorUI(QMainWindow):
             
             self.show_auto_close_message("접속 성공", "축전지 시스템 연결 성공")
 
+            self.epo_supported = False
             self.is_connected = True
+            self.update_full_cutoff_button_state()
             self.connect_btn.setText("접속종료")
 
             ip = self.ip_edit.text().strip()
@@ -3224,6 +3289,7 @@ class BatteryMonitorUI(QMainWindow):
             self.snmp_thread.rx_signal.connect(self.rx_led_poll)
             self.snmp_thread.parent_ui = self
             self.snmp_thread.event_sample_signal.connect(self.handle_charge_discharge_sample)
+            self.snmp_thread.epo_support_signal.connect(self.handle_epo_support_result)
             self.snmp_thread.result_signal.connect(self.handle_snmp_result)
             self.snmp_thread.initial_load_complete_signal.connect(
                 lambda: self.close_initial_load_message(completed=True)
@@ -3811,7 +3877,7 @@ class BatteryMonitorUI(QMainWindow):
                 if module_no in self.cutoff_buttons:
                     if getattr(self, "full_cutoff_active", False):
                         self.cutoff_buttons[module_no].setEnabled(False)
-                    elif status in (4, 5, 6):
+                    elif status in (4, 5, 6) and self.is_epo_supported(module_no):
                         self.cutoff_buttons[module_no].setEnabled(True)
                     else:
                         self.cutoff_buttons[module_no].setEnabled(False)
@@ -5448,6 +5514,8 @@ class BatteryMonitorUI(QMainWindow):
             return False, str(e)
 
     def set_soc_charge_limit(self, enabled, value):
+        if not self.is_connected or not getattr(self, "soc_charge_limit_supported", False):
+            return False, "SOC support OID not verified"
         try:
             ip = self.ip_edit.text().strip()
             set_community = self.set_comm_edit.text().strip()
@@ -5521,16 +5589,17 @@ class BatteryMonitorUI(QMainWindow):
         if not hasattr(self, "soc_charge_limit_button"):
             return
 
+        success = (success and self.is_connected and isinstance(result, dict)
+                   and result.get("enabled") in (1, 2)
+                   and isinstance(result.get("value"), int)
+                   and 1 <= result["value"] <= 100)
+        self.soc_charge_limit_supported = bool(success)
         if not success:
-            self.soc_charge_limit_fail_count = (
-                getattr(self, "soc_charge_limit_fail_count", 0) + 1
-            )
-            if self.soc_charge_limit_fail_count >= 2:
-                self.soc_charge_limit_button.setEnabled(False)
-                self.soc_charge_limit_button.setText("-")
-                self.soc_charge_limit_button.setStyleSheet(
-                    self.SOC_CHARGE_DISABLED_STYLE
-                )
+            self.soc_charge_limit_enabled = None
+            self.soc_charge_limit_value = None
+            self.soc_charge_limit_button.setEnabled(False)
+            self.soc_charge_limit_button.setText("-")
+            self.soc_charge_limit_button.setStyleSheet(self.SOC_CHARGE_DISABLED_STYLE)
             return
 
         self.soc_charge_limit_fail_count = 0
@@ -5554,6 +5623,8 @@ class BatteryMonitorUI(QMainWindow):
             )
 
     def open_soc_charge_limit_dialog(self):
+        if not self.is_connected or not getattr(self, "soc_charge_limit_supported", False):
+            return
         dialog = QDialog(self)
         dialog.setWindowTitle("SOC충전제한 설정")
 
@@ -5776,6 +5847,8 @@ class BatteryMonitorUI(QMainWindow):
                     btn = QPushButton("-")
                     btn.setFixedHeight(22)
                     btn.setStyleSheet(BUTTON_STYLE)
+                    btn.setEnabled(False)
+                    btn.setStyleSheet(self.SOC_CHARGE_DISABLED_STYLE)
                     btn.clicked.connect(self.open_soc_charge_limit_dialog)
 
                     table.setCellWidget(value_row, col, btn)
@@ -5988,6 +6061,21 @@ class BatteryMonitorUI(QMainWindow):
         return main_widget
 
 
+    def is_epo_supported(self, module_no):
+        info = self.module_map.get(module_no, {})
+        return (self.is_connected and getattr(self, "epo_supported", False)
+                and info.get("row_index") is not None)
+
+
+    def handle_epo_support_result(self, supported):
+        # 종료된 이전 polling 스레드의 큐에 남은 결과는 무시한다.
+        source = self.sender()
+        if source is not getattr(self, "snmp_thread", None) or not source or not source.running:
+            return
+        self.epo_supported = supported is True and self.is_connected
+        self.update_full_cutoff_button_state()
+
+
     def get_alive_module_numbers(self):
         """접속 상태에서 EPO 차단 명령을 받을 수 있는 모듈 번호를 반환한다."""
         if not self.is_connected:
@@ -5997,13 +6085,21 @@ class BatteryMonitorUI(QMainWindow):
         for module_no, module_info in self.module_map.items():
             row_index = module_info.get("row_index")
             data = self.module_data.get(row_index)
-            if data and data.get("status") in (4, 5, 6):
+            if data and data.get("status") in (4, 5, 6) and self.is_epo_supported(module_no):
                 alive_modules.append(module_no)
 
         return alive_modules
 
     def update_full_cutoff_button_state(self):
         operation_active = getattr(self, "full_cutoff_active", False)
+        if not self.is_connected:
+            self.epo_supported = False
+            self.handle_soc_charge_limit_result(False, None)
+        alive = set(self.get_alive_module_numbers())
+        for module_no, button in self.cutoff_buttons.items():
+            worker = getattr(self, "epo_cutoff_threads", {}).get(module_no)
+            button.setEnabled(module_no in alive and not operation_active
+                              and not (worker and worker.isRunning()))
         if hasattr(self, "full_cutoff_button"):
             self.full_cutoff_button.setEnabled(
                 bool(self.get_alive_module_numbers()) and not operation_active
@@ -6011,7 +6107,7 @@ class BatteryMonitorUI(QMainWindow):
         if hasattr(self, "full_restore_button"):
             self.full_restore_button.setEnabled(
                 self.is_connected
-                and bool(self.module_map)
+                and any(self.is_epo_supported(no) for no in self.module_map)
                 and not operation_active
             )
 
@@ -6034,7 +6130,7 @@ class BatteryMonitorUI(QMainWindow):
             module_list = sorted(
                 int(no)
                 for no, info in self.module_map.items()
-                if info.get("row_index") is not None
+                if self.is_epo_supported(no)
             )
 
         if not module_list:
@@ -6309,6 +6405,8 @@ class BatteryMonitorUI(QMainWindow):
             self.execute_full_restore()
 
     def execute_cutoff(self, module_no):
+        if not self.is_epo_supported(module_no):
+            return False
         module_info = self.module_map.get(module_no)
         row_index = module_info.get("row_index") if module_info else None
         if row_index is None:
@@ -6411,7 +6509,7 @@ class BatteryMonitorUI(QMainWindow):
             and self.full_cutoff_current_module == module_no
         )
         if cutoff_btn and self.is_connected and not is_full_cutoff:
-            cutoff_btn.setEnabled(True)
+            cutoff_btn.setEnabled(module_no in self.get_alive_module_numbers())
 
         if is_full_cutoff:
             self.full_cutoff_completed_count += 1

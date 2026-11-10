@@ -39,6 +39,7 @@ public sealed class SnmpMonitorService : IMonitorService
     public async Task ConnectAsync(ConnectionOptions options, CancellationToken cancellationToken)
     {
         await DisconnectAsync();
+        _snapshot.EpoSupported = false;
         _snapshot.SystemName = ""; _snapshot.RackUpdatedAt = null; _snapshot.ModulesUpdatedAt = null; _snapshot.UpdatedAt = null;
         _snapshot.RawValues.Clear(); SnmpDataMapper.Apply(_snapshot, _snapshot.RawValues);
         _snapshot.ConsecutiveFailures = 0;
@@ -53,8 +54,10 @@ public sealed class SnmpMonitorService : IMonitorService
 
     public async Task DisconnectAsync()
     {
+        _snapshot.EpoSupported = false;
         var session = _session; _session = null; if (session is null) return; session.Cancel();
         var tasks = new[] { _pollTask, _trapTask }.Where(t => t is not null).Cast<Task>().ToArray(); try { await Task.WhenAll(tasks); } catch (OperationCanceledException) { }
+        _snapshot.EpoSupported = false;
         session.Dispose(); _pollTask = null; _trapTask = null; _snapshot.SystemName = ""; _snapshot.Connection = ConnectionState.Disconnected; RaiseSnapshot();
     }
 
@@ -77,7 +80,10 @@ public sealed class SnmpMonitorService : IMonitorService
     public async Task SetEpoAsync(int? moduleNumber, bool cutoff, CancellationToken cancellationToken)
     {
         var options = _options ?? throw new InvalidOperationException("SNMP가 연결되지 않았습니다.");
-        await SetVerifiedAsync("1.3.6.1.4.1.2011.6.164.1.2.2.1.1.11.1", 1);
+        if (moduleNumber is not { } target || target is < 1 or > 10
+            || !DeviceFeatureSupport.EpoSupported(_snapshot, _snapshot.Modules[target - 1]))
+            throw new InvalidOperationException("EPO 지원 OID 응답이 확인되지 않았습니다.");
+        await SetVerifiedAsync(DeviceFeatureSupport.EpoPrepareOid, 1);
         if (moduleNumber is not { } number || number is < 1 or > 10) return;
         var rowIndex = _snapshot.Modules[number - 1].RowIndex; if (rowIndex.Length == 0) throw new InvalidOperationException($"모듈 #{number:00}의 SNMP 행 인덱스를 찾을 수 없습니다.");
         await SetVerifiedAsync($"1.3.6.1.4.1.2011.6.164.1.18.3.1.2.{rowIndex}", cutoff ? 2 : 1);
@@ -103,6 +109,7 @@ public sealed class SnmpMonitorService : IMonitorService
     }
     public async Task SetSocChargeLimitAsync(int enabled, int? value, CancellationToken cancellationToken)
     {
+        if (!DeviceFeatureSupport.SocSupported(_snapshot)) throw new InvalidOperationException("SOC 충전제한 지원 OID 응답이 확인되지 않았습니다.");
         if (enabled is not (1 or 2)) throw new ArgumentOutOfRangeException(nameof(enabled), "SOC 제한 상태는 1 또는 2여야 합니다."); if (enabled == 2 && value is not (>= 1 and <= 100)) throw new ArgumentOutOfRangeException(nameof(value), "SOC 제한값은 1~100 범위여야 합니다.");
         await SetVerifiedAsync(SocEnableOid, SnmpDataType.Integer, enabled, cancellationToken); if (enabled == 2) { await Task.Delay(100, cancellationToken); await SetVerifiedAsync(SocValueOid, SnmpDataType.Gauge32, value!.Value, cancellationToken); }
         var read = await GetSocChargeLimitAsync(cancellationToken); if (read.Enabled != enabled || (enabled == 2 && read.Value != value)) throw new InvalidDataException($"SOC 제한 검증 불일치: 설정 {enabled}/{value}, 장비 {read.Enabled}/{read.Value}");
@@ -114,9 +121,26 @@ public sealed class SnmpMonitorService : IMonitorService
     private async Task SetVerifiedAsync(string oid, SnmpDataType type, int expected, CancellationToken token) { token.ThrowIfCancellationRequested(); var o = RequireOptions(); var values = await _client.SetAsync(o.Address, o.Port, o.SetCommunity, new SnmpVariable(oid, type, expected)); if (values.Count == 0 || values[0].Oid != oid || ParseInt(values[0], oid) != expected) throw new InvalidDataException($"SNMP SET 응답 불일치: {oid}"); }
     private static int ParseInt(SnmpVariable value, string oid) => int.TryParse(value.DisplayValue, out var parsed) ? parsed : throw new InvalidDataException($"SNMP 정수값 오류: {oid}={value.DisplayValue}");
 
+    private async Task<bool> ReadEpoSupportAsync(ConnectionOptions options, CancellationToken token)
+    {
+        // Optional firmware capability: neither absence nor timeout fails normal monitoring.
+        try
+        {
+            var table = await _client.WalkBulkAsync(options.Address, options.Port,
+                options.GetCommunity, DeviceFeatureSupport.EpoTableRoot, 10, token);
+            if (!table.Any(DeviceFeatureSupport.IsValidEpoPrepareResponse)) return false;
+            var response = await _client.GetAsync(options.Address, options.Port,
+                options.GetCommunity, [DeviceFeatureSupport.EpoPrepareOid], token);
+            return response.Count == 1 && DeviceFeatureSupport.IsValidEpoPrepareResponse(response[0]);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+        catch (Exception) { return false; }
+    }
+
     private async Task PollAsync(CancellationToken token)
     {
         var options = _options!;
+        var epoSupportChecked = false;
         while (!token.IsCancellationRequested)
         {
             try
@@ -125,6 +149,13 @@ public sealed class SnmpMonitorService : IMonitorService
                 // 실제 TBC1000B에서 30개 응답은 UDP 단편화/유실로 timeout이 발생했다.
                 // 10개 단위는 동일 장비의 577개 OID를 누락 없이 안정적으로 수집했다.
                 foreach (var oid in BaseOids) { var values = await _client.WalkBulkAsync(options.Address, options.Port, options.GetCommunity, oid, 10, token); foreach (var value in values) cycle[value.Oid] = value.DisplayValue; await Task.Delay(10, token); }
+                if (!epoSupportChecked && cycle.Count > 0)
+                {
+                    var supported = await ReadEpoSupportAsync(options, token);
+                    token.ThrowIfCancellationRequested();
+                    _snapshot.EpoSupported = supported;
+                    epoSupportChecked = true;
+                }
                 lock (_snapshot) { _snapshot.RawValues.Clear(); foreach (var item in cycle) _snapshot.RawValues[item.Key] = item.Value; _snapshot.UpdatedAt = DateTime.Now; _snapshot.RackUpdatedAt = _snapshot.UpdatedAt; _snapshot.LastError = null; _snapshot.ConsecutiveFailures = 0; }
                 SnmpDataMapper.Apply(_snapshot, cycle);
                 if (_snapshot.Modules.Any(m => m.Connected)) _snapshot.ModulesUpdatedAt = DateTime.Now;
@@ -136,6 +167,7 @@ public sealed class SnmpMonitorService : IMonitorService
                 _snapshot.LastError = ex.Message; _snapshot.ConsecutiveFailures++; _snapshot.TotalFailures++;
                 if (_snapshot.ConsecutiveFailures >= 30)
                 {
+                    _snapshot.EpoSupported = false;
                     _snapshot.Connection = ConnectionState.Disconnected;
                     _snapshot.SystemName = "";
                     _session?.Cancel();

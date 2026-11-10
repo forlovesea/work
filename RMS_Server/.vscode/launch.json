@@ -2,10 +2,10 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Python: TBC1000B 감시프로그램 V3.2.6",
+      "name": "Python: TBC1000B 감시프로그램 V3.2.7",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}\\TBC1000B_감시프로그램_V3.2.6.py",
+      "program": "${workspaceFolder}\\TBC1000B_감시프로그램_V3.2.7.py",
       "python": "${config:python.defaultInterpreterPath}",
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",

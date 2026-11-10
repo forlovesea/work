@@ -3,7 +3,7 @@ import json
 import sys
 from pathlib import Path
 
-VERSION = '3.2.8'
+VERSION = '3.2.9'
 BUILD_DATE = '개발 실행'
 if getattr(sys, 'frozen', False):
     metadata = json.loads((Path(sys._MEIPASS) / 'build-info.json').read_text(encoding='utf-8'))

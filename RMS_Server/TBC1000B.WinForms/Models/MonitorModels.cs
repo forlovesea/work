@@ -36,6 +36,7 @@ public sealed class MonitorSnapshot
     public List<FaultEntry> Faults { get; } = [];
     public List<ActiveAlarmEntry> ActiveAlarms { get; } = [];
     public ConnectionState Connection { get; set; }
+    public bool EpoSupported { get; set; }
     public DateTime? UpdatedAt { get; set; }
     public DateTime? RackUpdatedAt { get; set; }
     public DateTime? ModulesUpdatedAt { get; set; }

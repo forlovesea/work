@@ -6,6 +6,41 @@ using TBC1000B.WinForms.Services;
 using System.IO.Compression;
 using System.Xml.Linq;
 
+// Optional firmware controls remain unavailable until their own OIDs respond.
+var features = new MonitorSnapshot { Connection = ConnectionState.Connected };
+var featureModule = features.Modules[0]; featureModule.RowIndex = "100";
+if (DeviceFeatureSupport.SocSupported(features) || DeviceFeatureSupport.EpoSupported(features, featureModule)) throw new Exception("Missing feature OIDs enabled controls");
+features.RawValues[DeviceFeatureSupport.SocEnableOid] = "1";
+if (DeviceFeatureSupport.SocSupported(features)) throw new Exception("Partial SOC response enabled control");
+features.RawValues[DeviceFeatureSupport.SocValueOid] = "95";
+features.EpoSupported = true;
+if (!DeviceFeatureSupport.SocSupported(features) || !DeviceFeatureSupport.EpoSupported(features, featureModule)) throw new Exception("Valid feature OIDs did not enable controls");
+foreach (var invalid in new[] { "noSuchInstance", "noSuchObject", "Null", "2147483647", "" })
+{
+    features.EpoSupported = false;
+    features.RawValues[DeviceFeatureSupport.SocValueOid] = invalid;
+    if (DeviceFeatureSupport.SocSupported(features) || DeviceFeatureSupport.EpoSupported(features, featureModule)) throw new Exception("Invalid feature response enabled controls");
+}
+features.RawValues[DeviceFeatureSupport.SocValueOid] = "95";
+features.EpoSupported = true;
+features.Connection = ConnectionState.Disconnected;
+if (DeviceFeatureSupport.SocSupported(features) || DeviceFeatureSupport.EpoSupported(features, featureModule)) throw new Exception("Disconnected controls enabled");
+var unsupported = new MonitorSnapshot { Connection = ConnectionState.Connected };
+unsupported.Modules[0].RowIndex = "100";
+unsupported.RawValues[DeviceFeatureSupport.EpoRoot + ".100"] = "1";
+unsupported.RawValues[DeviceFeatureSupport.EpoPrepareOid] = "1";
+if (DeviceFeatureSupport.EpoSupported(unsupported, unsupported.Modules[0])) throw new Exception("Raw data bypassed verified prepare GET");
+foreach (var type in new[] { SnmpDataType.NoSuchInstance, SnmpDataType.NoSuchObject, SnmpDataType.EndOfMibView, SnmpDataType.Null, SnmpDataType.OctetString, SnmpDataType.Gauge32 })
+{
+    if (DeviceFeatureSupport.IsValidEpoPrepareResponse(new(DeviceFeatureSupport.EpoPrepareOid, type, 1))) throw new Exception($"Invalid SNMP type accepted: {type}");
+}
+if (DeviceFeatureSupport.IsValidEpoPrepareResponse(new(DeviceFeatureSupport.EpoPrepareOid + ".1", SnmpDataType.Integer, 1))) throw new Exception("Wrong OID accepted");
+if (DeviceFeatureSupport.IsValidEpoPrepareResponse(new(DeviceFeatureSupport.EpoPrepareOid, SnmpDataType.Integer, int.MaxValue))) throw new Exception("Unavailable value accepted");
+if (!DeviceFeatureSupport.IsValidEpoPrepareResponse(new(DeviceFeatureSupport.EpoPrepareOid, SnmpDataType.Integer, 1))) throw new Exception("Valid prepare response rejected");
+Console.WriteLine("Firmware feature support checks passed");
+
+if (args.Contains("--features-only")) return;
+
 if (args.Length == 2 && args[0] == "--device")
 {
     var profilePath = Path.GetFullPath(args[1]); var profile = new ProfileStore(Path.GetDirectoryName(profilePath)!).Load(profilePath); var probe = new SnmpClient { Timeout = TimeSpan.FromSeconds(2.5), Retries = 1 };

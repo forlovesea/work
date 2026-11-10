@@ -513,7 +513,7 @@ public sealed class MainForm : Form
         var operation = cutoff ? "전체차단" : "전체복구";
         var modules = (cutoff
                 ? _modules.Where(IsEpoCutoffAvailable)
-                : _modules.Where(m => !string.IsNullOrWhiteSpace(m.RowIndex)))
+                : _modules.Where(m => DeviceFeatureSupport.EpoSupported(_latestSnapshot, m)))
             .Select(m => m.Number).Order().ToArray();
         if (modules.Length == 0) { MessageBox.Show(this, $"{operation} 가능한 모듈이 없습니다.", operation, MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
         var warning = cutoff ? "모든 통신 가능 축전지 모듈의 전원을 차단합니다.\n시스템이 즉시 종료될 수 있습니다." : "인식된 모든 축전지 모듈에 복구 명령을 전송합니다.";
@@ -557,12 +557,23 @@ public sealed class MainForm : Form
     {
         var connected = _latestSnapshot?.Connection == ConnectionState.Connected;
         _fullCutoffButton.Enabled = connected && _modules.Any(IsEpoCutoffAvailable) && !_fullEpoOperationActive;
-        _fullRestoreButton.Enabled = connected && _modules.Any(m => !string.IsNullOrWhiteSpace(m.RowIndex)) && !_fullEpoOperationActive;
+        _fullRestoreButton.Enabled = connected && _modules.Any(m => DeviceFeatureSupport.EpoSupported(_latestSnapshot, m)) && !_fullEpoOperationActive;
         ApplyFullEpoButtonStyles();
+        if (_summary.RowCount > 7)
+        {
+            var supported = DeviceFeatureSupport.SocSupported(_latestSnapshot);
+            var cell = _summary[5, 7];
+            if (cell is DataGridViewButtonCell button) button.FlatStyle = supported ? FlatStyle.Standard : FlatStyle.Flat;
+            cell.Style.BackColor = supported ? Color.White : Color.FromArgb(226, 232, 240);
+            cell.Style.ForeColor = supported ? Color.Black : Color.FromArgb(148, 163, 184);
+            cell.Style.SelectionBackColor = cell.Style.BackColor;
+            cell.Style.SelectionForeColor = cell.Style.ForeColor;
+            cell.ToolTipText = supported ? "SOC 충전 제한값 설정" : "지원 OID 응답 대기 / 미지원";
+        }
     }
 
-    private static bool IsEpoCutoffAvailable(ModuleState module) =>
-        module.Connected && module.Status is "충전중" or "방전중" or "Standby";
+    private bool IsEpoCutoffAvailable(ModuleState module) =>
+        DeviceFeatureSupport.EpoSupported(_latestSnapshot, module) && module.Connected && module.Status is "충전중" or "방전중" or "Standby";
 
     private void ApplyFullEpoButtonStyles()
     {
@@ -908,6 +919,7 @@ public sealed class MainForm : Form
     }
     private async Task OpenSocLimitAsync()
     {
+        if (!DeviceFeatureSupport.SocSupported(_latestSnapshot)) return;
         if (_latestSnapshot?.Connection != ConnectionState.Connected) { MessageBox.Show(this, "먼저 장비에 접속해 주세요."); return; }
         try { var current = await _service.GetSocChargeLimitAsync(_lifetime.Token); using var dialog = new SocLimitDialog(current.Enabled, current.Value); if (dialog.ShowDialog(this) != DialogResult.OK) return; await _service.SetSocChargeLimitAsync(dialog.EnabledValue, dialog.LimitValue, _lifetime.Token); MessageBox.Show(this, dialog.EnabledValue == 1 ? "SOC 충전 제한을 사용하지 않도록 설정했습니다." : $"SOC 충전 제한이 {dialog.LimitValue}%로 설정되었습니다.", "설정 성공", MessageBoxButtons.OK, MessageBoxIcon.Information); }
         catch (Exception ex) { MessageBox.Show(this, ex.Message, "SOC 충전 제한 오류", MessageBoxButtons.OK, MessageBoxIcon.Error); }

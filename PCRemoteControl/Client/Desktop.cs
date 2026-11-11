@@ -1,4 +1,3 @@
-using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.ComponentModel;
@@ -69,6 +68,16 @@ static class Desktop
     }
     public static CapturedFrame Capture(Rectangle bounds)
     {
+        using var original = CaptureBitmap(bounds);
+        return FrameCodec.Encode(original);
+    }
+    public static RawVideoFrame CaptureVideo(Rectangle bounds)
+    {
+        using var original = CaptureBitmap(bounds);
+        return FrameCodec.ToVideoFrame(original);
+    }
+    static Bitmap CaptureBitmap(Rectangle bounds)
+    {
         if (bounds.Width <= 0 || bounds.Height <= 0) throw new IOException("활성 모니터를 찾을 수 없습니다.");
         IntPtr input = OpenInputDesktop(0, false, 1); // Read desktop metadata only; never switch desktops.
         if (input == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error(), "TARGET의 잠금 화면 또는 보안 화면을 해제하세요.");
@@ -83,25 +92,29 @@ static class Desktop
                 throw new IOException("TARGET의 잠금 화면 또는 UAC 보안 화면을 해제하세요.");
         }
         finally { CloseDesktop(input); }
-        using var original = FrameCodec.CreateSurface(bounds.Width, bounds.Height);
-        using (var g = Graphics.FromImage(original))
+        var original = FrameCodec.CreateSurface(bounds.Width, bounds.Height);
+        try
         {
-            IntPtr source = GetDC(IntPtr.Zero);
-            if (source == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
-            try
+            using (var g = Graphics.FromImage(original))
             {
-                IntPtr destination = g.GetHdc();
+                IntPtr source = GetDC(IntPtr.Zero);
+                if (source == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
                 try
                 {
-                    const uint sourceCopy = 0x00CC0020, captureLayered = 0x40000000;
-                    if (!BitBlt(destination, 0, 0, bounds.Width, bounds.Height, source, bounds.X, bounds.Y, sourceCopy | captureLayered) &&
-                        !BitBlt(destination, 0, 0, bounds.Width, bounds.Height, source, bounds.X, bounds.Y, sourceCopy))
-                        throw new Win32Exception(Marshal.GetLastWin32Error(), "화면 캡처 실패. TARGET 로그인 상태와 모니터 연결을 확인하세요.");
+                    IntPtr destination = g.GetHdc();
+                    try
+                    {
+                        const uint sourceCopy = 0x00CC0020, captureLayered = 0x40000000;
+                        if (!BitBlt(destination, 0, 0, bounds.Width, bounds.Height, source, bounds.X, bounds.Y, sourceCopy | captureLayered) &&
+                            !BitBlt(destination, 0, 0, bounds.Width, bounds.Height, source, bounds.X, bounds.Y, sourceCopy))
+                            throw new Win32Exception(Marshal.GetLastWin32Error(), "화면 캡처 실패. TARGET 로그인 상태와 모니터 연결을 확인하세요.");
+                    }
+                    finally { g.ReleaseHdc(destination); }
                 }
-                finally { g.ReleaseHdc(destination); }
+                finally { ReleaseDC(IntPtr.Zero, source); }
             }
-            finally { ReleaseDC(IntPtr.Zero, source); }
+            return original;
         }
-        return FrameCodec.Encode(original);
+        catch { original.Dispose(); throw; }
     }
 }

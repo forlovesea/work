@@ -148,6 +148,32 @@ class RelayTests(unittest.IsolatedAsyncioTestCase):
         await self.send(hw, dict(type='list'))
         self.assertEqual((await read_message(hr))['targets'], [])
 
+    async def test_webrtc_signaling_is_forwarded_only_between_paired_roles(self):
+        tr, tw, _ = await self.peer('target')
+        hr, hw, _ = await self.peer('host')
+        await self.send(hw, dict(type='connect', id='test'))
+        await read_message(hr)
+        await read_message(tr)
+        session = '0123456789abcdef0123456789abcdef'
+        offer = dict(type='rtc', action='offer', session=session, description='offer sdp')
+        await self.send(hw, offer)
+        self.assertEqual(await read_message(tr), offer)
+        answer = dict(type='rtc', action='answer', session=session, description='answer sdp')
+        await self.send(tw, answer)
+        self.assertEqual(await read_message(hr), answer)
+        candidate = dict(type='rtc', action='candidate', session=session,
+                         candidate=dict(candidate='candidate:1 1 UDP 1 192.0.2.1 5000 typ host',
+                                        sdpMid='video', sdpMLineIndex=0))
+        await self.send(tw, candidate)
+        self.assertEqual(await read_message(hr), candidate)
+
+    async def test_webrtc_offer_from_target_is_rejected(self):
+        tr, tw, _ = await self.peer('target')
+        await self.send(tw, dict(type='rtc', action='offer',
+                                 session='0123456789abcdef0123456789abcdef',
+                                 description='offer sdp'))
+        self.assertEqual(await asyncio.wait_for(tr.read(), 2), b'')
+
     async def test_capture_error_and_large_frame_recovery(self):
         import base64
         tr, tw, _ = await self.peer('target')

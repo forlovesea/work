@@ -1,13 +1,36 @@
 using System.Drawing.Imaging;
+using System.Runtime.InteropServices;
 
 namespace PCRemoteControl;
 
 sealed record CapturedFrame(byte[] Data, int Width, int Height, bool NearlyBlack);
+sealed record RawVideoFrame(byte[] Data, int Width, int Height);
 
 static class FrameCodec
 {
     // GDI screen copies do not define alpha. Keep the entire capture/resize path opaque.
     public static Bitmap CreateSurface(int width, int height) => new(width, height, PixelFormat.Format24bppRgb);
+
+    public static RawVideoFrame ToVideoFrame(Bitmap original)
+    {
+        double scale = Math.Min(1, 1600.0 / original.Width);
+        using var resized = CreateSurface(
+            Math.Max(1, (int)(original.Width * scale)), Math.Max(1, (int)(original.Height * scale)));
+        using (var graphics = Graphics.FromImage(resized))
+            graphics.DrawImage(original, new Rectangle(0, 0, resized.Width, resized.Height));
+
+        var rect = new Rectangle(0, 0, resized.Width, resized.Height);
+        var data = resized.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format24bppRgb);
+        try
+        {
+            int rowBytes = checked(resized.Width * 3);
+            var pixels = new byte[checked(rowBytes * resized.Height)];
+            for (int row = 0; row < resized.Height; row++)
+                Marshal.Copy(IntPtr.Add(data.Scan0, row * data.Stride), pixels, row * rowBytes, rowBytes);
+            return new RawVideoFrame(pixels, resized.Width, resized.Height);
+        }
+        finally { resized.UnlockBits(data); }
+    }
 
     public static CapturedFrame Encode(Bitmap original)
     {

@@ -62,6 +62,22 @@ static class Program
 
         using var opaque = FrameCodec.CreateSurface(3200, 1800);
         Copy(opaque);
+        var rawFrame = FrameCodec.ToVideoFrame(opaque);
+        int rawOffset = (450 * rawFrame.Width + 800) * 3;
+        Check(rawFrame.Width == 1600 && rawFrame.Height == 900 &&
+            rawFrame.Data[rawOffset] == 35 && rawFrame.Data[rawOffset + 1] == 90 && rawFrame.Data[rawOffset + 2] == 230,
+            "WebRTC raw BGR frames scale correctly without JPEG encoding");
+        var defaultIce = WebRtcSession.ParseIceServers(null);
+        Check(defaultIce.Count == 1 && defaultIce[0].urls == "stun:stun.cloudflare.com:3478",
+            "WebRTC has a default STUN server");
+        var configuredIce = WebRtcSession.ParseIceServers(
+            """[{"urls":"turn:turn.example.com:3478","username":"user","credential":"secret"}]""");
+        Check(configuredIce.Count == 1 && configuredIce[0].urls == "turn:turn.example.com:3478" &&
+            configuredIce[0].username == "user", "WebRTC accepts configured TURN credentials");
+        bool badIceRejected = false;
+        try { WebRtcSession.ParseIceServers("""[{"urls":"https://invalid.example.com"}]"""); }
+        catch (IOException) { badIceRejected = true; }
+        Check(badIceRejected, "invalid ICE server configuration is rejected");
         var frame = FrameCodec.Encode(opaque);
         using var decoded = FrameCodec.Decode(frame.Data);
         Color actual = decoded.GetPixel(800, 450);
@@ -97,7 +113,7 @@ static class Program
             handler.Invoke(host, new object[] { doc.RootElement });
         }
         var view = (PictureBox)typeof(MainForm).GetField("view", fields)!.GetValue(host)!;
-        Receive(new { type = "paired" });
+        typeof(MainForm).GetField("paired", fields)!.SetValue(host, true);
         Receive(new { type = "frame", data = frame.Data });
         Check(view.Image != null && view.Image.Width == 1600, "HOST receive handler assigns decoded image");
         Receive(new { type = "frame", data = Array.Empty<byte>(), capture_error = "Desktop locked" });

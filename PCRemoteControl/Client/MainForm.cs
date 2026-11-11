@@ -36,12 +36,13 @@ sealed class MainForm : Form
     readonly FlowLayoutPanel settings = new() { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(10) };
     readonly RemoteView view = new() { Dock = DockStyle.Fill, BackColor = Color.FromArgb(25, 28, 34), SizeMode = PictureBoxSizeMode.Zoom };
     readonly System.Windows.Forms.Timer heartbeat = new() { Interval = 10000 };
-    readonly System.Windows.Forms.Timer capture = new() { Interval = 125 };
+    readonly System.Windows.Forms.Timer capture = new() { Interval = 50 };
     readonly System.Windows.Forms.Timer listing = new() { Interval = 5000 };
     readonly string settingsFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PCRemoteControl", "settings.json");
     string id = Guid.NewGuid().ToString("N");
     CancellationTokenSource? lifetime;
     Connection? connection;
+    WebRtcSession? mediaSession;
     bool paired, sendingFrame, fullScreen, running, targetMode;
     Rectangle oldBounds;
     FormWindowState oldState;
@@ -65,7 +66,7 @@ sealed class MainForm : Form
     {
         this.watchdogFolder = watchdogFolder;
         fixedTarget = target;
-        Text = "PCRemoteControl v0.1.3 · Windows HOST / TARGET";
+        Text = "PCRemoteControl v0.2.0 · Windows HOST / TARGET";
         Size = new Size(1180, 780); MinimumSize = new Size(800, 500); KeyPreview = true;
         role.Items.AddRange(new object[] { "HOST", "TARGET" }); role.SelectedIndex = target ? 1 : 0;
         LoadSettings();
@@ -112,7 +113,7 @@ sealed class MainForm : Form
         };
         status.Height = 46; status.BackColor = DarkTheme.Surface;
         view.BackColor = DarkTheme.Editor;
-        foreach (Control action in actions.Controls) action.Width = 205;
+        foreach (Control action in actions.Controls) { action.AutoSize = false; action.Width = 190; action.Height = Math.Max(30, action.PreferredSize.Height); }
         start.Click += async (_, _) => await Start();
         stop.Click += (_, _) => Stop();
         refresh.Click += async (_, _) => await Send(new { type = "list" });
@@ -186,7 +187,7 @@ sealed class MainForm : Form
                 connection = c; heartbeat.Start(); listing.Start(); capture.Start(); UpdateControls();
                 status.Text = targetMode ? "TARGET 연결 유지 중 · HOST 접속 시 화면과 키보드/마우스 제어가 허용됩니다." : "인증 완료 · TARGET을 선택하고 원격접속을 누르세요.";
                 if (!targetMode) await c.Send(new { type = "list" }, token);
-                while (!token.IsCancellationRequested) HandleMessage(await c.Read(token));
+                while (!token.IsCancellationRequested) await HandleMessage(await c.Read(token));
             }
             catch (LoginException ex) { lifetime.Cancel(); WriteHealth("paused"); status.Text = ex.Message; }
             catch (Exception ex) { if (!token.IsCancellationRequested) { DiagnosticLog.Write("connection", ex.GetType().Name + ": " + ex.Message); status.Text = "연결 종료: " + ex.Message + (targetMode ? " · 5초 후 재연결" : ""); } }
@@ -214,7 +215,7 @@ sealed class MainForm : Form
         try { await c.Send(message, lifetime.Token); }
         catch (Exception ex) { DiagnosticLog.Write("send", ex.GetType().Name + ": " + ex.Message); status.Text = "전송 실패: " + ex.Message; c.Dispose(); }
     }
-    void HandleMessage(JsonElement m)
+    async Task HandleMessage(JsonElement m)
     {
         switch (m.GetProperty("type").GetString())
         {
@@ -229,13 +230,22 @@ sealed class MainForm : Form
                 targets.EndUpdate(); break;
             case "paired":
                 EndSession(); paired = true; pairedAt = Environment.TickCount64;
-                status.Text = targetMode ? "HOST 접속됨 · 첫 화면 캡처 중" : "TARGET 연결됨 · 첫 화면 수신 대기 중";
-                view.Message = targetMode ? "HOST에 화면 전송을 준비하고 있습니다." : "TARGET에 연결되었습니다.\n첫 화면을 기다리고 있습니다…";
+                status.Text = targetMode ? "HOST 접속됨 · WebRTC 미디어 연결 협상 중" : "TARGET 연결됨 · WebRTC 미디어 연결 협상 중";
+                view.Message = status.Text;
                 DiagnosticLog.Write("paired", targetMode ? "TARGET" : "HOST");
                 UpdateControls();
-                if (targetMode) _ = CaptureFrame();
+                await StartMediaSession();
                 break;
             case "ended": EndSession(); status.Text = "원격접속 종료 · 서버 연결 유지 중"; UpdateControls(); break;
+            case "rtc" when paired:
+                if (mediaSession == null)
+                {
+                    ReportMediaFailure(null, new IOException("WebRTC 세션이 준비되지 않았습니다."));
+                    break;
+                }
+                try { await mediaSession.HandleSignal(m); }
+                catch (Exception ex) { ReportMediaFailure(mediaSession, ex); }
+                break;
             case "error": status.Text = m.GetProperty("message").GetString(); break;
             case "frame" when !targetMode && paired:
                 if (m.TryGetProperty("capture_error", out var failure))
@@ -271,6 +281,8 @@ sealed class MainForm : Form
         sessionGeneration++;
         lastFrameAt = pairedAt = receivedFrames = sentFrames = nextCaptureAt = 0;
         captureError = null;
+        mediaSession?.Dispose();
+        mediaSession = null;
         paired = false; if (targetMode) Desktop.Release();
         var old = view.Image; view.Image = null; old?.Dispose();
         view.Message = targetMode ? "TARGET 화면 공유 대기 중입니다." : "HOST에서 TARGET을 선택한 뒤 원격접속을 누르세요.";
@@ -297,55 +309,123 @@ sealed class MainForm : Form
     }
     async Task CaptureFrame()
     {
-        if (!targetMode || !paired || sendingFrame || Environment.TickCount64 < nextCaptureAt) return;
+        var session = mediaSession;
+        if (!targetMode || !paired || session == null || !session.IsConnected || sendingFrame ||
+            Environment.TickCount64 < nextCaptureAt) return;
         sendingFrame = true;
-        var c = connection;
         int generation = sessionGeneration;
         var token = lifetime?.Token ?? CancellationToken.None;
         try
         {
-            CapturedFrame frame;
-            try
+            Rectangle bounds = Screen.PrimaryScreen?.Bounds ?? throw new IOException("활성 모니터를 찾을 수 없습니다.");
+            RawVideoFrame frame = await Task.Run(() => Desktop.CaptureVideo(bounds), token);
+            if (paired && ReferenceEquals(session, mediaSession) && generation == sessionGeneration)
             {
-                Rectangle bounds = Screen.PrimaryScreen?.Bounds ?? throw new IOException("활성 모니터를 찾을 수 없습니다.");
-                frame = await Task.Run(() => Desktop.Capture(bounds), token);
-            }
-            catch (Exception ex) when (!token.IsCancellationRequested)
-            {
-                if (!paired || c == null || !ReferenceEquals(c, connection) || generation != sessionGeneration) return;
-                string message = ex.Message;
-                if (captureError != message) DiagnosticLog.Write("capture-error", ex.GetType().Name + ": " + message);
-                captureError = message;
-                status.Text = "화면 캡처 실패: " + message;
-                view.Message = status.Text;
-                nextCaptureAt = Environment.TickCount64 + 2000;
-                // Existing relays forward frame envelopes unchanged, including optional diagnostic fields.
-                await c.Send(new { type = "frame", data = Array.Empty<byte>(), capture_error = message }, token);
-                return;
-            }
-            if (paired && c != null && ReferenceEquals(c, connection) && generation == sessionGeneration)
-            {
-                await c.Send(new { type = "frame", data = frame.Data, nearly_black = frame.NearlyBlack }, token);
-                if (generation != sessionGeneration || !ReferenceEquals(c, connection)) return;
+                await Task.Run(() => session.SendFrame(frame), token);
+                if (generation != sessionGeneration || !ReferenceEquals(session, mediaSession)) return;
                 sentFrames++;
                 if (sentFrames == 1 || captureError != null)
-                    DiagnosticLog.Write("frame-sent", $"{frame.Width}x{frame.Height} bytes={frame.Data.Length} nearlyBlack={frame.NearlyBlack}");
+                    DiagnosticLog.Write("frame-sent", $"{frame.Width}x{frame.Height} bytes={frame.Data.Length} transport=WebRTC");
                 captureError = null;
-                status.Text = frame.NearlyBlack ? $"화면 전송 {sentFrames}회 · 캡처 결과가 거의 검습니다. 모니터·잠금·RDP 상태를 확인하세요."
-                    : $"화면 전송 {sentFrames}회 · {frame.Width}×{frame.Height} · 연결 중지 버튼으로 차단";
+                status.Text = $"화면 전송 {sentFrames}회 · {frame.Width}×{frame.Height} · WebRTC VP8";
                 view.Message = status.Text;
             }
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
         catch (Exception ex)
         {
-            if (generation == sessionGeneration && ReferenceEquals(c, connection))
+            if (generation == sessionGeneration && ReferenceEquals(session, mediaSession))
             {
-                DiagnosticLog.Write("frame-send-error", ex.GetType().Name + ": " + ex.Message);
-                status.Text = "화면 전송 실패: " + ex.Message; c?.Dispose();
+                string message = "화면 캡처/인코딩 실패: " + ex.Message;
+                if (captureError != message) DiagnosticLog.Write("capture-error", ex.GetType().Name + ": " + ex.Message);
+                captureError = message;
+                status.Text = message;
+                view.Message = message;
+                nextCaptureAt = Environment.TickCount64 + 2000;
             }
         }
         finally { sendingFrame = false; }
+    }
+
+    async Task StartMediaSession()
+    {
+        WebRtcSession? session = null;
+        try
+        {
+            var c = connection ?? throw new IOException("Relay 연결이 끊겼습니다.");
+            var token = lifetime?.Token ?? throw new IOException("연결 수명이 끝났습니다.");
+            session = new WebRtcSession(targetMode, targetMode ? null : Guid.NewGuid().ToString("N"),
+                message => c.Send(message, token));
+            mediaSession = session;
+            session.FrameReceived += frame => DisplayMediaFrame(session, frame);
+            session.StatusChanged += message => UpdateMediaStatus(session, message);
+            session.Failed += ex => ReportMediaFailure(session, ex);
+            if (!targetMode) await session.CreateOffer();
+        }
+        catch (Exception ex)
+        {
+            ReportMediaFailure(session, ex);
+        }
+    }
+
+    void DisplayMediaFrame(WebRtcSession session, Bitmap frame)
+    {
+        if (IsDisposed || Disposing)
+        {
+            frame.Dispose();
+            return;
+        }
+        try
+        {
+            if (InvokeRequired) BeginInvoke(new Action(() => DisplayMediaFrame(session, frame)));
+            else
+            {
+                if (!paired || !ReferenceEquals(session, mediaSession)) { frame.Dispose(); return; }
+                var old = view.Image;
+                view.Image = frame;
+                old?.Dispose();
+                view.Invalidate();
+                lastFrameAt = Environment.TickCount64;
+                receivedFrames++;
+                if (receivedFrames == 1 || captureError != null)
+                    DiagnosticLog.Write("frame-received", $"{frame.Width}x{frame.Height} transport=WebRTC");
+                captureError = null;
+                status.Text = $"화면 수신 {receivedFrames}회 · {frame.Width}×{frame.Height} · WebRTC VP8 · 화면 클릭 후 제어";
+            }
+        }
+        catch (InvalidOperationException) { frame.Dispose(); }
+    }
+
+    void UpdateMediaStatus(WebRtcSession session, string message)
+    {
+        if (IsDisposed || Disposing) return;
+        try
+        {
+            if (InvokeRequired) BeginInvoke(new Action(() => UpdateMediaStatus(session, message)));
+            else if (ReferenceEquals(session, mediaSession)) status.Text = message;
+        }
+        catch (InvalidOperationException) { }
+    }
+
+    void ReportMediaFailure(WebRtcSession? session, Exception ex)
+    {
+        string message = "WebRTC 미디어 오류: " + ex.Message;
+        DiagnosticLog.Write("webrtc", ex.GetType().Name + ": " + ex.Message);
+        if (IsDisposed || Disposing) return;
+        try
+        {
+            if (InvokeRequired) BeginInvoke(new Action(() => ReportMediaFailure(session, ex)));
+            else if (session == null || ReferenceEquals(session, mediaSession))
+            {
+                if (targetMode)
+                {
+                    status.Text = message;
+                    view.Message = message;
+                }
+                else ShowFrameProblem(message);
+            }
+        }
+        catch (InvalidOperationException) { }
     }
     async Task Mouse(MouseEventArgs e, bool? down, int wheel = 0)
     {

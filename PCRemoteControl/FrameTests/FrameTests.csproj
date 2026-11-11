@@ -3,5 +3,9 @@
     <OutputType>Exe</OutputType><TargetFramework>net8.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
   </PropertyGroup>
-  <ItemGroup><Compile Include="../Client/*.cs" Exclude="../Client/Program.cs" Link="Client/%(Filename)%(Extension)" /></ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="SIPSorcery" Version="10.0.17" />
+    <PackageReference Include="SIPSorceryMedia.FFmpeg" Version="10.0.17" />
+    <Compile Include="../Client/*.cs" Exclude="../Client/Program.cs" Link="Client/%(Filename)%(Extension)" />
+  </ItemGroup>
 </Project>

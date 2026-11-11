@@ -154,6 +154,28 @@ class Relay:
                     await p.other.send(m)
                 elif kind == 'input' and p.role == 'host' and p.other:
                     await p.other.send(m)
+                elif kind == 'rtc' and p.other:
+                    action = m.get('action')
+                    session = m.get('session')
+                    if not isinstance(session, str) or len(session) != 32 or any(c not in '0123456789abcdef' for c in session):
+                        raise ValueError('Invalid WebRTC session')
+                    if action == 'offer' and p.role == 'host':
+                        description = m.get('description')
+                        if not isinstance(description, str) or not 1 <= len(description) <= 128 * 1024:
+                            raise ValueError('Invalid WebRTC offer')
+                    elif action == 'answer' and p.role == 'target':
+                        description = m.get('description')
+                        if not isinstance(description, str) or not 1 <= len(description) <= 128 * 1024:
+                            raise ValueError('Invalid WebRTC answer')
+                    elif action == 'candidate':
+                        candidate = m.get('candidate')
+                        if (not isinstance(candidate, dict) or
+                                not isinstance(candidate.get('candidate'), str) or
+                                not 1 <= len(candidate['candidate']) <= 4096):
+                            raise ValueError('Invalid WebRTC candidate')
+                    else:
+                        raise ValueError('Unsupported WebRTC operation')
+                    await p.other.send(m)
                 else:
                     # Late frames/input after disconnect are harmless and discarded.
                     if kind not in ('frame', 'input'):

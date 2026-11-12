@@ -87,6 +87,7 @@ class Relay:
             writer.close()
             return
         self.peers.add(p)
+        operation = 'handshake'
         try:
             now = time.monotonic()
             self.failures = {ip: entry for ip, entry in self.failures.items() if now - entry[1] < 60}
@@ -116,11 +117,13 @@ class Relay:
                 await p.send({'type': 'error', 'message': 'Verification email could not be sent. Check server SMTP settings.'})
                 return
             await p.send({'type': 'email_required', 'email': AUTH_EMAIL, 'expires_in': AUTH_SECONDS})
+            operation = 'email verification'
             verification = await read_message(reader, AUTH_SECONDS)
             supplied = verification.get('code')
             if verification.get('type') != 'verify_email' or not isinstance(supplied, str) or not hmac.compare_digest(supplied.encode(), code.encode()):
                 await p.send({'type': 'error', 'message': 'Email verification failed. Reconnect to request a new code.'})
                 return
+            operation = 'target registration'
             if p.role == 'target':
                 p.id, p.name = hello.get('id'), hello.get('name')
                 if not isinstance(p.id, str) or not 1 <= len(p.id) <= 80 or not isinstance(p.name, str) or not 1 <= len(p.name) <= 80:
@@ -130,9 +133,13 @@ class Relay:
                     return
                 self.targets[p.id] = p
             await p.send({'type': 'ok'})
+            operation = 'client message'
             while True:
                 m = await read_message(reader)
                 kind = m.get('type')
+                operation = kind if isinstance(kind, str) and kind in (
+                    'ping', 'list', 'connect', 'disconnect', 'frame', 'input', 'rtc'
+                ) else 'unsupported'
                 if kind == 'ping':
                     await p.send({'type': 'pong'})
                 elif kind == 'list' and p.role == 'host':
@@ -180,8 +187,11 @@ class Relay:
                     # Late frames/input after disconnect are harmless and discarded.
                     if kind not in ('frame', 'input'):
                         raise ValueError('Unsupported operation')
-        except (OSError, ValueError, TypeError, asyncio.IncompleteReadError, asyncio.TimeoutError):
-            pass
+        except asyncio.IncompleteReadError as exc:
+            if exc.partial:
+                self.log_disconnect(p, operation, exc)
+        except (OSError, ValueError, TypeError, asyncio.TimeoutError) as exc:
+            self.log_disconnect(p, operation, exc)
         finally:
             if self.targets.get(p.id) is p:
                 del self.targets[p.id]
@@ -192,6 +202,17 @@ class Relay:
                 await writer.wait_closed()
             except (OSError, asyncio.TimeoutError):
                 pass
+
+    @staticmethod
+    def log_disconnect(peer, operation, error):
+        role = peer.role if peer.role in ('target', 'host') else 'unknown'
+        reason = str(error).replace('\n', ' ')[:160]
+        print(
+            'Relay connection closed role={} operation={} error={}: {}'.format(
+                role, operation, type(error).__name__, reason
+            ),
+            flush=True,
+        )
 
 async def main():
     parser = argparse.ArgumentParser(description=__doc__)

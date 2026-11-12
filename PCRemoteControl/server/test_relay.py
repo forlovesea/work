@@ -167,6 +167,25 @@ class RelayTests(unittest.IsolatedAsyncioTestCase):
         await self.send(tw, candidate)
         self.assertEqual(await read_message(hr), candidate)
 
+    async def test_invalid_webrtc_signal_logs_reason_without_payload(self):
+        tr, tw, _ = await self.peer('target')
+        hr, hw, _ = await self.peer('host')
+        await self.send(hw, dict(type='connect', id='test'))
+        await read_message(hr)
+        await read_message(tr)
+
+        with patch('builtins.print') as log:
+            await self.send(hw, dict(
+                type='rtc', action='offer', session='invalid',
+                description='private test description'
+            ))
+            self.assertEqual(await asyncio.wait_for(hr.read(), 2), b'')
+            await asyncio.sleep(0.05)
+
+        output = ' '.join(str(call.args[0]) for call in log.call_args_list)
+        self.assertIn('role=host operation=rtc error=ValueError: Invalid WebRTC session', output)
+        self.assertNotIn('private test description', output)
+
     async def test_webrtc_offer_from_target_is_rejected(self):
         tr, tw, _ = await self.peer('target')
         await self.send(tw, dict(type='rtc', action='offer',

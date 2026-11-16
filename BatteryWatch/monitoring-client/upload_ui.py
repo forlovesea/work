@@ -6,7 +6,7 @@ import threading
 from collections import deque
 from datetime import datetime
 from pathlib import Path
-from PySide6.QtCore import QObject, QTimer, Signal, Qt, QSize
+from PySide6.QtCore import QObject, QTimer, Signal, Qt, QSize, QSettings
 from PySide6.QtGui import QColor, QIcon, QPixmap, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QFormLayout, QLineEdit,
                                QSpinBox, QCheckBox, QMessageBox, QLabel, QTextBrowser,
@@ -93,6 +93,8 @@ class UploadController(QObject):
         self.history = deque(maxlen=30)
         self.history_dialog = None
         self.history_view = None
+        self.diagnostic_label = None
+        self.transport_status = '전송 결과 대기'
         self.connection_state = 'waiting'
         key = hashlib.sha256(str(Path(ui.profile_path).resolve()).encode()).hexdigest()[:20]
         self.outbox = Outbox(application_directory() / 'data' / (key + '.sqlite3'))
@@ -111,6 +113,7 @@ class UploadController(QObject):
         self.apply_timer()
 
     def show_status(self, text):
+        self.transport_status = text
         self.label.setText(self.storage_error or text)
         self.label.setToolTip(self.label.text())
         self.update_status_button()
@@ -130,8 +133,9 @@ class UploadController(QObject):
         bg, border, fg, tooltip = colors[state]
         button = self.ui.btn_upload_status
         button.setProperty('uploadState', state)
-        button.setEnabled(state == 'success')
-        button.setCursor(Qt.PointingHandCursor if state == 'success' else Qt.ArrowCursor)
+        button.setEnabled(True)
+        button.setCursor(Qt.PointingHandCursor)
+        tooltip += ' · 클릭하면 오류와 전송 기록을 확인합니다.'
         button.setToolTip(tooltip)
         button.setAccessibleName('업로드 상태: ' + tooltip)
         button.setStyleSheet(f'''
@@ -193,6 +197,18 @@ class UploadController(QObject):
     def refresh_history(self):
         if self.history_view is None:
             return
+        states = {'waiting': '전송 대기', 'failed': '전송 실패', 'success': '서버 저장 확인'}
+        self.diagnostic_label.setText(
+            f"업로드 사용: {'켜짐' if self.config.get('enabled') else '꺼짐'} | "
+            f"상태: {states.get(self.connection_state, self.connection_state)}\n"
+            f"서버: {self.config.get('host')}:{self.config.get('port')} | "
+            f"TLS: {self.config.get('tls')}\n"
+            f"실시간 작업: {'실행 중' if self.worker.is_alive() else '중지'} | "
+            f"이력 작업: {'실행 중' if self.worker.history_thread.is_alive() else '중지'}\n"
+            f"최근 통신: {self.transport_status}\n"
+            f"로컬 저장: {self.storage_error or '정상'}\n"
+            '연결 실패: 서버/포트/방화벽 확인 · TLS 오류: 인증서 확인 · '
+            '저장 실패: 디스크 공간/권한 확인. 설정 저장 또는 재연결로 재시도합니다.')
         lines = []
         def local_time(value):
             if not value:
@@ -211,8 +227,6 @@ class UploadController(QObject):
         self.history_view.verticalScrollBar().setValue(0)
 
     def open_history(self):
-        if not self.ui.btn_upload_status.isEnabled():
-            return
         if self.history_dialog is None:
             dialog = QDialog(self.ui)
             dialog.setWindowTitle('업로드 상태 · 최근 전송 기록')
@@ -229,6 +243,17 @@ class UploadController(QObject):
             layout.addWidget(QLabel('최근 전송 결과 30건 · 최신 기록이 맨 위에 실시간 표시됩니다.\n'
                                    '시간은 이 PC의 현지 시각이며, 기록은 프로그램 실행 중에 유지됩니다.\n'
                                    '전송 성공은 서버 저장 확인입니다. 최신 측정 여부는 실제 측정 시각과 측정 성공 상태를 확인하세요.'))
+            self.diagnostic_label = QLabel(dialog)
+            self.diagnostic_label.setTextFormat(Qt.PlainText)
+            self.diagnostic_label.setWordWrap(True)
+            self.diagnostic_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            layout.addWidget(self.diagnostic_label)
+            retry = QPushButton('지금 재연결', dialog)
+            retry.clicked.connect(self.retry_upload)
+            layout.addWidget(retry)
+            refresh = QTimer(dialog)
+            refresh.timeout.connect(self.refresh_history)
+            refresh.start(1000)
             self.history_view = QPlainTextEdit(dialog)
             self.history_view.setReadOnly(True)
             self.history_view.setLineWrapMode(QPlainTextEdit.NoWrap)
@@ -243,6 +268,12 @@ class UploadController(QObject):
         self.history_dialog.show()
         self.history_dialog.raise_()
         self.history_dialog.activateWindow()
+
+    def retry_upload(self):
+        self.generation = self.worker.configure(self.config)
+        self.connection_state = 'waiting'
+        self.show_status('재연결 요청 완료 · 다음 전송 결과를 기다립니다.')
+        self.refresh_history()
 
     def load_config(self):
         s = self.ui.settings
@@ -259,7 +290,7 @@ class UploadController(QObject):
             self.timer.start(self.config['interval'] * 1000)
             QTimer.singleShot(0, self.capture)
         self.show_status(('업로드 대기' if self.config['enabled'] else '업로드 사용 안 함') +
-                         f" | 주기 {self.config['interval']}초 | 전체 대기 {self.outbox.count()}건")
+                         f" | 주기 {self.config['interval']}초")
 
     def open_settings(self):
         dialog = QDialog(self.ui)
@@ -353,6 +384,9 @@ class UploadController(QObject):
                 QMessageBox.warning(dialog, '설정 확인', 'CA 파일을 찾을 수 없습니다.'); return
             for k,v in config.items(): self.ui.settings.setValue('upload/' + k, v)
             self.ui.settings.sync()
+            if self.ui.settings.status() != QSettings.NoError:
+                QMessageBox.warning(dialog, '설정 저장 실패', '프로필 파일에 저장하지 못했습니다. 파일 권한과 디스크 공간을 확인하세요.')
+                return
             self.config = config
             self.generation = self.worker.configure(config)
             self.connection_state = 'waiting'
@@ -510,7 +544,8 @@ class UploadController(QObject):
             메인 화면의 ‘축전지명’ 표시 이름과는 별도입니다.</p>
             <h3>저장 후 확인 및 문제 해결</h3>
             <ul>
-            <li>접속 실패: 서버 주소·TCP 포트, 서버 실행 여부, 방화벽을 확인합니다.</li>
+            <li>접속 실패: 서버 주소·TCP 포트, 서버 실행 여부, 방화벽을 확인합니다.
+            설정에서 ‘저장’을 누르면 재시도 대기 시간이 초기화됩니다.</li>
             <li>인증서 오류: 접속 주소와 인증서의 이름/IP, CA 파일, PC 시간을 확인합니다.</li>
             <li>인증 또는 권한 오류: 수집기 토큰과 허용된 현장 ID·장비 ID 조합을 확인합니다.</li>
             <li>대기 데이터가 계속 증가하면 업로드 상태의 오류를 확인합니다.
@@ -548,6 +583,9 @@ class UploadController(QObject):
         if not self.config['enabled']: return False
         try:
             self.outbox.put(destination(self.config), envelope(self.config, kind, plain(data)))
+            if self.storage_error:
+                self.storage_error = ''
+                self.show_status(self.transport_status)
             return True
         except Exception as exc:
             self.storage_error = '데이터 저장 실패 (일부 유실 가능): ' + str(exc)

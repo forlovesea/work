@@ -34,18 +34,28 @@ def encode_frame(value):
 
 
 def receive_frame(sock):
+    # A per-recv timeout alone allows a trickling peer to stall forever.
+    timeout = sock.gettimeout()
+    deadline = time.monotonic() + (timeout if timeout is not None else 15)
     def exact(size):
         chunks = bytearray()
         while len(chunks) < size:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError('Frame deadline exceeded')
+            sock.settimeout(remaining)
             part = sock.recv(size - len(chunks))
             if not part:
                 raise ConnectionError('Connection closed before complete frame')
             chunks.extend(part)
         return bytes(chunks)
-    length = struct.unpack('!I', exact(4))[0]
-    if not 0 < length <= MAX_FRAME:
-        raise ValueError('Invalid frame size')
-    return json.loads(exact(length).decode('utf-8'))
+    try:
+        length = struct.unpack('!I', exact(4))[0]
+        if not 0 < length <= MAX_FRAME:
+            raise ValueError('Invalid frame size')
+        return json.loads(exact(length).decode('utf-8'))
+    finally:
+        sock.settimeout(timeout)
 
 
 def destination(config):
@@ -136,6 +146,7 @@ class UploadWorker(threading.Thread):
         self.history_sock = None
         self.history_supported = False
         self.last_live_success = 0
+        self._retry_delay = 1
         self.history_thread = threading.Thread(target=self.run_history, daemon=True, name='BatteryWatchHistory')
 
     def start(self):
@@ -154,6 +165,7 @@ class UploadWorker(threading.Thread):
             self.generation += 1
             self.history_supported = False
             self.last_live_success = 0
+            self._retry_delay = 1
             generation = self.generation
         self.disconnect()
         self.disconnect_history()
@@ -177,7 +189,6 @@ class UploadWorker(threading.Thread):
 
     def run(self):
         route = None
-        backoff = 1
         while not self.stopping.is_set():
             self.wake.clear()
             with self.lock:
@@ -216,21 +227,25 @@ class UploadWorker(threading.Thread):
                         if generation == self.generation:
                             self.history_supported = ack.get('history_batch_v1') is True
                             self.last_live_success = time.monotonic()
+                            self._retry_delay = 1
                     self.result(self.result_event(generation, payload, True,
                                                   control_command=ack.get('control_command')))
                     self.report('ACK ' + utc_now() + ' | pending ' + str(self.outbox.count()))
-                    backoff, delay = 1, 0.1
+                    delay = 0.1
             except Exception as exc:
                 self.disconnect()
                 with self.lock:
                     self.last_live_success = 0
+                    if generation == self.generation:
+                        delay = self._retry_delay
+                        self._retry_delay = min(self._retry_delay * 2, 60)
+                    else:
+                        delay = 0.1
                 # Do not expose server response contents or credentials.
                 if not self.stopping.is_set():
                     self.result(self.result_event(generation, pending[1] if pending else None,
                                                   False, type(exc).__name__))
-                    self.report('Upload failed (' + type(exc).__name__ + '); retry in ' + str(backoff) + 's')
-                delay = backoff
-                backoff = min(backoff * 2, 60)
+                    self.report('Upload failed (' + type(exc).__name__ + '); retry in ' + str(delay) + 's')
             self.wake.wait(delay)
         self.disconnect()
 
@@ -248,9 +263,8 @@ class UploadWorker(threading.Thread):
         while not self.stopping.wait(0.2):
             with self.lock:
                 config, generation = dict(self.config), self.generation
-                ready = (self.history_supported and self.last_live_success and
-                         time.monotonic() - self.last_live_success < max(30, config.get('interval', 5) * 2 + 10))
-            if not config.get('enabled') or not ready:
+            # History must drain even when a full queue prevents fresh snapshots.
+            if not config.get('enabled'):
                 next_send = time.monotonic() + random.uniform(2, 5)
                 continue
             if generation != previous_generation:

@@ -49,6 +49,59 @@ class UploadTests(unittest.TestCase):
         self.assertIn('측정 실패/대기', event['summary'])
         self.assertNotIn('token', event)
 
+    def test_frame_deadline_bounds_trickling_ack(self):
+        a, b = socket.socketpair()
+        self.addCleanup(a.close); self.addCleanup(b.close)
+        b.settimeout(.15)
+        def trickle():
+            try:
+                for byte in encode_frame({'ok': True}):
+                    a.sendall(bytes([byte]))
+                    time.sleep(.04)
+            except OSError:
+                pass
+        thread = threading.Thread(target=trickle, daemon=True)
+        thread.start()
+        started = time.monotonic()
+        with self.assertRaises(TimeoutError):
+            receive_frame(b)
+        self.assertLess(time.monotonic() - started, .5)
+        self.assertEqual(b.gettimeout(), .15)
+        b.close(); thread.join(1)
+
+    def test_history_recovers_without_live_ack(self):
+        listener = socket.socket()
+        listener.bind(('127.0.0.1', 0)); listener.listen()
+        listener.settimeout(8)
+        self.addCleanup(listener.close)
+        self.config['port'] = listener.getsockname()[1]
+        box = Outbox(self.root/'history.db')
+        payload = envelope(self.config, 'snapshot', {})
+        payload['captured_at'] = '2020-01-01T00:00:00+00:00'
+        box.put(destination(self.config), payload)
+        box.live(destination(self.config), 30)
+        received = []
+        def accept_history():
+            conn, _ = listener.accept()
+            with conn:
+                conn.settimeout(4)
+                received.append(receive_frame(conn)['type'])
+                conn.sendall(encode_frame(dict(type='history_ack', ok=True,
+                                              sample_ids=[payload['sample_id']])))
+        thread = threading.Thread(target=accept_history, daemon=True)
+        thread.start()
+        worker = UploadWorker(box, lambda text: None)
+        worker.configure(self.config); worker.start()
+        try:
+            deadline = time.monotonic() + 8
+            while box.count() and time.monotonic() < deadline:
+                time.sleep(.02)
+            self.assertEqual(box.count(), 0)
+            self.assertEqual(received, ['history_batch'])
+            self.assertEqual(worker.last_live_success, 0)
+        finally:
+            worker.stop(); worker.join(5); thread.join(1)
+
     def test_upload_ack_passes_remote_command_to_client_handler(self):
         from upload_transport import UploadWorker
         command={'command_id':'12345678-1234-4234-8234-123456789abc',
@@ -129,6 +182,13 @@ class UploadTests(unittest.TestCase):
             worker.stop(); worker.join(5)
         thread.join(2)
 
+    def test_reconfiguring_upload_resets_retry_backoff(self):
+        worker = UploadWorker(Outbox(self.root/'queue.db'), lambda text: None)
+        worker._retry_delay = 60
+        worker.configure(self.config)
+        self.assertEqual(worker._retry_delay, 1)
+        self.assertTrue(worker.wake.is_set())
+
     def test_gui_snapshot_and_fast_alarm_recovery(self):
         from PySide6.QtWidgets import QApplication, QDialog, QSpinBox, QDialogButtonBox
         from PySide6.QtCore import QSettings, QTimer
@@ -154,6 +214,10 @@ class UploadTests(unittest.TestCase):
             controller.worker.stop(); controller.worker.join(5)
             controller.outbox=Outbox(self.root/'ui.db')
             controller.config=dict(self.config, interval=5)
+            controller.storage_error = 'temporary storage failure'
+            self.assertTrue(controller.enqueue('snapshot', {}))
+            self.assertEqual(controller.storage_error, '')
+            controller.outbox.acknowledge(controller.outbox.peek(destination(controller.config))[0])
             ui.module_data={'1':{'soc':83,'status':0,'cells':[3.2,3.3],'temps':[24,25]}}
             controller.poll(True,{'1.2.3':'raw'})
             controller.trap({'alarm':'raised','_source_ip':'10.0.0.1'})
@@ -204,10 +268,13 @@ class UploadTests(unittest.TestCase):
             self.assertFalse(data[2]['data']['connected'])
             # ACK-driven state, stale configuration events, and live bounded history.
             controller.update_status_button()
-            self.assertFalse(ui.btn_upload_status.isEnabled())
+            self.assertTrue(ui.btn_upload_status.isEnabled())
             event = UploadWorker.result_event(controller.generation, data[2], False, 'ConnectionError')
             controller.on_upload_result(event)
             self.assertEqual(ui.btn_upload_status.property('uploadState'), 'failed')
+            controller.open_history()
+            self.assertTrue(controller.history_dialog.isVisible())
+            self.assertIn('전송 실패', controller.diagnostic_label.text())
             controller.on_upload_result(dict(event, generation=controller.generation - 1, ok=True))
             self.assertEqual(ui.btn_upload_status.property('uploadState'), 'failed')
             controller.on_upload_result(dict(event, ok=True, error=''))

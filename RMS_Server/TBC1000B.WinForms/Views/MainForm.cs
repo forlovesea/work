@@ -34,7 +34,7 @@ public sealed class MainForm : Form
     private readonly Label _resource = new() { AutoSize = false, TextAlign = ContentAlignment.MiddleLeft, BackColor = Color.FromArgb(31, 31, 31), ForeColor = Color.White, Font = new Font("Consolas", 9F, FontStyle.Bold) };
     private readonly Label _updated = new() { Text = "최종업데이트시간 : 대기중", AutoSize = true, Margin = new Padding(8, 7, 0, 0) };
     private readonly DataGridView _summary = new();
-    private readonly TableLayoutPanel _fullEpoPanel = new() { Margin = Padding.Empty, Padding = new Padding(1), ColumnCount = 2, RowCount = 1, BackColor = Color.White };
+    private readonly TableLayoutPanel _fullEpoPanel = new() { Margin = Padding.Empty, Padding = Padding.Empty, ColumnCount = 2, RowCount = 1, BackColor = Color.White };
     private readonly Button _fullCutoffButton = UiTheme.Button("차단", UiTheme.Critical);
     private readonly Button _fullRestoreButton = UiTheme.Button("복구", Color.FromArgb(20, 184, 166));
     private static readonly IReadOnlyDictionary<string, (int Row, int Column)> SummaryPositions = new Dictionary<string, (int, int)>
@@ -175,7 +175,8 @@ public sealed class MainForm : Form
                 + (_summary.Height - _summary.ClientSize.Height)
                 + (_summaryGroup.Height - _summaryGroup.DisplayRectangle.Height)
                 + _summaryGroup.Margin.Vertical + summaryPanel.Padding.Vertical
-                + summaryPanel.Margin.Vertical;
+                + summaryPanel.Margin.Vertical
+                + (int)Math.Ceiling(16 * _summary.DeviceDpi / 96f);
             if (root.RowStyles[2].Height != height)
                 root.RowStyles[2].Height = height;
         }
@@ -556,20 +557,42 @@ public sealed class MainForm : Form
     private void ConfigureFullEpoButtons()
     {
         _fullEpoPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50)); _fullEpoPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        _fullEpoPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         _fullCutoffButton.Dock = DockStyle.Fill; _fullCutoffButton.Margin = new Padding(1); _fullCutoffButton.Padding = Padding.Empty; _fullCutoffButton.Font = new Font("맑은 고딕", 8F, FontStyle.Bold); _fullCutoffButton.ToolTipText("전체 모듈 강제 차단 (SNMP SET)");
         _fullRestoreButton.Dock = DockStyle.Fill; _fullRestoreButton.Margin = new Padding(1); _fullRestoreButton.Padding = Padding.Empty; _fullRestoreButton.Font = new Font("맑은 고딕", 8F, FontStyle.Bold); _fullRestoreButton.ToolTipText("전체 모듈 차단 복구 (SNMP SET)");
         _fullCutoffButton.Click += async (_, _) => await ConfirmFullEpoAsync(true); _fullRestoreButton.Click += async (_, _) => await ConfirmFullEpoAsync(false);
         _fullCutoffButton.EnabledChanged += (_, _) => ApplyFullEpoButtonStyles(); _fullRestoreButton.EnabledChanged += (_, _) => ApplyFullEpoButtonStyles();
-        _fullEpoPanel.Controls.Add(_fullCutoffButton, 0, 0); _fullEpoPanel.Controls.Add(_fullRestoreButton, 1, 0); _summary.Controls.Add(_fullEpoPanel);
+        _fullEpoPanel.Controls.Add(_fullCutoffButton, 0, 0); _fullEpoPanel.Controls.Add(_fullRestoreButton, 1, 0);
+        // Keep the buttons outside DataGridView's internally managed child controls.
+        _summaryGroup.Controls.Add(_fullEpoPanel);
+        _summaryGroup.Layout += (_, _) => PositionFullEpoPanel();
         _summary.Resize += (_, _) => PositionFullEpoPanel(); _summary.Scroll += (_, _) => PositionFullEpoPanel();
         _summary.ColumnWidthChanged += (_, _) => PositionFullEpoPanel(); _summary.RowHeightChanged += (_, _) => PositionFullEpoPanel();
         _summary.Layout += (_, _) => PositionFullEpoPanel(); UpdateFullEpoButtonState();
+        // Initial layout can run before the grid has any displayed rows.
+        // Reposition from the final painted cell as well as when the form appears.
+        _summary.CellPainting += (_, e) =>
+        {
+            if (e.ColumnIndex == 5 && e.RowIndex == 5) PositionFullEpoPanel(e.CellBounds);
+        };
+        Shown += (_, _) => PositionFullEpoPanel();
     }
 
     private void PositionFullEpoPanel()
     {
         if (_summary.RowCount <= 5 || _summary.ColumnCount <= 5) return;
-        var bounds = _summary.GetCellDisplayRectangle(5, 5, true); bounds.Inflate(-2, -2); _fullEpoPanel.Bounds = bounds; _fullEpoPanel.Visible = bounds.Width > 4 && bounds.Height > 4; _fullEpoPanel.BringToFront();
+        PositionFullEpoPanel(_summary.GetCellDisplayRectangle(5, 5, true));
+    }
+
+    private void PositionFullEpoPanel(Rectangle bounds)
+    {
+        bounds.Offset(_summary.Left, _summary.Top);
+        bounds.Width = Math.Max(0, bounds.Width - 1);
+        bounds.Height = Math.Max(0, bounds.Height - 1);
+        if (_fullEpoPanel.Bounds != bounds) _fullEpoPanel.Bounds = bounds;
+        var visible = bounds.Width > 4 && bounds.Height > 4;
+        if (_fullEpoPanel.Visible != visible) _fullEpoPanel.Visible = visible;
+        if (_summaryGroup.Controls.GetChildIndex(_fullEpoPanel) != 0) _fullEpoPanel.BringToFront();
     }
 
     private void UpdateFullEpoButtonState()
@@ -614,7 +637,7 @@ public sealed class MainForm : Form
             { "Rack 전압[V]", "SOC 충전율[%]", "Max 전압[V]", "Min 전압[V]", "Avg 전압[V]", "" },
             { "-", "-", "-", "-", "-", "-" },
             { "Rack 전류[A]", "방전 횟수", "Max 온도[℃]", "Min 온도[℃]", "Avg 온도[℃]", "EPO(전체모듈)" },
-            { "-", "-", "-", "-", "-", "차단 / 복구" },
+            { "-", "-", "-", "-", "-", "" },
             { "과전압 충전차단", "고온 충전차단", "과전류 충전차단", "차단기 OFF", "충전전류제한[C]", "SOC충전제한[%]" },
             { "-", "-", "-", "-", "-", "-" } };
         for (var r = 0; r < 8; r++) for (var c = 0; c < 6; c++) { _summary[c, r].Value = labels[r, c]; if (r % 2 == 0) _summary[c, r].Style.BackColor = UiTheme.Header; }
@@ -637,7 +660,7 @@ public sealed class MainForm : Form
         };
         button.Style.Alignment = DataGridViewContentAlignment.MiddleCenter;
         button.Style.Font = new Font("맑은 고딕", 9F, FontStyle.Bold);
-        button.Style.Padding = new Padding(3);
+        button.Style.Padding = Padding.Empty;
         _summary[column, 7] = button;
     }
 

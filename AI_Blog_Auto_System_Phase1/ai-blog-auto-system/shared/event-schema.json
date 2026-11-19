@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AI Blog Event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "device_id",
+    "event_type"
+  ],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "device_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100,
+      "pattern": "^[A-Za-z0-9_.-]+$"
+    },
+    "event_type": {
+      "type": "string",
+      "enum": [
+        "PC_ONLINE",
+        "PC_OFFLINE",
+        "NAVER_LOGIN_SUCCESS",
+        "NAVER_LOGIN_FAILED",
+        "NAVER_LOGIN_EXPIRED",
+        "CONTENT_GENERATED",
+        "IMAGE_GENERATED",
+        "PUBLISH_STARTED",
+        "PUBLISH_SUCCESS",
+        "PUBLISH_FAILED",
+        "PUBLISH_UNCONFIRMED",
+        "MANUAL_PUBLISH_REQUIRED",
+        "MANUAL_PUBLISH_COMPLETED",
+        "PACKAGE_UPLOAD_SUCCESS",
+        "PACKAGE_UPLOAD_FAILED",
+        "STATISTICS_UPDATED",
+        "SERVER_ERROR",
+        "MOCK_PUBLISH_SUCCESS",
+        "PACKAGE_EXPIRING_6H",
+        "PACKAGE_EXPIRING_1H",
+        "PACKAGE_DELETED"
+      ]
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "payload": {
+      "type": "object",
+      "description": "Maximum 16384 UTF-8 bytes when JSON serialized; never include credentials."
+    }
+  }
+}

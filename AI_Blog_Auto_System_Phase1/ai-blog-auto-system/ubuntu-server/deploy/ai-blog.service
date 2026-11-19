@@ -1,0 +1,26 @@
+[Unit]
+Description=AI Blog event and manual content server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ai-blog
+Group=ai-blog
+WorkingDirectory=/opt/ai-blog/current
+EnvironmentFile=/etc/ai-blog/server.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/ai-blog/current/.venv/bin/python -m uvicorn app.main:app --app-dir ubuntu-server --host 127.0.0.1 --port 8000 --workers 1 --limit-concurrency 8 --no-access-log
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=45
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/ai-blog
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

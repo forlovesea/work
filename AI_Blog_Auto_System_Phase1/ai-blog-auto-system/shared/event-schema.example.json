@@ -1,0 +1,7 @@
+{
+  "event_id": "5db32fdb-12df-4d18-a049-a3c2833f74d4",
+  "device_id": "WINDOWS-PC-001",
+  "event_type": "MOCK_PUBLISH_SUCCESS",
+  "occurred_at": "2026-11-17T10:00:00+09:00",
+  "payload": {"title": "Example", "status": "MOCK_ONLY"}
+}

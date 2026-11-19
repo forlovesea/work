@@ -1,0 +1,5 @@
+-r ubuntu-server/requirements.txt
+-r windows-app/requirements.txt
+pytest>=8,<9
+jsonschema>=4.23,<5
+pytest-qt>=4.4,<5

@@ -1,0 +1,9 @@
+# GNU tar --exclude-from; adjust to the actual BLOG_PACKAGE_DIR before use.
+# Prefer backup_metadata.py over whole-directory or disk-image backups.
+packages
+packages/**
+var/lib/ai-blog/packages
+var/lib/ai-blog/packages/**
+**/.pytest-tmp
+**/.pytest-tmp/**
+**/.env

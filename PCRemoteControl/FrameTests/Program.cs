@@ -53,6 +53,18 @@ static class Program
     }
     static void Run()
     {
+        var primary = new MonitorInfo(@"\\.\DISPLAY1", 0, 0, 1920, 1080, true);
+        var left = new MonitorInfo(@"\\.\DISPLAY2", -1280, 0, 1280, 1024, false);
+        var above = new MonitorInfo(@"\\.\DISPLAY3", 0, -1200, 1920, 1200, false);
+        var screens = new[] { primary, left, above };
+        Check(MonitorInfo.Resolve(screens, left.Id) == left, "select second monitor by device identity");
+        Check(MonitorInfo.Resolve(new[] { primary, above }, left.Id) == primary, "removed monitor falls back to primary");
+        Check(MonitorInfo.Resolve(Array.Empty<MonitorInfo>(), null) == null, "empty monitor list is safe");
+        var desktop = new Rectangle(-1280, -1200, 3200, 2280);
+        Check(MonitorInfo.MapInput(left.Bounds, desktop, 0, 0).X == 0, "left monitor negative X maps to virtual desktop origin");
+        Check(MonitorInfo.MapInput(above.Bounds, desktop, 1, 0) == new Point(65535, 0), "third monitor above primary maps top right correctly");
+        Check(MonitorInfo.MapInput(primary.Bounds, desktop, 1, 1) == new Point(65535, 65535), "primary bottom right maps to desktop bottom right");
+        Check(left.Label.StartsWith("모니터 2"), "monitor label retains Windows display number");
         // Emulate a GDI display surface with RGB color but no alpha channel.
         using var legacy = new Bitmap(3200, 1800);
         Copy(legacy);
@@ -110,9 +122,19 @@ static class Program
         void Receive(object value)
         {
             using var doc = JsonDocument.Parse(JsonSerializer.SerializeToUtf8Bytes(value));
-            handler.Invoke(host, new object[] { doc.RootElement });
+            ((Task)handler.Invoke(host, new object[] { doc.RootElement })!).GetAwaiter().GetResult();
         }
         var view = (PictureBox)typeof(MainForm).GetField("view", fields)!.GetValue(host)!;
+        Receive(new { type = "paired" });
+        Check((bool)typeof(MainForm).GetField("relayFrames", fields)!.GetValue(host)! &&
+            typeof(MainForm).GetField("mediaSession", fields)!.GetValue(host) == null,
+            "legacy relay pairing selects JPEG without constructing WebRTC or sending rtc");
+        Receive(new { type = "ended" });
+        Check(!(bool)typeof(MainForm).GetField("relayFrames", fields)!.GetValue(host)!,
+            "ending a session clears its negotiated transport");
+        Receive(new { type = "paired", media = "relay-jpeg" });
+        Check((bool)typeof(MainForm).GetField("relayFrames", fields)!.GetValue(host)!,
+            "explicit relay JPEG pairing selects compatibility mode");
         typeof(MainForm).GetField("paired", fields)!.SetValue(host, true);
         Receive(new { type = "frame", data = frame.Data });
         Check(view.Image != null && view.Image.Width == 1600, "HOST receive handler assigns decoded image");
@@ -125,8 +147,24 @@ static class Program
         Check(view.Image == null && ((RemoteView)view).Message.Contains("10초"), "stale HOST frame is cleared after timeout");
         Receive(new { type = "frame", data = frame.Data });
         Check(view.Image != null, "HOST display recovers after timeout");
+        Receive(new { type = "frame", monitors = screens, selected_monitor = left.Id, restart_media = true });
+        var monitorPicker = (ComboBox)typeof(MainForm).GetField("monitors", fields)!.GetValue(host)!;
+        Check(monitorPicker.Items.Count == 3 && ((MonitorInfo)monitorPicker.SelectedItem!).Id == left.Id,
+            "HOST lists three monitors and confirms selected monitor");
+        Check(view.Image == null, "monitor switch clears previous image");
+        Receive(new { type = "frame", data = frame.Data, monitor = primary.Id });
+        Check(view.Image == null, "late frame from previous monitor is ignored");
+        Receive(new { type = "frame", data = frame.Data, monitor = left.Id });
+        Check(view.Image != null, "selected monitor frame is displayed");
+        typeof(MainForm).GetField("monitorSwitching", fields)!.SetValue(host, true);
+        typeof(MainForm).GetMethod("ClearMonitorFrame", fields)!.Invoke(host, null);
+        Receive(new { type = "frame", data = frame.Data, monitor = left.Id });
+        Check(view.Image == null, "frames are blocked until selection acknowledgement");
+        Receive(new { type = "frame", monitors = new[] { primary }, selected_monitor = primary.Id, restart_media = true });
+        Check(monitorPicker.Items.Count == 1 && monitorPicker.Enabled, "hot unplug updates monitor selection");
         Receive(new { type = "ended" });
         Check(view.Image == null, "session end clears displayed image");
+        Check(monitorPicker.Items.Count == 0 && !monitorPicker.Enabled, "session end clears monitor list");
         // No FormClosed event for a form that was never shown.
         foreach (string timerName in new[] { "health", "heartbeat", "capture", "listing" })
             ((System.Windows.Forms.Timer)typeof(MainForm).GetField(timerName, fields)!.GetValue(host)!).Dispose();

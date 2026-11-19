@@ -32,6 +32,11 @@ sealed class MainForm : Form
     readonly AppButton full = new() { Text = "전체 화면 (F11)", AutoSize = true };
     readonly Label status = new() { Dock = DockStyle.Bottom, Height = 32, Text = "서버 주소를 입력하세요.", Padding = new Padding(8) };
     readonly ListBox targets = new() { Dock = DockStyle.Fill, DisplayMember = "Label" };
+    readonly ComboBox monitors = new() { DropDownStyle = ComboBoxStyle.DropDownList, DisplayMember = "Label", Width = 190, DropDownWidth = 300, AccessibleName = "TARGET 모니터 선택" };
+    MonitorInfo[] localMonitors = Array.Empty<MonitorInfo>();
+    MonitorInfo? activeMonitor;
+    string? remoteMonitor;
+    bool monitorSubscribed, monitorBusy, monitorSwitching;
     readonly Panel side = new() { Dock = DockStyle.Left, Width = 250 };
     readonly FlowLayoutPanel settings = new() { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(10) };
     readonly RemoteView view = new() { Dock = DockStyle.Fill, BackColor = Color.FromArgb(25, 28, 34), SizeMode = PictureBoxSizeMode.Zoom };
@@ -43,7 +48,7 @@ sealed class MainForm : Form
     CancellationTokenSource? lifetime;
     Connection? connection;
     WebRtcSession? mediaSession;
-    bool paired, sendingFrame, fullScreen, running, targetMode;
+    bool paired, sendingFrame, fullScreen, running, targetMode, relayFrames;
     Rectangle oldBounds;
     FormWindowState oldState;
     long lastMove;
@@ -66,7 +71,7 @@ sealed class MainForm : Form
     {
         this.watchdogFolder = watchdogFolder;
         fixedTarget = target;
-        Text = "PCRemoteControl v0.2.0 · Windows HOST / TARGET";
+        Text = "PCRemoteControl v0.2.1 · Windows HOST / TARGET";
         Size = new Size(1180, 780); MinimumSize = new Size(800, 500); KeyPreview = true;
         role.Items.AddRange(new object[] { "HOST", "TARGET" }); role.SelectedIndex = target ? 1 : 0;
         LoadSettings();
@@ -82,7 +87,7 @@ sealed class MainForm : Form
         passwordGroup.Controls.AddRange(new Control[] { password, passwordEye });
         settings.Controls.AddRange(new Control[] { new Label { Text = "Relay 주소", AutoSize = true }, server, port, role, new Label { Text = "비밀번호", AutoSize = true }, passwordGroup, new Label { Text = "TARGET 이름", AutoSize = true }, targetName, start, stop });
         var actions = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(10) };
-        actions.Controls.AddRange(new Control[] { refresh, connect, disconnect, full });
+        actions.Controls.AddRange(new Control[] { refresh, connect, disconnect, full, new Label { Text = "TARGET 모니터", AutoSize = true }, monitors });
         actions.FlowDirection = FlowDirection.TopDown; actions.WrapContents = false;
         side.Padding = new Padding(10);
         side.Controls.Add(targets); side.Controls.Add(actions);
@@ -120,8 +125,20 @@ sealed class MainForm : Form
         connect.Click += async (_, _) => { if (targets.SelectedItem is Target t) await Send(new { type = "connect", id = t.Id }); };
         disconnect.Click += async (_, _) => await Send(new { type = "disconnect" });
         full.Click += (_, _) => ToggleFull();
+        monitors.SelectionChangeCommitted += async (_, _) =>
+        {
+            if (monitors.SelectedItem is not MonitorInfo selected || selected.Id == remoteMonitor) return;
+            monitorSwitching = true; UpdateControls();
+            await Send(new { type = "input", action = "release" });
+            ClearMonitorFrame();
+            await Send(new { type = "input", action = "select_monitor", monitor = selected.Id });
+        };
         heartbeat.Tick += async (_, _) => await Send(new { type = "ping" });
-        listing.Tick += async (_, _) => { if (!targetMode && connection != null) await Send(new { type = "list" }); };
+        listing.Tick += async (_, _) =>
+        {
+            if (!targetMode && connection != null) await Send(new { type = "list" });
+            if (targetMode && paired && monitorSubscribed) await PublishMonitors();
+        };
         capture.Tick += async (_, _) => await CaptureFrame();
         view.MouseDown += async (_, e) => { view.Focus(); view.Capture = true; await Mouse(e, true); };
         view.MouseUp += async (_, e) => { await Mouse(e, false); view.Capture = false; };
@@ -131,9 +148,9 @@ sealed class MainForm : Form
         {
             if (e.KeyCode == Keys.F11) { ToggleFull(); e.SuppressKeyPress = true; return; }
             if (e.KeyCode == Keys.Escape && fullScreen) { ToggleFull(); e.SuppressKeyPress = true; return; }
-            if (CanInput) { e.SuppressKeyPress = true; await Send(new { type = "input", action = "key", key = (int)e.KeyCode, down = true }); }
+            if (CanInput) { e.SuppressKeyPress = true; await Send(new { type = "input", action = "key", key = (int)e.KeyCode, down = true, monitor = remoteMonitor }); }
         };
-        KeyUp += async (_, e) => { if (CanInput && e.KeyCode != Keys.F11) { e.SuppressKeyPress = true; await Send(new { type = "input", action = "key", key = (int)e.KeyCode, down = false }); } };
+        KeyUp += async (_, e) => { if (CanInput && e.KeyCode != Keys.F11) { e.SuppressKeyPress = true; await Send(new { type = "input", action = "key", key = (int)e.KeyCode, down = false, monitor = remoteMonitor }); } };
         view.LostFocus += async (_, _) => { if (paired && !targetMode) await Send(new { type = "input", action = "release" }); };
         Deactivate += async (_, _) => { if (paired && !targetMode) await Send(new { type = "input", action = "release" }); };
         FormClosing += (_, _) => { health.Stop(); Stop(); WriteHealth("stopped"); };
@@ -141,10 +158,11 @@ sealed class MainForm : Form
         role.SelectedIndexChanged += (_, _) => UpdateControls();
         UpdateControls();
     }
-    bool CanInput => paired && !targetMode && view.Focused && view.Image != null;
+    bool CanInput => paired && !targetMode && !monitorSwitching && view.Focused && view.Image != null;
     void UpdateControls()
     {
         bool isTarget = role.SelectedIndex == 1;
+        monitors.Enabled = !isTarget && paired && monitors.Items.Count > 0 && !monitorSwitching;
         refresh.Enabled = connect.Enabled = !isTarget && connection != null && !paired;
         disconnect.Enabled = paired; full.Enabled = !isTarget;
         targetName.Enabled = isTarget && !running;
@@ -183,15 +201,31 @@ sealed class MainForm : Form
             try
             {
                 status.Text = "Relay 서버 연결 중…";
-                await c.Open(server.Text.Trim(), (int)port.Value, new { type = "hello", role = targetMode ? "target" : "host", password = password.Text, id, name = targetName.Text }, RequestEmailCode, token);
+                await c.Open(server.Text.Trim(), (int)port.Value, new { type = "hello", role = targetMode ? "target" : "host", password = password.Text, id, name = targetName.Text, media = "webrtc-v1" }, RequestEmailCode, token);
                 connection = c; heartbeat.Start(); listing.Start(); capture.Start(); UpdateControls();
                 status.Text = targetMode ? "TARGET 연결 유지 중 · HOST 접속 시 화면과 키보드/마우스 제어가 허용됩니다." : "인증 완료 · TARGET을 선택하고 원격접속을 누르세요.";
                 if (!targetMode) await c.Send(new { type = "list" }, token);
                 while (!token.IsCancellationRequested) await HandleMessage(await c.Read(token));
             }
+            catch (RelayCertificateException ex)
+            {
+                if (!token.IsCancellationRequested)
+                {
+                    DiagnosticLog.Write("certificate", ex.Message);
+                    lifetime.Cancel(); WriteHealth("paused");
+                    status.Text = "Relay 인증서 오류 · 자동 재연결 중지 · 화면의 조치 안내를 확인하세요.";
+                    view.Message = ex.Message;
+                }
+            }
             catch (LoginException ex) { lifetime.Cancel(); WriteHealth("paused"); status.Text = ex.Message; }
             catch (Exception ex) { if (!token.IsCancellationRequested) { DiagnosticLog.Write("connection", ex.GetType().Name + ": " + ex.Message); status.Text = "연결 종료: " + ex.Message + (targetMode ? " · 5초 후 재연결" : ""); } }
-            finally { connection = null; heartbeat.Stop(); listing.Stop(); capture.Stop(); EndSession(); UpdateControls(); }
+            finally
+            {
+                connection = null; heartbeat.Stop(); listing.Stop(); capture.Stop(); EndSession();
+                targets.Items.Clear();
+                if (!token.IsCancellationRequested) view.Message = status.Text;
+                UpdateControls();
+            }
             if (!targetMode || token.IsCancellationRequested) break;
             try { await Task.Delay(5000, token); } catch (OperationCanceledException) { break; }
         } while (!token.IsCancellationRequested);
@@ -230,11 +264,22 @@ sealed class MainForm : Form
                 targets.EndUpdate(); break;
             case "paired":
                 EndSession(); paired = true; pairedAt = Environment.TickCount64;
+                if (targetMode) activeMonitor = MonitorInfo.Resolve(MonitorInfo.GetAll(), null);
                 status.Text = targetMode ? "HOST 접속됨 · WebRTC 미디어 연결 협상 중" : "TARGET 연결됨 · WebRTC 미디어 연결 협상 중";
                 view.Message = status.Text;
                 DiagnosticLog.Write("paired", targetMode ? "TARGET" : "HOST");
                 UpdateControls();
-                await StartMediaSession();
+                // Old relays close the TLS socket on an unknown rtc message.
+                // Only use WebRTC when the relay explicitly negotiated it for both peers.
+                relayFrames = !m.TryGetProperty("media", out var transport) || transport.GetString() != "webrtc-v1";
+                if (relayFrames)
+                {
+                    status.Text = "원격접속됨 · TLS Relay 화면 전송 모드";
+                    view.Message = status.Text;
+                    DiagnosticLog.Write("media", "TLS Relay compatibility mode");
+                }
+                else await StartMediaSession();
+                if (!targetMode) await Send(new { type = "input", action = "monitors" });
                 break;
             case "ended": EndSession(); status.Text = "원격접속 종료 · 서버 연결 유지 중"; UpdateControls(); break;
             case "rtc" when paired:
@@ -248,6 +293,24 @@ sealed class MainForm : Form
                 break;
             case "error": status.Text = m.GetProperty("message").GetString(); break;
             case "frame" when !targetMode && paired:
+                if (m.TryGetProperty("monitors", out var monitorList))
+                {
+                    var items = monitorList.Deserialize<MonitorInfo[]>() ?? Array.Empty<MonitorInfo>();
+                    string? selectedId = m.GetProperty("selected_monitor").GetString();
+                    bool restart = m.TryGetProperty("restart_media", out var restartFlag) && restartFlag.GetBoolean();
+                    monitors.Items.Clear();
+                    foreach (var item in items) { monitors.Items.Add(item); if (item.Id == selectedId) monitors.SelectedItem = item; }
+                    remoteMonitor = selectedId;
+                    if (restart)
+                    {
+                        ClearMonitorFrame();
+                        var previous = mediaSession; mediaSession = null; previous?.Dispose();
+                        if (!relayFrames) await StartMediaSession();
+                    }
+                    monitorSwitching = false; UpdateControls();
+                    break;
+                }
+                if (monitorSwitching || (remoteMonitor != null && m.TryGetProperty("monitor", out var frameMonitor) && frameMonitor.GetString() != remoteMonitor)) break;
                 if (m.TryGetProperty("capture_error", out var failure))
                 {
                     string message = failure.GetString() ?? "TARGET 화면 캡처 실패";
@@ -272,15 +335,62 @@ sealed class MainForm : Form
                 }
                 break;
             case "input" when targetMode && paired:
-                try { Desktop.Apply(m); } catch (Exception ex) { status.Text = "입력 처리 실패: " + ex.Message; }
+                string? action = m.GetProperty("action").GetString();
+                if (action is "monitors" or "select_monitor")
+                {
+                    monitorSubscribed = true;
+                    await PublishMonitors(action == "select_monitor" ? m.GetProperty("monitor").GetString() : null, true);
+                    break;
+                }
+                if (action == "release") { Desktop.Release(); break; }
+                if (monitorBusy || (m.TryGetProperty("monitor", out var inputMonitor) && inputMonitor.ValueKind == JsonValueKind.String && inputMonitor.GetString() != activeMonitor?.Id)) break;
+                if (activeMonitor == null || !MonitorInfo.GetAll().Contains(activeMonitor)) break;
+                try { Desktop.Apply(m, activeMonitor.Bounds); } catch (Exception ex) { status.Text = "입력 처리 실패: " + ex.Message; }
                 break;
         }
     }
+    void ClearMonitorFrame()
+    {
+        var old = view.Image; view.Image = null; old?.Dispose();
+        view.Message = "선택한 모니터 화면을 기다리는 중입니다.";
+        lastFrameAt = 0; pairedAt = Environment.TickCount64; captureError = null;
+    }
+    async Task PublishMonitors(string? requested = null, bool force = false)
+    {
+        int generation = sessionGeneration;
+        while (monitorBusy && force && paired && generation == sessionGeneration) await Task.Delay(20);
+        if (monitorBusy || !paired || generation != sessionGeneration) return;
+        monitorBusy = true;
+        try
+        {
+            // Drain the previous capture/encode before replacing its media session.
+            while (sendingFrame && paired && generation == sessionGeneration) await Task.Delay(20);
+            if (!paired || generation != sessionGeneration) return;
+            var current = MonitorInfo.GetAll();
+            var selected = MonitorInfo.Resolve(current, requested ?? activeMonitor?.Id);
+            bool changed = selected != activeMonitor;
+            if (!force && !changed && current.SequenceEqual(localMonitors)) return;
+            if (changed)
+            {
+                Desktop.Release();
+                activeMonitor = selected;
+                nextCaptureAt = 0;
+                var previous = mediaSession; mediaSession = null; previous?.Dispose();
+                if (!relayFrames) await StartMediaSession();
+            }
+            localMonitors = current;
+            await Send(new { type = "frame", monitors = current, selected_monitor = selected?.Id, restart_media = changed });
+        }
+        finally { monitorBusy = false; }
+    }
     void EndSession()
     {
+        monitors.Items.Clear(); remoteMonitor = null; activeMonitor = null;
+        localMonitors = Array.Empty<MonitorInfo>(); monitorSubscribed = monitorSwitching = false;
         sessionGeneration++;
         lastFrameAt = pairedAt = receivedFrames = sentFrames = nextCaptureAt = 0;
         captureError = null;
+        relayFrames = false;
         mediaSession?.Dispose();
         mediaSession = null;
         paired = false; if (targetMode) Desktop.Release();
@@ -310,18 +420,37 @@ sealed class MainForm : Form
     async Task CaptureFrame()
     {
         var session = mediaSession;
-        if (!targetMode || !paired || session == null || !session.IsConnected || sendingFrame ||
+        if (!targetMode || !paired || monitorBusy || (!relayFrames && (session == null || !session.IsConnected)) || sendingFrame ||
             Environment.TickCount64 < nextCaptureAt) return;
         sendingFrame = true;
         int generation = sessionGeneration;
         var token = lifetime?.Token ?? CancellationToken.None;
         try
         {
-            Rectangle bounds = Screen.PrimaryScreen?.Bounds ?? throw new IOException("활성 모니터를 찾을 수 없습니다.");
+            var selectedMonitor = activeMonitor ?? throw new IOException("활성 모니터를 찾을 수 없습니다.");
+            if (!MonitorInfo.GetAll().Contains(selectedMonitor)) return;
+            Rectangle bounds = selectedMonitor.Bounds;
+            if (relayFrames)
+            {
+                var c = connection;
+                if (c == null) return;
+                CapturedFrame jpeg = await Task.Run(() => Desktop.Capture(bounds), token);
+                if (!paired || generation != sessionGeneration || !ReferenceEquals(c, connection)) return;
+                await c.Send(new { type = "frame", data = jpeg.Data, width = jpeg.Width, height = jpeg.Height, nearly_black = jpeg.NearlyBlack, monitor = selectedMonitor.Id }, token);
+                if (generation != sessionGeneration) return;
+                sentFrames++;
+                if (sentFrames == 1 || captureError != null)
+                    DiagnosticLog.Write("frame-sent", $"{jpeg.Width}x{jpeg.Height} transport=TLS Relay");
+                captureError = null;
+                status.Text = $"화면 전송 {sentFrames}회 · {jpeg.Width}×{jpeg.Height} · TLS Relay";
+                view.Message = status.Text;
+                nextCaptureAt = Environment.TickCount64 + 150;
+                return;
+            }
             RawVideoFrame frame = await Task.Run(() => Desktop.CaptureVideo(bounds), token);
             if (paired && ReferenceEquals(session, mediaSession) && generation == sessionGeneration)
             {
-                await Task.Run(() => session.SendFrame(frame), token);
+                await Task.Run(() => session!.SendFrame(frame), token);
                 if (generation != sessionGeneration || !ReferenceEquals(session, mediaSession)) return;
                 sentFrames++;
                 if (sentFrames == 1 || captureError != null)
@@ -342,6 +471,8 @@ sealed class MainForm : Form
                 status.Text = message;
                 view.Message = message;
                 nextCaptureAt = Environment.TickCount64 + 2000;
+                if (relayFrames)
+                    await Send(new { type = "frame", data = "", capture_error = message });
             }
         }
         finally { sendingFrame = false; }
@@ -380,7 +511,7 @@ sealed class MainForm : Form
             if (InvokeRequired) BeginInvoke(new Action(() => DisplayMediaFrame(session, frame)));
             else
             {
-                if (!paired || !ReferenceEquals(session, mediaSession)) { frame.Dispose(); return; }
+                if (!paired || monitorSwitching || !ReferenceEquals(session, mediaSession)) { frame.Dispose(); return; }
                 var old = view.Image;
                 view.Image = frame;
                 old?.Dispose();
@@ -435,6 +566,7 @@ sealed class MainForm : Form
         double x = (e.X - (view.ClientSize.Width - w) / 2) / w, y = (e.Y - (view.ClientSize.Height - h) / 2) / h;
         if ((x < 0 || x > 1 || y < 0 || y > 1) && down != false && !view.Capture) return;
         var m = new Dictionary<string, object> { ["type"] = "input", ["action"] = "mouse", ["x"] = Math.Clamp(x, 0, 1), ["y"] = Math.Clamp(y, 0, 1) };
+        if (remoteMonitor != null) m["monitor"] = remoteMonitor;
         if (down.HasValue) { m["button"] = e.Button switch { MouseButtons.Left => "left", MouseButtons.Right => "right", _ => "middle" }; m["down"] = down.Value; }
         if (wheel != 0) m["wheel"] = wheel;
         await Send(m);

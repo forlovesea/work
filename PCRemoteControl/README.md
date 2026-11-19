@@ -1,14 +1,19 @@
-# PCRemoteControl v0.2.0
+# PCRemoteControl v0.2.1
 
 Windows 10/11 PC 간 화면 보기와 키보드·마우스 제어를 위한 원격제어 프로그램입니다. 하나의 클라이언트에서 HOST 또는 TARGET 역할을 선택합니다.
 
 ## 주요 기능
 
-- 화면은 WebRTC VP8 미디어로 전송하고, 인증·입력 명령·세션 신호는 Relay와의 TLS/TCP 연결로 처리합니다.
+- HOST 왼쪽의 **TARGET 모니터** 목록에서 모니터 1·2·3 등을 선택할 수 있습니다. 처음에는 TARGET의 주 모니터를 표시하며, 선택한 화면을 기준으로 마우스를 제어합니다. 모니터 번호는 Windows 장치 이름의 DISPLAY 번호이며 해상도와 주 화면 여부를 함께 표시합니다.
+- 모니터 연결 변경은 약 5초마다 확인하며, 선택한 모니터가 분리되면 주 모니터로 전환합니다. 전환 시 누른 키·마우스를 해제하고 이전 화면을 지웁니다. WebRTC 모드에서는 새 화면의 해상도에 맞춰 미디어 연결을 다시 맺으므로 잠시 대기할 수 있습니다. 전체 화면에서는 F11로 돌아온 뒤 모니터를 선택하세요.
+- 다중 모니터 기능은 HOST와 TARGET 모두 `release/v0.2.1/PCRemoteControl-v0.2.1.exe`로 교체해야 합니다. Relay 서버 변경은 필요 없습니다. 구버전 TARGET 연결 시 모니터 선택은 비활성화되고 기존 주 화면 보기가 유지됩니다.
+
+- Relay가 양쪽 클라이언트의 `webrtc-v1` 지원을 확인한 경우 화면을 WebRTC VP8로 전송합니다. 전송 방식 협상이 없는 구버전 Relay에서는 JPEG 화면을 기존 TLS/TCP 연결로 전송하므로 서버 교체 없이 사용할 수 있습니다. 인증·입력 명령은 두 모드 모두 TLS/TCP로 처리합니다.
+- TLS Relay 호환 모드에서는 캡처·전송 완료 후 150ms 간격을 두며, WebRTC보다 프레임률이 낮고 Relay 대역폭을 사용합니다. HOST와 TARGET 모두 수정된 실행 파일로 교체하세요. WebRTC 연결 실패 시의 자동 전환 기능은 아닙니다.
 - 화면 미디어는 ICE 연결과 DTLS-SRTP로 보호됩니다. NAT/방화벽 환경에 따라 STUN만으로 연결되지 않을 수 있으며, 이 경우 TURN 서버를 설정해야 합니다.
-- 주 모니터를 최대 가로 1600px로 축소하고 약 20fps를 목표로 캡처합니다. 실제 프레임률은 캡처, 인코딩, 네트워크 상태에 따라 달라집니다.
-- 원격 마우스 이동·버튼·휠, 키보드 입력, 전체 화면(F11)을 지원합니다. 오디오, 파일 전송, 클립보드, 다중 모니터 선택은 지원하지 않습니다.
-- WebRTC 미디어 인코딩·디코딩에 양쪽 PC의 FFmpeg 8.1 Shared 네이티브 라이브러리가 필요합니다. 라이브러리는 클라이언트 EXE에 포함되지 않습니다.
+- 선택한 모니터를 최대 가로 1600px로 축소하고 약 20fps를 목표로 캡처합니다. 실제 프레임률은 캡처, 인코딩, 네트워크 상태에 따라 달라집니다.
+- 원격 마우스 이동·버튼·휠, 키보드 입력, 전체 화면(F11)을 지원합니다. 오디오, 파일 전송, 클립보드는 지원하지 않습니다.
+- WebRTC 미디어 인코딩·디코딩에 필요한 FFmpeg 8.1 Shared 네이티브 라이브러리를 Windows x64 클라이언트 EXE에 포함합니다. 별도 FFmpeg 설치는 필요하지 않습니다.
 
 ## 연결 및 인증
 
@@ -25,17 +30,16 @@ HOST ═══════ WebRTC VP8 미디어 경로 ═══════ TAR
 
 ## Windows 클라이언트 실행
 
-1. HOST와 TARGET 모두에 64비트 FFmpeg 8.1 Shared 라이브러리를 설치합니다.
-2. [PCRemoteControl-v0.2.0.exe](./release/v0.2.0/PCRemoteControl-v0.2.0.exe)를 실행하고 Relay 주소, 포트, 비밀번호를 설정합니다. TARGET에는 표시할 PC 이름도 지정합니다.
-3. 두 PC에서 **서버 연결**을 누르고 각각 이메일 인증을 완료합니다.
-4. HOST의 TARGET 목록에서 대상 PC를 골라 **원격접속**을 누릅니다.
+1. [PCRemoteControl-v0.2.1.exe](https://github.com/forlovesea/work/releases/download/pcremotecontrol-v0.2.1/PCRemoteControl-v0.2.1.exe)를 실행하고 Relay 주소, 포트, 비밀번호를 설정합니다. TARGET에는 표시할 PC 이름도 지정합니다.
+2. 두 PC에서 **서버 연결**을 누르고 각각 이메일 인증을 완료합니다.
+3. HOST의 TARGET 목록에서 대상 PC를 골라 **원격접속**을 누릅니다.
 
 기본 Relay 주소는 `61.105.141.21`, 포트는 `61000`입니다. 실제 서버 인증서에 포함된 DNS 이름을 사용하세요. IP 주소로 직접 연결하려면 서버 인증서에 해당 IP SAN이 있어야 합니다. TLS 인증서 검증을 끄는 옵션은 없습니다.
 
 TARGET 역할만 실행하려면 다음 인수를 사용할 수 있습니다.
 
 ```powershell
-.\PCRemoteControl-v0.2.0.exe --target
+.\PCRemoteControl-v0.2.1.exe --target
 ```
 
 설정과 기기 ID는 `%LOCALAPPDATA%\PCRemoteControl\settings.json`에 저장됩니다. TARGET 비밀번호는 자동 복구용으로 `%LOCALAPPDATA%\PCRemoteControl\target-password.bin`에 Windows DPAPI로 암호화해 저장합니다. 클라이언트 로그는 `%LOCALAPPDATA%\PCRemoteControl\client.log`에 기록되며 크기가 512000바이트를 넘으면 `.old` 파일로 회전합니다. 비밀번호, 인증 코드, 화면 내용은 로그에 기록하지 않습니다.
@@ -59,6 +63,8 @@ TARGET 역할만 실행하려면 다음 인수를 사용할 수 있습니다.
 
 Relay는 Python 3.8 이상과 표준 라이브러리를 사용합니다. 공개 DNS 이름에 유효한 TLS 인증서와 키를 준비하고 Ubuntu 서버에서 설치하세요. 다음 예시는 GitHub 저장소에 접근할 수 있는 경우입니다.
 
+v0.2.0 클라이언트에는 WebRTC `offer`/`answer`/ICE 신호를 중계하는 Relay가 필요합니다. 이전 Relay는 연결 페어링까지는 되지만 첫 `rtc` 메시지를 처리하지 못해 연결을 닫을 수 있으며, HOST에는 `Unable to read beyond the end of the stream`으로 표시됩니다. 기존 서버도 저장소의 최신 코드를 받은 뒤 설치 스크립트를 다시 실행해 Relay를 업데이트하세요.
+
 ```sh
 sudo apt-get update
 sudo apt-get install -y git python3 ca-certificates
@@ -67,7 +73,14 @@ cd work/PCRemoteControl
 sudo sh server/install.sh /path/to/fullchain.pem /path/to/privkey.pem
 ```
 
-설치 스크립트는 `pcremote-relay`라는 별도 systemd 서비스만 설치·재시작하며 기존 스마트폰용 Relay 서비스는 변경하지 않습니다. TCP 61000이 이미 사용 중이면 설치를 중단합니다. 설치 후 서버 방화벽과 클라우드 보안 그룹에서 TCP 61000을 허용하세요. UFW를 사용하는 경우:
+이미 저장소를 복제한 서버라면 저장소 디렉터리에서 다음처럼 업데이트합니다.
+
+```sh
+git pull --ff-only origin main
+sudo sh server/install.sh /path/to/fullchain.pem /path/to/privkey.pem
+```
+
+설치 스크립트는 `pcremote-relay` systemd 서비스를 설치·재시작합니다. TCP 61000이 이미 사용 중이면 설치를 중단합니다. 설치 후 서버 방화벽과 클라우드 보안 그룹에서 TCP 61000을 허용하세요. UFW를 사용하는 경우:
 
 ```sh
 sudo ufw allow 61000/tcp
@@ -108,9 +121,11 @@ sudo sh server/install.sh /etc/pcremote/fullchain.pem /etc/pcremote/privkey.pem
 
 TLS 인증서가 갱신된 뒤에도 Relay 서비스를 재시작해야 새 인증서를 사용합니다. NAT 환경에서 미디어 연결이 안 되면 별도 TURN 서비스를 구성하고 위의 ICE 설정을 양쪽 PC에 적용하세요. Relay 포트 개방만으로 모든 WebRTC 미디어 경로가 보장되는 것은 아닙니다.
 
+`NotTimeValid` 오류는 PC의 현재 시간이 인증서 체인의 유효기간과 맞지 않을 때 발생합니다. 먼저 오류가 발생한 Windows PC의 날짜·시간을 동기화하세요. 시간이 정확하다면 Relay 서버 인증서와 중간 인증서의 유효기간을 확인하고 갱신하세요. `install.sh`는 인증서를 `/etc/pcremote/fullchain.pem`과 `/etc/pcremote/privkey.pem`으로 **복사**하므로, 원본 인증서만 갱신하고 서비스를 재시작하면 기존 복사본이 계속 사용됩니다. 갱신된 인증서와 키를 인자로 설치 스크립트를 다시 실행하여 복사본을 교체하고 서비스를 재시작하세요. 클라이언트는 인증서 검증 실패 시 자동 재연결을 중지하고 UTC 시각과 서버 인증서 유효기간을 표시합니다. 조치 후 ‘서버 연결’을 누르세요. 인증서 검증은 계속 적용됩니다.
+
 ## TARGET 자동 복구 (선택)
 
-`build.ps1 -IncludeWatchdog`로 Watchdog를 함께 빌드할 수 있습니다. 생성된 `PCRemoteControl.Watchdog-v0.2.0.exe`를 클라이언트와 같은 폴더에 두고 실행하세요. Watchdog는 TARGET만 감시하며 HOST는 감시하지 않습니다.
+`build.ps1 -IncludeWatchdog`로 Watchdog를 함께 빌드할 수 있습니다. 생성된 `PCRemoteControl.Watchdog-v0.2.1.exe`를 클라이언트와 같은 폴더에 두고 실행하세요. Watchdog는 TARGET만 감시하며 HOST는 감시하지 않습니다.
 
 - 비정상 종료 시 TARGET을 다시 실행하고 Relay 재연결을 시도합니다. 인증이 다시 필요하면 이메일 코드를 입력해야 합니다.
 - TARGET에서 **연결 중지**를 누르면 자동 복구를 멈춥니다. 정상 종료한 TARGET은 자동으로 다시 실행하지 않습니다.
@@ -119,7 +134,7 @@ TLS 인증서가 갱신된 뒤에도 Relay 서비스를 재시작해야 새 인�
 
 ## 빌드 및 테스트
 
-필요한 도구: .NET 8 SDK, Windows x64 빌드 환경, Relay 테스트용 Python 3.8 이상.
+필요한 도구: .NET 8 SDK, Windows x64 빌드 환경, 빌드 시 FFmpeg 패키지를 내려받을 인터넷 연결, Relay 테스트용 Python 3.8 이상.
 
 ```powershell
 dotnet build .\Client\PCRemoteControl.csproj -c Release
@@ -129,14 +144,18 @@ python -m unittest discover -s server -v
 .\build.ps1
 ```
 
-배포 EXE와 SHA-256 목록은 `release/v0.2.0/`에 생성됩니다. 기본 배포 빌드는 클라이언트 단일 EXE를 만들지만 FFmpeg 8.1 Shared 네이티브 라이브러리는 포함하지 않습니다. Watchdog 포함 빌드:
+배포 EXE와 SHA-256 목록은 `release/v0.2.1/`에 생성됩니다. 빌드 스크립트는 FFmpeg-Builds의 Windows x64 LGPL Shared 8.1 패키지를 내려받고 고정된 SHA-256을 확인한 뒤, 필요한 네이티브 라이브러리를 단일 EXE에 포함합니다. 실행 시 .NET이 네이티브 라이브러리를 사용자 임시 폴더에 풀어 사용합니다. 배포 시 `FFmpeg-LICENSE.txt`, `GPL-LICENSE.txt`, `FFmpeg-NOTICE.txt`도 EXE와 함께 제공하세요. Watchdog 포함 빌드:
 
 ```powershell
 .\build.ps1 -IncludeWatchdog
 ```
 
-릴리스 의존성의 라이선스 조건도 확인하세요. SIPSorcery에는 추가 사용 제한이 명시되어 있고, SIPSorceryMedia.FFmpeg는 LGPL-2.1-only 라이선스를 사용합니다.
+릴리스 의존성의 라이선스 조건도 확인하세요. SIPSorcery에는 추가 사용 제한이 명시되어 있고, SIPSorceryMedia.FFmpeg는 LGPL-2.1-only 라이선스를 사용합니다. 포함된 FFmpeg 라이브러리는 LGPL Shared 빌드이며 라이선스와 소스 안내는 배포 폴더의 `FFmpeg-LICENSE.txt`, `GPL-LICENSE.txt`, `FFmpeg-NOTICE.txt`에 있습니다. FFmpeg 및 빌드 스크립트의 소스는 [FFmpeg](https://ffmpeg.org/)와 [FFmpeg-Builds](https://github.com/FFmpeg-Builds/FFmpeg-Builds)에서 확인할 수 있습니다.
 
 ## 검증 범위와 제한
 
 자동 테스트는 화면 프레임 변환, 클라이언트 복구 정책, Relay 인증 및 메시지 처리, WebRTC signaling 전달 등을 검증합니다. 실제 두 PC 간 연결, 다양한 NAT 조합, TURN 서비스, FFmpeg 인코딩·디코딩을 포함한 운영 환경 검증은 배포 환경에서 별도로 수행해야 합니다.
+
+### v0.2.1 마무리 검증
+
+클라이언트 단일 EXE 및 Watchdog 빌드 성공. 화면·모니터 테스트 35개, 복구 테스트 7개, 인증서 테스트 2개, Relay 테스트 19개 통과. 인증서 테스트는 Windows 키 저장소 접근이 가능한 환경에서 실행했습니다. 실제 두 PC 간 원격 접속 및 화면 디자인 육안 검증은 이번 마무리에서 수행하지 않았습니다.

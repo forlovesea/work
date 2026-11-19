@@ -45,13 +45,13 @@ class RelayTests(unittest.IsolatedAsyncioTestCase):
         w.write(struct.pack('!I', len(data)) + data)
         await w.drain()
 
-    async def peer(self, role, password='jjh1234', id='test', verify=True, reset_limit=True):
+    async def peer(self, role, password='jjh1234', id='test', verify=True, reset_limit=True, media=None):
         if reset_limit:
             self.relay.mail_times.clear()
             self.relay.last_mail = float('-inf')
         r, w = await asyncio.open_connection('127.0.0.1', self.port)
         self.writers.append(w)
-        await self.send(w, dict(type='hello', role=role, password=password, id=id, name='Test PC'))
+        await self.send(w, dict(type='hello', role=role, password=password, id=id, name='Test PC', media=media))
         reply = await read_message(r, 2)
         if verify and reply['type'] == 'email_required':
             await self.send(w, dict(type='verify_email', code=self.codes[-1]))
@@ -139,6 +139,23 @@ class RelayTests(unittest.IsolatedAsyncioTestCase):
         await self.send(hw, dict(type='list'))
         self.assertEqual((await read_message(hr))['targets'][0]['state'], 'ready')
 
+    async def test_monitor_selection_uses_existing_relay_messages(self):
+        tr, tw, _ = await self.peer('target')
+        hr, hw, _ = await self.peer('host')
+        await self.send(hw, dict(type='connect', id='test'))
+        await read_message(hr)
+        await read_message(tr)
+        for command in [dict(type='input', action='monitors'),
+                        dict(type='input', action='select_monitor', monitor='DISPLAY2'),
+                        dict(type='input', action='mouse', monitor='DISPLAY2', x=0.5, y=0.5)]:
+            await self.send(hw, command)
+            self.assertEqual(await read_message(tr), command)
+        catalog = dict(type='frame', monitors=[dict(Id='DISPLAY2', X=-1920, Y=0,
+                       Width=1920, Height=1080, Primary=False)],
+                       selected_monitor='DISPLAY2', restart_media=True)
+        await self.send(tw, catalog)
+        self.assertEqual(await read_message(hr), catalog)
+
     async def test_target_socket_close_removes_listing(self):
         _, tw, _ = await self.peer('target')
         hr, hw, _ = await self.peer('host')
@@ -147,6 +164,22 @@ class RelayTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0.05)
         await self.send(hw, dict(type='list'))
         self.assertEqual((await read_message(hr))['targets'], [])
+
+    async def test_media_negotiation_requires_both_peers(self):
+        for target_media, host_media, expected in [
+            (None, 'webrtc-v1', 'relay-jpeg'),
+            ('webrtc-v1', None, 'relay-jpeg'),
+            ('webrtc-v1', 'webrtc-v1', 'webrtc-v1'),
+        ]:
+            target_id = str(len(self.writers))
+            tr, tw, _ = await self.peer('target', id=target_id, media=target_media)
+            hr, hw, _ = await self.peer('host', media=host_media)
+            await self.send(hw, dict(type='connect', id=target_id))
+            self.assertEqual((await read_message(hr))['media'], expected)
+            self.assertEqual((await read_message(tr))['media'], expected)
+            await self.send(hw, dict(type='disconnect'))
+            await read_message(hr)
+            await read_message(tr)
 
     async def test_webrtc_signaling_is_forwarded_only_between_paired_roles(self):
         tr, tw, _ = await self.peer('target')

@@ -34,7 +34,7 @@ static class Desktop
         foreach (string button in buttons.ToArray()) { try { Send(new Input { value = new InputUnion { mouse = new MouseInput { flags = ButtonFlag(button, false) } } }); } catch (IOException) { } }
         keys.Clear(); buttons.Clear();
     }
-    public static void Apply(JsonElement m)
+    public static void Apply(JsonElement m, Rectangle bounds)
     {
         string? action = m.GetProperty("action").GetString();
         if (action == "release") { Release(); return; }
@@ -50,9 +50,7 @@ static class Desktop
         if (action != "mouse") return;
         double x = m.GetProperty("x").GetDouble(), y = m.GetProperty("y").GetDouble();
         if (!double.IsFinite(x) || !double.IsFinite(y)) return;
-        Rectangle primary = Screen.PrimaryScreen!.Bounds, all = SystemInformation.VirtualScreen;
-        int px = primary.Left + (int)(Math.Clamp(x, 0, 1) * (primary.Width - 1));
-        int py = primary.Top + (int)(Math.Clamp(y, 0, 1) * (primary.Height - 1));
+        Point position = MonitorInfo.MapInput(bounds, SystemInformation.VirtualScreen, x, y);
         uint flags = 0x8000 | 0x4000 | 1, data = 0;
         if (m.TryGetProperty("button", out var b))
         {
@@ -63,8 +61,7 @@ static class Desktop
         }
         if (m.TryGetProperty("wheel", out var wheel)) { flags |= 0x800; data = unchecked((uint)Math.Clamp(wheel.GetInt32(), -1200, 1200)); }
         Send(new Input { value = new InputUnion { mouse = new MouseInput {
-            x = (int)((px - all.Left) * 65535L / Math.Max(1, all.Width - 1)),
-            y = (int)((py - all.Top) * 65535L / Math.Max(1, all.Height - 1)), flags = flags, data = data } } });
+            x = position.X, y = position.Y, flags = flags, data = data } } });
     }
     public static CapturedFrame Capture(Rectangle bounds)
     {

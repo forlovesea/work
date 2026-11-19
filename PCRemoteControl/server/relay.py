@@ -50,6 +50,7 @@ class Peer:
         self.lock = asyncio.Lock()
         self.role = self.id = self.name = ''
         self.other = None
+        self.media = None
 
     async def send(self, value):
         raw = json.dumps(value, separators=(',', ':')).encode()
@@ -102,6 +103,7 @@ class Relay:
                 await p.send({'type': 'error', 'message': 'Authentication failed'})
                 return
             p.role = hello.get('role')
+            p.media = hello.get('media')
             if hello.get('type') != 'hello' or p.role not in ('target', 'host'):
                 raise ValueError('Invalid hello')
             now = time.monotonic()
@@ -152,8 +154,9 @@ class Relay:
                         await p.send({'type': 'error', 'message': 'Target unavailable or busy'})
                         continue
                     p.other, t.other = t, p
-                    await p.send({'type': 'paired', 'name': t.name})
-                    await t.send({'type': 'paired'})
+                    media = 'webrtc-v1' if p.media == t.media == 'webrtc-v1' else 'relay-jpeg'
+                    await p.send({'type': 'paired', 'name': t.name, 'media': media})
+                    await t.send({'type': 'paired', 'media': media})
                 elif kind == 'disconnect':
                     await self.detach(p)
                     await p.send({'type': 'ended'})

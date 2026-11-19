@@ -37,7 +37,13 @@ sealed class WebRtcSession : IDisposable
 
     public WebRtcSession(bool target, string? sessionId, Func<object, Task> sendSignal)
     {
-        if (!FFmpegInit.EnsureBinariesRegistered())
+        string? nativeSearchDirectories = AppContext.GetData("NATIVE_DLL_SEARCH_DIRECTORIES") as string;
+        string? bundledFfmpegDirectory = nativeSearchDirectories?
+            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault(directory => File.Exists(Path.Combine(directory, "avcodec-62.dll")));
+        if (bundledFfmpegDirectory != null)
+            FFmpegInit.Initialise(libPath: bundledFfmpegDirectory);
+        else if (!FFmpegInit.EnsureBinariesRegistered())
             throw new IOException("FFmpeg 8.1 Shared 라이브러리를 찾을 수 없습니다. README의 FFmpeg 설치 안내를 확인하세요.");
 
         this.target = target;

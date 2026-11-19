@@ -1,0 +1,4 @@
+PCRemoteControl includes FFmpeg 8.1 LGPL Shared Windows x64 libraries.
+FFmpeg source: https://github.com/FFmpeg/FFmpeg/tree/n8.1
+Build scripts and Windows binaries: https://github.com/FFmpeg-Builds/FFmpeg-Builds
+Binary package SHA-256: b96be85e024a68514876582e19a80062152cc499cb38efd70e9db72f7108d9c5

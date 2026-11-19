@@ -1,6 +1,6 @@
 param([switch]$IncludeWatchdog)
 $ErrorActionPreference = 'Stop'
-$version = '0.2.1'
+$version = '0.2.2'
 $clientExeName = "PCRemoteControl-v$version.exe"
 $releaseDir = Join-Path $PSScriptRoot "release/v$version"
 $publishDir = Join-Path $PSScriptRoot "Client/obj/publish-v$version"

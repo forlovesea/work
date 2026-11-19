@@ -36,6 +36,7 @@ sealed class MainForm : Form
     MonitorInfo[] localMonitors = Array.Empty<MonitorInfo>();
     MonitorInfo? activeMonitor;
     string? remoteMonitor;
+    string? pendingMonitor;
     bool monitorSubscribed, monitorBusy, monitorSwitching;
     readonly Panel side = new() { Dock = DockStyle.Left, Width = 250 };
     readonly FlowLayoutPanel settings = new() { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(10) };
@@ -71,7 +72,7 @@ sealed class MainForm : Form
     {
         this.watchdogFolder = watchdogFolder;
         fixedTarget = target;
-        Text = "PCRemoteControl v0.2.1 · Windows HOST / TARGET";
+        Text = "PCRemoteControl v0.2.2 · Windows HOST / TARGET";
         Size = new Size(1180, 780); MinimumSize = new Size(800, 500); KeyPreview = true;
         role.Items.AddRange(new object[] { "HOST", "TARGET" }); role.SelectedIndex = target ? 1 : 0;
         LoadSettings();
@@ -128,6 +129,7 @@ sealed class MainForm : Form
         monitors.SelectionChangeCommitted += async (_, _) =>
         {
             if (monitors.SelectedItem is not MonitorInfo selected || selected.Id == remoteMonitor) return;
+            pendingMonitor = selected.Id;
             monitorSwitching = true; UpdateControls();
             await Send(new { type = "input", action = "release" });
             ClearMonitorFrame();
@@ -298,6 +300,10 @@ sealed class MainForm : Form
                     var items = monitorList.Deserialize<MonitorInfo[]>() ?? Array.Empty<MonitorInfo>();
                     string? selectedId = m.GetProperty("selected_monitor").GetString();
                     bool restart = m.TryGetProperty("restart_media", out var restartFlag) && restartFlag.GetBoolean();
+                    // A periodic catalog already in flight is not an acknowledgement of our selection.
+                    // Keep input blocked until the requested display (or its hot-unplug fallback) arrives.
+                    if (monitorSwitching && pendingMonitor != null && selectedId != pendingMonitor &&
+                        items.Any(item => item.Id == pendingMonitor)) break;
                     monitors.Items.Clear();
                     foreach (var item in items) { monitors.Items.Add(item); if (item.Id == selectedId) monitors.SelectedItem = item; }
                     remoteMonitor = selectedId;
@@ -307,6 +313,7 @@ sealed class MainForm : Form
                         var previous = mediaSession; mediaSession = null; previous?.Dispose();
                         if (!relayFrames) await StartMediaSession();
                     }
+                    pendingMonitor = null;
                     monitorSwitching = false; UpdateControls();
                     break;
                 }
@@ -385,7 +392,7 @@ sealed class MainForm : Form
     }
     void EndSession()
     {
-        monitors.Items.Clear(); remoteMonitor = null; activeMonitor = null;
+        monitors.Items.Clear(); remoteMonitor = pendingMonitor = null; activeMonitor = null;
         localMonitors = Array.Empty<MonitorInfo>(); monitorSubscribed = monitorSwitching = false;
         sessionGeneration++;
         lastFrameAt = pairedAt = receivedFrames = sentFrames = nextCaptureAt = 0;
@@ -471,8 +478,8 @@ sealed class MainForm : Form
                 status.Text = message;
                 view.Message = message;
                 nextCaptureAt = Environment.TickCount64 + 2000;
-                if (relayFrames)
-                    await Send(new { type = "frame", data = "", capture_error = message });
+                // Diagnostics still travel over TLS when video uses WebRTC.
+                await Send(new { type = "frame", data = "", capture_error = message, monitor = activeMonitor?.Id });
             }
         }
         finally { sendingFrame = false; }
@@ -552,6 +559,7 @@ sealed class MainForm : Form
                 {
                     status.Text = message;
                     view.Message = message;
+                    if (paired) _ = Send(new { type = "frame", data = "", capture_error = message, monitor = activeMonitor?.Id });
                 }
                 else ShowFrameProblem(message);
             }

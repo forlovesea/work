@@ -1,4 +1,12 @@
-# PCRemoteControl v0.2.1
+# PCRemoteControl v0.2.2
+
+## v0.2.2 수정 내용 (2026-11-19)
+
+- 모니터 전환 중 먼저 도착한 주기적 목록을 선택 완료 응답으로 처리하던 경쟁 조건을 수정했습니다. 요청한 화면이 확인될 때까지 이전 화면 표시와 입력을 차단하고, 요청한 모니터가 분리된 경우에는 주 모니터 대체 응답을 허용합니다.
+- WebRTC 전송 중에도 캡처 실패 및 TARGET 미디어 초기화·연결 오류를 TLS 제어 채널로 HOST에 알립니다. 잠금 화면이나 FFmpeg 문제를 HOST에서 단순 화면 수신 시간 초과로만 보던 상황을 보완했습니다.
+- HOST와 TARGET을 모두 새 실행 파일로 교체하세요. 서버 프로토콜 변경은 없습니다. 이번 빌드는 로컬 `release/v0.2.2/`에 생성하며 GitHub에는 게시하지 않았습니다.
+
+분석한 기존 로컬 로그에는 11월 16일 인증서 유효기간 오류, 11월 18일 TARGET 잠금·보안 데스크톱 캡처 실패가 있습니다. 11월 19일 13:42에는 HOST 화면 수신 성공이 기록돼 있습니다. 모니터 기능만을 전체 장애의 단일 원인으로 확정할 수는 없습니다. 인증서 오류가 다시 나오면 아래 인증서 교체 안내를 따르고, TARGET 잠금·UAC 화면은 해당 PC에서 해제해야 합니다.
 
 Windows 10/11 PC 간 화면 보기와 키보드·마우스 제어를 위한 원격제어 프로그램입니다. 하나의 클라이언트에서 HOST 또는 TARGET 역할을 선택합니다.
 
@@ -6,7 +14,7 @@ Windows 10/11 PC 간 화면 보기와 키보드·마우스 제어를 위한 원�
 
 - HOST 왼쪽의 **TARGET 모니터** 목록에서 모니터 1·2·3 등을 선택할 수 있습니다. 처음에는 TARGET의 주 모니터를 표시하며, 선택한 화면을 기준으로 마우스를 제어합니다. 모니터 번호는 Windows 장치 이름의 DISPLAY 번호이며 해상도와 주 화면 여부를 함께 표시합니다.
 - 모니터 연결 변경은 약 5초마다 확인하며, 선택한 모니터가 분리되면 주 모니터로 전환합니다. 전환 시 누른 키·마우스를 해제하고 이전 화면을 지웁니다. WebRTC 모드에서는 새 화면의 해상도에 맞춰 미디어 연결을 다시 맺으므로 잠시 대기할 수 있습니다. 전체 화면에서는 F11로 돌아온 뒤 모니터를 선택하세요.
-- 다중 모니터 기능은 HOST와 TARGET 모두 `release/v0.2.1/PCRemoteControl-v0.2.1.exe`로 교체해야 합니다. Relay 서버 변경은 필요 없습니다. 구버전 TARGET 연결 시 모니터 선택은 비활성화되고 기존 주 화면 보기가 유지됩니다.
+- 다중 모니터 기능은 HOST와 TARGET 모두 `release/v0.2.2/PCRemoteControl-v0.2.2.exe`로 교체해야 합니다. Relay 서버 변경은 필요 없습니다. 구버전 TARGET 연결 시 모니터 선택은 비활성화되고 기존 주 화면 보기가 유지됩니다.
 
 - Relay가 양쪽 클라이언트의 `webrtc-v1` 지원을 확인한 경우 화면을 WebRTC VP8로 전송합니다. 전송 방식 협상이 없는 구버전 Relay에서는 JPEG 화면을 기존 TLS/TCP 연결로 전송하므로 서버 교체 없이 사용할 수 있습니다. 인증·입력 명령은 두 모드 모두 TLS/TCP로 처리합니다.
 - TLS Relay 호환 모드에서는 캡처·전송 완료 후 150ms 간격을 두며, WebRTC보다 프레임률이 낮고 Relay 대역폭을 사용합니다. HOST와 TARGET 모두 수정된 실행 파일로 교체하세요. WebRTC 연결 실패 시의 자동 전환 기능은 아닙니다.
@@ -30,7 +38,7 @@ HOST ═══════ WebRTC VP8 미디어 경로 ═══════ TAR
 
 ## Windows 클라이언트 실행
 
-1. [PCRemoteControl-v0.2.1.exe](https://github.com/forlovesea/work/releases/download/pcremotecontrol-v0.2.1/PCRemoteControl-v0.2.1.exe)를 실행하고 Relay 주소, 포트, 비밀번호를 설정합니다. TARGET에는 표시할 PC 이름도 지정합니다.
+1. [PCRemoteControl-v0.2.2.exe](release/v0.2.2/PCRemoteControl-v0.2.2.exe)를 실행하고 Relay 주소, 포트, 비밀번호를 설정합니다. TARGET에는 표시할 PC 이름도 지정합니다.
 2. 두 PC에서 **서버 연결**을 누르고 각각 이메일 인증을 완료합니다.
 3. HOST의 TARGET 목록에서 대상 PC를 골라 **원격접속**을 누릅니다.
 
@@ -39,7 +47,7 @@ HOST ═══════ WebRTC VP8 미디어 경로 ═══════ TAR
 TARGET 역할만 실행하려면 다음 인수를 사용할 수 있습니다.
 
 ```powershell
-.\PCRemoteControl-v0.2.1.exe --target
+.\PCRemoteControl-v0.2.2.exe --target
 ```
 
 설정과 기기 ID는 `%LOCALAPPDATA%\PCRemoteControl\settings.json`에 저장됩니다. TARGET 비밀번호는 자동 복구용으로 `%LOCALAPPDATA%\PCRemoteControl\target-password.bin`에 Windows DPAPI로 암호화해 저장합니다. 클라이언트 로그는 `%LOCALAPPDATA%\PCRemoteControl\client.log`에 기록되며 크기가 512000바이트를 넘으면 `.old` 파일로 회전합니다. 비밀번호, 인증 코드, 화면 내용은 로그에 기록하지 않습니다.
@@ -125,7 +133,7 @@ TLS 인증서가 갱신된 뒤에도 Relay 서비스를 재시작해야 새 인�
 
 ## TARGET 자동 복구 (선택)
 
-`build.ps1 -IncludeWatchdog`로 Watchdog를 함께 빌드할 수 있습니다. 생성된 `PCRemoteControl.Watchdog-v0.2.1.exe`를 클라이언트와 같은 폴더에 두고 실행하세요. Watchdog는 TARGET만 감시하며 HOST는 감시하지 않습니다.
+`build.ps1 -IncludeWatchdog`로 Watchdog를 함께 빌드할 수 있습니다. 생성된 `PCRemoteControl.Watchdog-v0.2.2.exe`를 클라이언트와 같은 폴더에 두고 실행하세요. Watchdog는 TARGET만 감시하며 HOST는 감시하지 않습니다.
 
 - 비정상 종료 시 TARGET을 다시 실행하고 Relay 재연결을 시도합니다. 인증이 다시 필요하면 이메일 코드를 입력해야 합니다.
 - TARGET에서 **연결 중지**를 누르면 자동 복구를 멈춥니다. 정상 종료한 TARGET은 자동으로 다시 실행하지 않습니다.
@@ -144,7 +152,7 @@ python -m unittest discover -s server -v
 .\build.ps1
 ```
 
-배포 EXE와 SHA-256 목록은 `release/v0.2.1/`에 생성됩니다. 빌드 스크립트는 FFmpeg-Builds의 Windows x64 LGPL Shared 8.1 패키지를 내려받고 고정된 SHA-256을 확인한 뒤, 필요한 네이티브 라이브러리를 단일 EXE에 포함합니다. 실행 시 .NET이 네이티브 라이브러리를 사용자 임시 폴더에 풀어 사용합니다. 배포 시 `FFmpeg-LICENSE.txt`, `GPL-LICENSE.txt`, `FFmpeg-NOTICE.txt`도 EXE와 함께 제공하세요. Watchdog 포함 빌드:
+배포 EXE와 SHA-256 목록은 `release/v0.2.2/`에 생성됩니다. 빌드 스크립트는 FFmpeg-Builds의 Windows x64 LGPL Shared 8.1 패키지를 내려받고 고정된 SHA-256을 확인한 뒤, 필요한 네이티브 라이브러리를 단일 EXE에 포함합니다. 실행 시 .NET이 네이티브 라이브러리를 사용자 임시 폴더에 풀어 사용합니다. 배포 시 `FFmpeg-LICENSE.txt`, `GPL-LICENSE.txt`, `FFmpeg-NOTICE.txt`도 EXE와 함께 제공하세요. Watchdog 포함 빌드:
 
 ```powershell
 .\build.ps1 -IncludeWatchdog
@@ -156,6 +164,6 @@ python -m unittest discover -s server -v
 
 자동 테스트는 화면 프레임 변환, 클라이언트 복구 정책, Relay 인증 및 메시지 처리, WebRTC signaling 전달 등을 검증합니다. 실제 두 PC 간 연결, 다양한 NAT 조합, TURN 서비스, FFmpeg 인코딩·디코딩을 포함한 운영 환경 검증은 배포 환경에서 별도로 수행해야 합니다.
 
-### v0.2.1 마무리 검증
+### v0.2.2 검증 결과
 
-클라이언트 단일 EXE 및 Watchdog 빌드 성공. 화면·모니터 테스트 35개, 복구 테스트 7개, 인증서 테스트 2개, Relay 테스트 19개 통과. 인증서 테스트는 Windows 키 저장소 접근이 가능한 환경에서 실행했습니다. 실제 두 PC 간 원격 접속 및 화면 디자인 육안 검증은 이번 마무리에서 수행하지 않았습니다.
+클라이언트와 Watchdog 단일 EXE 빌드 성공. 화면·모니터 테스트 39개, 복구 테스트 7개, 인증서 거부 테스트 2개, Relay 테스트 19개 통과. 인증서 테스트는 제한된 실행 환경의 키 저장소 접근 오류로 일반 실행 환경에서 재검증했습니다. SHA-256 목록과 FFmpeg 라이선스 파일을 배포 폴더에 포함했습니다. 실제 두 PC 및 물리적 다중 모니터에서의 전환·입력 검증, 운영 서버 인증서 변경은 이번 작업에서 수행하지 않았습니다.

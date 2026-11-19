@@ -157,11 +157,28 @@ static class Program
         Receive(new { type = "frame", data = frame.Data, monitor = left.Id });
         Check(view.Image != null, "selected monitor frame is displayed");
         typeof(MainForm).GetField("monitorSwitching", fields)!.SetValue(host, true);
+        typeof(MainForm).GetField("pendingMonitor", fields)!.SetValue(host, primary.Id);
+        typeof(MainForm).GetMethod("UpdateControls", fields)!.Invoke(host, null);
         typeof(MainForm).GetMethod("ClearMonitorFrame", fields)!.Invoke(host, null);
+        Receive(new { type = "frame", monitors = screens, selected_monitor = left.Id, restart_media = false });
+        Check((bool)typeof(MainForm).GetField("monitorSwitching", fields)!.GetValue(host)! && !monitorPicker.Enabled,
+            "in-flight periodic catalog cannot acknowledge a different monitor selection");
         Receive(new { type = "frame", data = frame.Data, monitor = left.Id });
         Check(view.Image == null, "frames are blocked until selection acknowledgement");
         Receive(new { type = "frame", monitors = new[] { primary }, selected_monitor = primary.Id, restart_media = true });
         Check(monitorPicker.Items.Count == 1 && monitorPicker.Enabled, "hot unplug updates monitor selection");
+        Check(typeof(MainForm).GetField("pendingMonitor", fields)!.GetValue(host) == null,
+            "selection acknowledgement clears pending request");
+        typeof(MainForm).GetField("monitorSwitching", fields)!.SetValue(host, true);
+        typeof(MainForm).GetField("pendingMonitor", fields)!.SetValue(host, left.Id);
+        Receive(new { type = "frame", monitors = new[] { primary }, selected_monitor = primary.Id, restart_media = false });
+        Check(!(bool)typeof(MainForm).GetField("monitorSwitching", fields)!.GetValue(host)!,
+            "removed requested display accepts primary fallback without freezing input");
+        Receive(new { type = "frame", data = frame.Data, monitor = primary.Id });
+        typeof(MainForm).GetField("relayFrames", fields)!.SetValue(host, false);
+        Receive(new { type = "frame", data = "", capture_error = "WebRTC desktop locked", monitor = primary.Id });
+        Check(view.Image == null && ((RemoteView)view).Message.Contains("WebRTC desktop locked"),
+            "WebRTC capture diagnostics clear stale video through the TLS control channel");
         Receive(new { type = "ended" });
         Check(view.Image == null, "session end clears displayed image");
         Check(monitorPicker.Items.Count == 0 && !monitorPicker.Enabled, "session end clears monitor list");

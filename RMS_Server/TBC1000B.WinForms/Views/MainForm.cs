@@ -155,7 +155,7 @@ public sealed class MainForm : Form
         var root = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(6), RowCount = 5, ColumnCount = 1 };
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 120));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 112));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 27));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 220));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 48));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 25));
         Controls.Add(root);
@@ -164,6 +164,25 @@ public sealed class MainForm : Form
         root.Controls.Add(CreateSummaryTrapPanel(), 0, 2);
         root.Controls.Add(CreateModulesPanel(), 0, 3);
         root.Controls.Add(CreateFaultPanel(), 0, 4);
+
+        // Reserve the summary's actual content height, including DPI-scaled group
+        // chrome and margins. The adjacent trap log shares this same row.
+        void UpdateSummaryHeight()
+        {
+            var summaryPanel = _summaryGroup.Parent;
+            if (summaryPanel is null) return;
+            var height = _summary.Rows.GetRowsHeight(DataGridViewElementStates.Visible)
+                + (_summary.Height - _summary.ClientSize.Height)
+                + (_summaryGroup.Height - _summaryGroup.DisplayRectangle.Height)
+                + _summaryGroup.Margin.Vertical + summaryPanel.Padding.Vertical
+                + summaryPanel.Margin.Vertical;
+            if (root.RowStyles[2].Height != height)
+                root.RowStyles[2].Height = height;
+        }
+        root.Layout += (_, _) => UpdateSummaryHeight();
+        _summary.RowHeightChanged += (_, _) => UpdateSummaryHeight();
+        _summaryGroup.Layout += (_, _) => UpdateSummaryHeight();
+        UpdateSummaryHeight();
     }
 
     private Control CreateConnectionPanel()

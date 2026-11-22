@@ -1,0 +1,9 @@
+# Certificate bootstrap only. Replace the domain; no API is exposed over HTTP.
+server {
+    listen 80;
+    listen [::]:80;
+    server_name blog-monitor.example.com;
+    access_log off;
+    location /.well-known/acme-challenge/ { root /var/www/ai-blog-acme; }
+    location / { return 404; }
+}

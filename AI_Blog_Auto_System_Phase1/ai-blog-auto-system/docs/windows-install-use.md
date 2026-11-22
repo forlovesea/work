@@ -40,6 +40,10 @@ Python 버전이 다르면 첫 명령의 `-3.10`을 설치한 3.10 이상 버전
 
 ## 2. 최초 설정
 
+v1.1.0은 대시보드의 **무료 Mock 자동 작성 점검**으로 서버/API 키 없이 글·이미지 첨부·Word/HTML ZIP 저장까지 확인할 수 있습니다.
+실제 자동 작성과 예약 실행 방법은 [v1.1.0 안내](../release/v1.1.0/README.md)를 참고하세요.
+실제 자동 작성 모드는 API 키가 없으면 오류를 표시하며, 무료 점검 버튼은 저장된 모드를 바꾸지 않습니다.
+
 | 항목 | 입력 방법 | 비고 |
 |---|---|---|
 | Mock 모드 | 처음에는 켬 | 뉴스·글·이미지를 로컬 예제로 체험 |
@@ -139,7 +143,8 @@ Python 버전이 다르면 첫 명령의 `-3.10`을 설치한 3.10 이상 버전
 | EXE 실행 실패 | ZIP 전체 압축 해제 여부, `_internal` 누락, OS x64 여부 |
 | `ModuleNotFoundError: httpx` | 최신 `windows-app/requirements.txt` 재설치 |
 | 서버 401 | 서버와 Windows 토큰 일치, 공백·잘못된 저장 여부 |
-| 원격 HTTP 주소 거부 | 정상 인증서가 있는 HTTPS 사용 |
+| 원격 HTTP 주소 거부 | [Ubuntu HTTPS 설정](https-setup.md)을 완료하고 HTTPS 도메인 사용 |
+| HTTPS로 8000 연결 시 TLS 오류 | 기본 8000은 HTTP입니다. Nginx HTTPS 443 주소 사용 |
 | 키 저장 실패 | Windows 로그인 사용자 세션과 Credential Manager 접근 |
 | 글·이미지가 Mock으로 나옴 | Mock 설정 및 API 키 유무 |
 | 업로드 409 | 동일 초안 ID에 다른 ZIP이 이미 존재함. 새 초안 필요 |

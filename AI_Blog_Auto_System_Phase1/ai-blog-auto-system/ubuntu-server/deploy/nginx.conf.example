@@ -4,7 +4,17 @@ map $http_upgrade $blog_connection_upgrade {
     '' close;
 }
 server {
+    listen 80;
+    listen [::]:80;
+    server_name blog-monitor.example.com;
+    access_log off;
+    location /.well-known/acme-challenge/ { root /var/www/ai-blog-acme; }
+    # API clients must configure HTTPS directly; never proxy tokens over HTTP.
+    location / { return 308 https://blog-monitor.example.com$request_uri; }
+}
+server {
     listen 443 ssl;
+    listen [::]:443 ssl;
     server_name blog-monitor.example.com;
     ssl_certificate /etc/letsencrypt/live/blog-monitor.example.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/blog-monitor.example.com/privkey.pem;
@@ -16,6 +26,7 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $blog_connection_upgrade;
         proxy_request_buffering off;

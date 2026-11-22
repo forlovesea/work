@@ -24,3 +24,6 @@ android-app/*.keystore
 *.sqlite3-wal
 *.sqlite3-shm
 .pytest-tmp/
+
+# Distribute packaged releases; omit duplicate extracted application dependencies.
+release/*/AI-Blog-Auto/

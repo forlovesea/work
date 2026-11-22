@@ -253,6 +253,23 @@ def test_gui_news_writer_image_exports_and_logs(qtbot, window, tmp_path, monkeyp
     assert window.store.logs() == []
 
 
+def test_dashboard_local_check_does_not_change_real_settings(qtbot, window, monkeypatch):
+    window.config.mock = False
+    window.config.scheduled_image = False
+    def no_network():
+        raise AssertionError("Mock diagnostic must not contact server or AI")
+    monkeypatch.setattr(window.services, "client_factory", no_network)
+    click(qtbot, window, "check_local", 0)
+    assert window.article["mock"] and len(window.article["images"]) == 1
+    assert window.config.mock is False and window.config.scheduled_image is False
+    state = window.store.get("last_authoring_run")
+    assert state["status"] == "completed" and Path(state["path"]).is_file()
+    assert "completed" in window.local_result.text()
+    click(qtbot, window, "author_now")
+    assert "API 키" in window.activity.text()
+    assert window.store.get("last_authoring_run")["status"] == "failed"
+
+
 def test_gui_server_settings_schedule_account(qtbot, window, monkeypatch):
     click(qtbot, window, "connect", 2)
     assert "ONLINE" in window.connection.text()

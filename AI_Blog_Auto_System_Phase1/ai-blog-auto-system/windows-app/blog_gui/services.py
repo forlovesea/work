@@ -4,6 +4,7 @@ import html
 import io
 import json
 import re
+import ssl
 import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -24,9 +25,24 @@ def safe_error(exc):
     if isinstance(exc, ServiceError):
         return str(exc)
     if isinstance(exc, httpx.HTTPStatusError):
+        if exc.response.status_code in {301, 302, 303, 307, 308}:
+            return "서버가 다른 주소로 이동을 요구했습니다. 설정에 최종 HTTPS 서버 주소를 직접 입력하세요."
+        if exc.response.status_code in {502, 503, 504}:
+            return "서버 응답 오류 HTTP %s. Ubuntu의 ai-blog 서비스와 Nginx의 내부 포트 연결을 확인하세요." % exc.response.status_code
         return f"서버 응답 오류 HTTP {exc.response.status_code}. 설정 및 권한을 확인하세요."
     if isinstance(exc, httpx.TimeoutException):
         return "요청 시간이 초과되었습니다. 다시 시도하세요."
+    if isinstance(exc, httpx.ConnectError):
+        cause, seen = exc, set()
+        while cause is not None and id(cause) not in seen:
+            seen.add(id(cause))
+            detail = str(cause).upper()
+            if isinstance(cause, ssl.SSLCertVerificationError) or "CERTIFICATE_VERIFY_FAILED" in detail:
+                return "TLS 인증서 검증에 실패했습니다. 접속 도메인, 인증서 만료·체인, PC 시간을 확인하세요."
+            if "WRONG_VERSION_NUMBER" in detail or "UNKNOWN_PROTOCOL" in detail:
+                return "HTTPS 요청이 HTTP 포트에 도착했습니다. 원격 서버는 Nginx HTTPS 주소(기본 443)를 사용하세요. Uvicorn 8000 포트는 기본적으로 HTTP입니다."
+            cause = cause.__cause__ or cause.__context__
+        return "서버에 연결하지 못했습니다. 서버 주소, DNS, 방화벽, Nginx의 HTTPS 443 포트와 서비스 실행 상태를 확인하세요. 같은 PC 시험은 http://127.0.0.1:8000을 사용합니다."
     if isinstance(exc, httpx.HTTPError):
         return "네트워크 연결 또는 인증서 검증에 실패했습니다."
     return f"작업 실패 ({type(exc).__name__}). 입력값과 설정을 확인하세요."
@@ -71,7 +87,11 @@ class Services:
     def event(self, config, kind, payload):
         event = mock_event(config.device_id)
         event.update(event_type=kind, payload=payload)
-        self.outbox.enqueue(event)
+        try:
+            self.outbox.enqueue(event)
+        except Exception:
+            # Telemetry must never turn a successfully saved draft into a failure.
+            self.store.log("WARNING", "서버 이벤트 대기열 저장 실패. 로컬 콘텐츠 작성은 계속합니다.")
 
     def record_login(self, config, state):
         kinds = {"성공": "NAVER_LOGIN_SUCCESS", "실패": "NAVER_LOGIN_FAILED", "만료": "NAVER_LOGIN_EXPIRED"}
@@ -115,7 +135,7 @@ class Services:
         self.store.save_news(items)
         return items
 
-    def write_article(self, config, api_key, topic, sources=None):
+    def write_article(self, config, api_key, topic, sources=None, *, run_id=None):
         topic = topic.strip()
         if not topic or len(topic) > 500:
             raise ServiceError("주제는 1~500자로 입력하세요.")
@@ -126,6 +146,8 @@ class Services:
         evidence = [{k: source.get(k) for k in ("title", "url", "summary", "mock")} for source in sources]
         signature = hashlib.sha256(json.dumps([topic, evidence, config.style, mock, config.text_model],
                                               sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+        if run_id is not None:
+            signature = hashlib.sha256((signature + str(run_id)).encode()).hexdigest()
         prior = self.store.article_by_signature(signature)
         if prior:
             return prior

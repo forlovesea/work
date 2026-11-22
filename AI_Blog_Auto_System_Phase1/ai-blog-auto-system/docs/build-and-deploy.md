@@ -69,6 +69,10 @@ FCM 경계는 파일에 캡처하는 가짜 발송기로 대체합니다. Google
 
 ## Ubuntu 사전 준비와 승인 후 배포
 
+최초 소스 다운로드와 시험 서버 실행은 [Ubuntu 설치 가이드 2~3절](ubuntu-install-use.md#2-github에서-소스-내려받기)을 먼저 진행합니다.
+실제 저장소는 `https://github.com/forlovesea/work.git`이고 프로젝트 루트는
+`work/AI_Blog_Auto_System_Phase1/ai-blog-auto-system`입니다. 아래 릴리스 배치는 이 프로젝트 루트를 기준으로 합니다.
+
 대상은 별도의 Ubuntu 시험 서버부터 준비합니다. Python 3.10 이상이 필요하며,
 이 세션에서는 Ubuntu 커널·systemd·Nginx·POSIX 권한을 실행 검증하지 못했습니다.
 Ubuntu 기본 Python이 3.10 미만이면 먼저 호환 런타임을 준비해야 합니다.
@@ -99,7 +103,8 @@ BLOG_PACKAGE_MAX_BYTES=104857600
 6. `curl --fail http://127.0.0.1:8000/api/v1/health` 및 `systemctl status ai-blog`로 확인합니다.
    NTP 동기화, 재부팅 후 서비스 시작, 디스크 공간·삭제 오류 로그를 점검합니다.
 7. [Nginx 예시](../ubuntu-server/deploy/nginx.conf.example)의 도메인과 TLS 인증서 경로를 실제 값으로 바꿉니다.
-   `sudo nginx -t` 통과 후에만 reload합니다. 외부에는 HTTPS 포트만 노출하고 8000은 루프백에 유지합니다.
+   처음 설치하는 서버는 [HTTPS 설정 절차](https-setup.md)에 따라 bootstrap → 인증서 발급 → 최종 TLS 설정 순서로 적용합니다.
+   `sudo nginx -t` 통과 후에만 reload합니다. 앱 API는 HTTPS 443에서만 제공하고 8000은 루프백에 유지합니다. HTTP 80은 ACME 인증서 발급·갱신과 HTTPS 이동용입니다.
    패키지 경로를 static/alias로 공개하지 않습니다. 요청·응답 캐시/디스크 버퍼도 비활성화합니다.
 8. 시험 데이터로 인증 거부, 페어링, Windows 업로드, Android WS/다운로드/수동 완료, 서비스 재시작을 확인합니다.
    운영에서 시스템 시계를 변경하여 48시간을 시험하지 않습니다. 격리된 시험 앱의 주입 시계만 사용합니다.

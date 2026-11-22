@@ -13,14 +13,23 @@ import httpx
 
 
 def validate_url(url):
-    parsed = urlsplit(url)
+    url = url.strip()
+    if any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in url) or "\\" in url:
+        raise ValueError("서버 주소에 공백, 제어 문자 또는 역슬래시를 사용할 수 없습니다.")
+    try:
+        parsed = urlsplit(url)
+        port = parsed.port
+    except ValueError:
+        raise ValueError("서버 주소와 포트를 확인하세요. 예: https://blog.example.com") from None
+    if port == 0 or parsed.netloc.endswith(":"):
+        raise ValueError("서버 포트는 1~65535 범위로 입력하세요.")
     if (parsed.username or parsed.password or parsed.query or parsed.fragment
             or not parsed.hostname or parsed.path not in ("", "/")):
-        raise ValueError("Use a server origin without credentials, query or path")
+        raise ValueError("서버 주소만 입력하세요. 계정정보, /api/v1 등의 경로, 쿼리, #은 제외합니다.")
     if parsed.scheme != "https" and not (
         parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost", "::1"}
     ):
-        raise ValueError("Remote server URLs must use HTTPS with a valid certificate")
+        raise ValueError("원격 서버는 유효한 인증서의 HTTPS 주소가 필요합니다. Ubuntu에 Nginx/TLS를 설정하고 https://서버도메인을 입력하세요. HTTP는 같은 PC의 localhost/127.0.0.1/[::1]에서만 허용됩니다.")
     return url.rstrip("/")
 
 

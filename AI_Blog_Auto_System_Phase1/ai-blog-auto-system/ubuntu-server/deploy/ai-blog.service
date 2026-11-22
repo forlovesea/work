@@ -10,7 +10,7 @@ Group=ai-blog
 WorkingDirectory=/opt/ai-blog/current
 EnvironmentFile=/etc/ai-blog/server.env
 Environment=PYTHONDONTWRITEBYTECODE=1
-ExecStart=/opt/ai-blog/current/.venv/bin/python -m uvicorn app.main:app --app-dir ubuntu-server --host 127.0.0.1 --port 8000 --workers 1 --limit-concurrency 8 --no-access-log
+ExecStart=/opt/ai-blog/current/.venv/bin/python -m uvicorn app.main:app --app-dir ubuntu-server --host 127.0.0.1 --port 8000 --proxy-headers --forwarded-allow-ips 127.0.0.1 --workers 1 --limit-concurrency 8 --no-access-log
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=45

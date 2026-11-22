@@ -1,6 +1,12 @@
 # AI Blog Auto System — Windows · Ubuntu 서버 · Android
 
+**처음 사용자: [단계별 통합 매뉴얼 MANUAL.md](MANUAL.md)** — Windows 글쓰기·자동 작성, Ubuntu 설치·실행·상태 확인, HTTPS와 업로드를 체크리스트로 진행합니다.
+
+**Windows 최신 버전: [v1.1.0 다운로드·실행 방법](release/v1.1.0/README.md)** — 서버 없이 무료 자동 작성 점검, 예약 글·이미지·ZIP 자동 저장. 네이버 직접 자동 게시 기능은 포함하지 않습니다.
+
 ## 개발 상세서 및 설치·사용법
+
+**원격 연결 전 필수: [Windows ↔ Ubuntu HTTPS 설정](docs/https-setup.md)** — 인증서 발급, Nginx 443 → Uvicorn 8000 연결, 갱신 및 오류 진단. 서버 실행만으로 HTTPS가 활성화되지는 않습니다.
 
 **[개발 상세서 바로가기](docs/development-guide.md)** — 구조, 구현 범위, 모듈, API, 데이터, 오류 복구, 테스트와 유지보수.
 
@@ -51,6 +57,9 @@ HTML/TXT/DOCX/이미지/manifest ZIP을 제공합니다.
 [출력 사용법](docs/content-exports.md) · [출력 검증 결과](docs/phase3-test-results.md) · [스마트에디터 실제 시험 대기 항목](docs/naver-paste-test.md)
 
 ## 설치와 실행
+
+Ubuntu 서버를 처음 설치한다면 **[GitHub 다운로드부터 서버 설치·실행까지](docs/ubuntu-install-use.md#2-github에서-소스-내려받기)**를 따라 진행하세요.
+Git 설치, `forlovesea/work` 저장소 다운로드, 프로젝트 폴더 이동, 가상환경 설치, 서버 실행과 인증 확인, 재시작 순서가 있습니다.
 
 목표 환경: Windows 10/11, Ubuntu 20.04, Python 3.11.
 실제 검증 환경과 결과는 [Phase 1 결과](docs/test-results.md), [GUI 결과](docs/phase2-test-results.md)에 기록합니다.

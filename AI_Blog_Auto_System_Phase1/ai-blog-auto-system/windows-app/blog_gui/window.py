@@ -20,6 +20,7 @@ from .storage import utcnow
 from .exports import Publication, atomic_write, import_image, MAX_IMAGES
 from .clipboard import copy_publication
 from .preview import HtmlPreview
+from .workflow import VERSION, author_locally
 
 
 def configure_font():
@@ -40,6 +41,7 @@ def configure_font():
 
 
 class TaskSignals(QObject):
+    progress = Signal(str)
     done = Signal(object)
     failed = Signal(str)
 
@@ -85,6 +87,7 @@ class SetupWizard(QWizard):
         page.setTitle("서버 연결 · 나중에 설정 가능")
         form = QFormLayout(page)
         self.server = QLineEdit(config.server_url)
+        form.addRow(QLabel("원격: https://서버도메인 (Nginx TLS 설정 필요)\n같은 PC: http://127.0.0.1:8000\nUbuntu의 HTTP 8000 포트에 https://로 연결할 수 없습니다."))
         self.device = QLineEdit(config.device_id)
         self.token = password_field("서버와 동일한 개발 토큰 (선택)")
         form.addRow("서버 주소", self.server)
@@ -143,7 +146,7 @@ class MainWindow(QMainWindow):
         self.article = None
         self.image = None
         self.news_items = []
-        self.setWindowTitle("AI Blog Auto System · Desktop")
+        self.setWindowTitle(f"AI Blog Auto System · v{VERSION}")
         self.resize(1180, 820)
         self.setMinimumSize(920, 680)
         root = QWidget()
@@ -240,6 +243,15 @@ class MainWindow(QMainWindow):
         self.activity = QLabel("준비됨")
         self.activity.setWordWrap(True)
         layout.addWidget(self.activity)
+        row = self.row(layout)
+        self.button(row, "check_local", "무료 Mock 자동 작성 점검", self.check_local)
+        self.button(row, "author_now", "저장된 설정으로 자동 작성", self.run_scheduled)
+        self.button(layout, "open_local_output", "최근 자동 작성 결과 폴더 열기", self.open_local_output)
+        self.local_result = QLabel()
+        self.local_result.setWordWrap(True)
+        self.local_result.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(self.local_result)
+        layout.addWidget(QLabel("1. Mock 점검 → 2. 설정에 API 키 저장·Mock 해제 → 3. 예약 주제 저장 → 자동 작성\n서버 없이 글·이미지·ZIP을 저장합니다. Ubuntu 전달은 콘텐츠 출력의 대기 업로드 재시도에서 실행합니다."))
         self.button(layout, "refresh", "상태 새로고침", self.refresh_all)
         layout.addStretch()
 
@@ -248,6 +260,7 @@ class MainWindow(QMainWindow):
         form = QFormLayout()
         layout.addLayout(form)
         self.server_url = QLineEdit(self.config.server_url)
+        form.addRow(QLabel("원격: https://서버도메인 · 같은 PC: http://127.0.0.1:8000\n원격 Ubuntu에는 Nginx HTTPS 설정이 필요합니다. /api/v1 경로는 제외하세요."))
         self.device_id = QLineEdit(self.config.device_id)
         self.server_token = password_field()
         self.api_key = password_field()
@@ -394,17 +407,30 @@ class MainWindow(QMainWindow):
         if self.busy:
             self.notify("진행 중인 작업이 있어 이번 예약을 건너뜁니다.", "WARNING")
             return
-        config, key = copy.deepcopy(self.config), self.vault.get("openai")
-        def operation():
-            article = self.services.write_article(config, key, config.topic)
-            image = self.services.generate_image(config, key, config.topic) if config.scheduled_image else None
-            return article, image
+        config = copy.deepcopy(self.config)
+        key = "" if config.mock else self.vault.get("openai")
+        self.start_authoring(config, key)
+
+    def check_local(self):
+        config = copy.deepcopy(self.config)
+        config.mock, config.scheduled_image = True, True
+        self.start_authoring(config, "")
+
+    def open_local_output(self):
+        result = self.store.get("last_authoring_run", {})
+        path = Path(result.get("path", ""))
+        if result.get("status") != "completed" or not path.is_file():
+            raise ValueError("완료된 자동 작성 ZIP이 없습니다. 먼저 Mock 점검 또는 자동 작성을 실행하세요.")
+        self.browser(QUrl.fromLocalFile(str(path.parent.resolve())))
+
+    def start_authoring(self, config, key):
         def completed(result):
-            self.display_article(result[0])
-            if result[1]:
-                self.display_image(result[1])
+            self.display_article(result["article"])
+            if result["image"]:
+                self.display_image(result["image"])
             self.store.put("last_schedule_run", utcnow())
-        self.run_task("예약 초안 생성", operation, completed)
+        self.run_task("자동 작성 · 로컬 파일 저장", lambda: author_locally(
+            self.services, config, key, self.active_task.signals.progress.emit), completed)
 
     def build_news(self):
         layout = self.page("뉴스 수집", "RSS/Atom 제목·요약·출처를 수집합니다. 신뢰도와 사실 여부는 자동 보증하지 않습니다.")
@@ -832,14 +858,21 @@ class MainWindow(QMainWindow):
             finish()
         task.signals.done.connect(success)
         task.signals.failed.connect(failure)
+        task.signals.progress.connect(lambda message: self.activity.setText("자동 작성: " + message))
         self.pool.start(task)
 
     def refresh_summary(self):
         key = bool(self.vault.get("openai"))
-        mode = "MOCK" if self.config.mock or not key else "실제 OpenAI API"
+        mode = "MOCK" if self.config.mock else ("실제 OpenAI API" if key else "자동 작성 준비 필요 · API 키 없음")
         news = "MOCK" if self.config.mock else "실제 RSS"
         self.summary.setText(f"AI: {mode}  |  뉴스: {news}\n\n저장된 초안: {len(self.store.articles())}건\n예약: {'ON' if self.config.schedule_enabled else 'OFF'} · Asia/Seoul\n\n네이버 자동 발행: 미지원 · 모든 결과는 검토용 초안")
-        self.key_status.setText(f"OpenAI 키: {'저장됨' if key else '없음 → AI Mock 사용'} / 서버 토큰: {'저장됨' if self.vault.get('server') else '없음'}")
+        self.key_status.setText(f"OpenAI 키: {'저장됨' if key else '없음 · 실제 자동 작성 불가'} / 서버 토큰: {'저장됨' if self.vault.get('server') else '없음 · 로컬 작성 가능'}")
+        result = self.store.get("last_authoring_run", {})
+        mode_label = "Mock 점검" if result.get("mock") else "실제 AI"
+        self.local_result.setText(
+            f"최근 자동 작성 ({mode_label}): {result.get('stage', '미실행')}\n"
+            f"상태: {result.get('status', '대기')}\n{result.get('path', '')}\n"
+            "서버 연결은 로컬 자동 작성의 필수 조건이 아닙니다.")
 
     def refresh_all(self):
         self.refresh_summary()

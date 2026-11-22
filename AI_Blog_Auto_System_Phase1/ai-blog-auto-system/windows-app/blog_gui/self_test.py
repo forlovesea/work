@@ -7,6 +7,7 @@ from .storage import Store, Settings
 from .services import Services
 from .manual import ManualHandoff, AUTO_PUBLISH_ENABLED
 from .window import MainWindow
+from .workflow import VERSION, author_locally
 
 
 def run(directory):
@@ -20,6 +21,9 @@ def run(directory):
     config = Settings(initialized=True)
     store.save_settings(config)
     service = Services(store)
+    automatic = author_locally(service, Settings(scheduled_image=True), "")
+    assert Path(automatic["path"]).is_file()
+    assert len(automatic["article"]["images"]) == 1
     article = service.write_article(config, "", "EXE 통합 시험")
     image = service.generate_image(config, "", "EXE image")
     article["images"] = [{**image, "id": "test", "caption": "EXE image"}]
@@ -37,6 +41,6 @@ def run(directory):
     window.close()
     app.processEvents()
     assert not AUTO_PUBLISH_ENABLED
-    (directory / "result.json").write_text(json.dumps({"passed": True,
-        "checks": ["Qt GUI initialization", "Mock article/image", "DOCX/ZIP/manifest", "login recording", "auto publish disabled"]}, indent=2), encoding="utf-8")
+    (directory / "result.json").write_text(json.dumps({"passed": True, "version": VERSION,
+        "checks": ["local automatic authoring without server", "automatic image attachment and ZIP", "Qt GUI initialization", "Mock article/image", "DOCX/ZIP/manifest", "login recording", "auto publish disabled"]}, indent=2), encoding="utf-8")
     return 0

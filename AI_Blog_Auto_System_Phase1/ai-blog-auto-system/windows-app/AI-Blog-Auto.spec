@@ -8,5 +8,6 @@ a = Analysis([str(root / 'run_gui.py')], pathex=[str(root)],
     excludes=['pytest', 'matplotlib', 'tkinter', 'PySide6.QtWebEngineWidgets'], noarchive=False)
 pyz = PYZ(a.pure)
 exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name='AI-Blog-Auto',
-    debug=False, bootloader_ignore_signals=False, strip=False, upx=False, console=False)
+    debug=False, bootloader_ignore_signals=False, strip=False, upx=False, console=False,
+    version=str(root / 'version_info.txt'))
 coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name='AI-Blog-Auto')

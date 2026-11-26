@@ -21,7 +21,7 @@ from measurement_store import MeasurementStore, PLOT_MAX_POINTS
 MAX_MEASUREMENT_RECOVERY_ATTEMPTS = 3
 MAX_ERROR_QUEUE_DRAIN = 32
 SERIAL_RECOVERY_SETTLE_SECONDS = 0.25
-APP_VERSION = "v1.0.0.2"
+APP_VERSION = "v1.0.2"
 RELEASE_DATE = "2026-11-26"
 
 
@@ -123,11 +123,11 @@ class AgilentLogger:
         self.parity_var = tk.StringVar(value="없음")
         self.status_var = tk.StringVar(value="연결 대기")
         self.voltage_precision_var = tk.StringVar(value="3")
-        self.current_voltage_var = tk.StringVar(value="현재 전압: -- V")
-        self.maximum_voltage_var = tk.StringVar(value="Max: -- V")
-        self.minimum_voltage_var = tk.StringVar(value="Min: -- V")
-        self.voltage_range_var = tk.StringVar(value="Diff: -- V")
-        self.average_voltage_var = tk.StringVar(value="Avg: -- V")
+        self.current_voltage_var = tk.StringVar(value="현재 전압: --V")
+        self.maximum_voltage_var = tk.StringVar(value=" Max: -- V")
+        self.minimum_voltage_var = tk.StringVar(value=" Min: -- V")
+        self.voltage_range_var = tk.StringVar(value=" Diff: -- V")
+        self.average_voltage_var = tk.StringVar(value=" Avg: -- V")
         self.elapsed_time_var = tk.StringVar(
             value="*Elapsed Time: 0 hour 0 min 0 sec"
         )
@@ -256,11 +256,13 @@ class AgilentLogger:
 
         readout_frame = ttk.Frame(chart_frame)
         readout_frame.pack(fill=tk.X, padx=8, pady=(0, 4))
-        ttk.Label(readout_frame, text="Y축 소수 자릿수").pack(
+        readout_controls = ttk.Frame(readout_frame)
+        readout_controls.pack(side=tk.LEFT)
+        ttk.Label(readout_controls, text="Y축(전압V) 소수 자릿수").pack(
             side=tk.LEFT, padx=(0, 4)
         )
         self.voltage_precision_combo = ttk.Combobox(
-            readout_frame,
+            readout_controls,
             textvariable=self.voltage_precision_var,
             values=tuple(str(precision) for precision in range(7)),
             width=3,
@@ -272,9 +274,20 @@ class AgilentLogger:
         )
         ttk.Label(
             readout_frame,
+            textvariable=self.elapsed_time_var,
+            font=("Segoe UI", 9, "bold"),
+        ).pack(side=tk.RIGHT, padx=(8, 0))
+
+        measurement_readouts = ttk.Frame(readout_frame)
+        measurement_readouts.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+        ttk.Label(
+            measurement_readouts,
             textvariable=self.current_voltage_var,
-            font=("Segoe UI", 10, "bold"),
-        ).pack(side=tk.LEFT, padx=(0, 12))
+            foreground="#000000",
+        ).pack(side=tk.LEFT)
+        ttk.Label(
+            measurement_readouts, text=" (", foreground="#000000"
+        ).pack(side=tk.LEFT)
         for variable, color in (
             (self.maximum_voltage_var, "#c62828"),
             (self.minimum_voltage_var, "#1565c0"),
@@ -282,17 +295,13 @@ class AgilentLogger:
             (self.average_voltage_var, "#2e7d32"),
         ):
             ttk.Label(
-                readout_frame,
+                measurement_readouts,
                 textvariable=variable,
                 foreground=color,
-                font=("Segoe UI", 9, "bold"),
-            ).pack(side=tk.LEFT, padx=(0, 8))
-
+            ).pack(side=tk.LEFT)
         ttk.Label(
-            readout_frame,
-            textvariable=self.elapsed_time_var,
-            font=("Segoe UI", 9, "bold"),
-        ).pack(side=tk.RIGHT, padx=(8, 0))
+            measurement_readouts, text=")", foreground="#000000"
+        ).pack(side=tk.LEFT)
 
         self.figure = Figure(figsize=(8, 5), dpi=100)
         self.axes = self.figure.add_subplot(111)
@@ -941,30 +950,30 @@ class AgilentLogger:
 
     def update_voltage_readouts(self):
         if self.current_voltage is None:
-            self.current_voltage_var.set("현재 전압: -- V")
+            self.current_voltage_var.set("현재 전압: --V")
         else:
             self.current_voltage_var.set(
-                f"현재 전압: {self.format_voltage(self.current_voltage)} V"
+                f"현재 전압: {self.format_voltage(self.current_voltage)}V"
             )
 
         if self.sample_count == 0:
-            self.maximum_voltage_var.set("(Max: -- V)")
-            self.minimum_voltage_var.set("(Min: -- V)")
-            self.voltage_range_var.set("(Diff: -- V)")
-            self.average_voltage_var.set("(Avg: -- V)")
+            self.maximum_voltage_var.set(" Max: -- V")
+            self.minimum_voltage_var.set(" Min: -- V")
+            self.voltage_range_var.set(" Diff: -- V")
+            self.average_voltage_var.set(" Avg: -- V")
             return
 
         self.maximum_voltage_var.set(
-            f"(Max: {self.format_voltage(self.maximum_voltage)} V)"
+            f" Max: {self.format_voltage(self.maximum_voltage)} V"
         )
         self.minimum_voltage_var.set(
-            f"(Min: {self.format_voltage(self.minimum_voltage)} V)"
+            f" Min: {self.format_voltage(self.minimum_voltage)} V"
         )
         self.voltage_range_var.set(
-            f"(Diff: {self.format_voltage(self.maximum_voltage - self.minimum_voltage)} V)"
+            f" Diff: {self.format_voltage(self.maximum_voltage - self.minimum_voltage)} V"
         )
         self.average_voltage_var.set(
-            f"(Avg: {self.format_voltage(self.average_voltage)} V)"
+            f" Avg: {self.format_voltage(self.average_voltage)} V"
         )
 
     def reset_measurement_statistics(self):

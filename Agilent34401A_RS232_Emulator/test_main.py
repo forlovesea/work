@@ -433,14 +433,21 @@ class ChartUpdateTests(unittest.TestCase):
         app.voltage_range_var = Mock()
         app.average_voltage_var = Mock()
 
+        app.update_voltage_readouts()
+        app.current_voltage_var.set.assert_called_with("현재 전압: --V")
+        app.maximum_voltage_var.set.assert_called_with(" Max: -- V")
+        app.minimum_voltage_var.set.assert_called_with(" Min: -- V")
+        app.voltage_range_var.set.assert_called_with(" Diff: -- V")
+        app.average_voltage_var.set.assert_called_with(" Avg: -- V")
+
         for voltage in (1.234, 2.345, 1.876):
             app.update_measurement_statistics(voltage)
 
-        app.current_voltage_var.set.assert_called_with("현재 전압: 1.88 V")
-        app.maximum_voltage_var.set.assert_called_with("(Max: 2.35 V)")
-        app.minimum_voltage_var.set.assert_called_with("(Min: 1.23 V)")
-        app.voltage_range_var.set.assert_called_with("(Diff: 1.11 V)")
-        app.average_voltage_var.set.assert_called_with("(Avg: 1.82 V)")
+        app.current_voltage_var.set.assert_called_with("현재 전압: 1.88V")
+        app.maximum_voltage_var.set.assert_called_with(" Max: 2.35 V")
+        app.minimum_voltage_var.set.assert_called_with(" Min: 1.23 V")
+        app.voltage_range_var.set.assert_called_with(" Diff: 1.11 V")
+        app.average_voltage_var.set.assert_called_with(" Avg: 1.82 V")
 
     def test_elapsed_time_uses_hours_minutes_seconds_and_freezes_at_stop(self):
         app = main.AgilentLogger.__new__(main.AgilentLogger)

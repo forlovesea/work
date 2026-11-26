@@ -6,3 +6,4 @@ Pillow>=10,<13
 keyring>=25,<26
 tzdata>=2024.1
 python-docx>=1.1,<2
+PyJWT[crypto]>=2.10,<3

@@ -5,7 +5,6 @@ import android.content.*;
 import android.content.pm.ServiceInfo;
 import android.os.*;
 import java.io.IOException;
-import java.util.UUID;
 import javax.net.ssl.SSLSocket;
 
 /** User-started relay presence, independent of screen capture permission. */
@@ -15,6 +14,46 @@ public final class ConnectionService extends Service {
     private volatile boolean running;
     private volatile SSLSocket socket;
     private Thread worker;
+    private final Handler main = new Handler(Looper.getMainLooper());
+    private PowerManager.WakeLock cpuLease;
+    private volatile long lastProgress;
+    private final Runnable watchdog = new Runnable() {
+        @Override public void run() {
+            if (!running) return;
+            // A read timeout does not bound a blocked TLS write. Close that exact socket.
+            if (SystemClock.elapsedRealtime() - lastProgress > 45000) {
+                lastProgress = SystemClock.elapsedRealtime();
+                Diagnostics.record(ConnectionService.this, "target", "presence stalled; replacing socket", null);
+                closeSocket(socket);
+            }
+            renewCpuLease();
+            main.postDelayed(this, 10000);
+        }
+    };
+    private void renewCpuLease() {
+        PowerManager power = getSystemService(PowerManager.class);
+        // Doze ignores wake locks without the user's battery optimization exemption.
+        if (power == null || !power.isIgnoringBatteryOptimizations(getPackageName())) {
+            if (cpuLease != null && cpuLease.isHeld()) cpuLease.release();
+            return;
+        }
+        if (cpuLease == null) {
+            cpuLease = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "RemoteControl:relayPresence");
+            cpuLease.setReferenceCounted(false);
+        }
+        cpuLease.acquire(60000);
+    }
+    private static void closeSocket(SSLSocket closing) {
+        if (closing != null) new Thread(() -> {
+            try { closing.close(); } catch (IOException ignored) {}
+        }, "relay-presence-close").start();
+    }
+    private void logPowerState() {
+        PowerManager power = getSystemService(PowerManager.class);
+        if (power != null) Diagnostics.record(this, "target", "power state interactive="
+                + power.isInteractive() + " idle=" + power.isDeviceIdleMode()
+                + " batteryExempt=" + power.isIgnoringBatteryOptimizations(getPackageName()), null);
+    }
     @Override public IBinder onBind(Intent intent) { return null; }
     @Override public int onStartCommand(Intent intent, int flags, int id) {
         if (intent != null && "STOP".equals(intent.getAction())) {
@@ -38,11 +77,15 @@ public final class ConnectionService extends Service {
         String secret = ServerSettings.secret(this);
         String deviceName = ServerSettings.preferences(this).getString("name", Build.MODEL);
         running = true; active = true;
+        logPowerState();
+        lastProgress = SystemClock.elapsedRealtime();
+        main.post(watchdog);
         worker = new Thread(() -> {
             while (running) {
                 status = "중계서버 접속 중…";
                 try (SSLSocket connection = Relay.socket()) {
                     socket = connection;
+                    lastProgress = SystemClock.elapsedRealtime();
                     if (!running) break;
                     Directory.open(connection, host, port, Directory.request("PRESENCE", secret, deviceId).put("name", deviceName));
                     if (!running) break;
@@ -53,11 +96,13 @@ public final class ConnectionService extends Service {
                         connection.getOutputStream().write("PING\n".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
                         connection.getOutputStream().flush();
                         if (!Relay.line(connection).equals("PONG")) throw new IOException("서버 응답 오류");
+                        lastProgress = SystemClock.elapsedRealtime();
                         Thread.sleep(10000);
                     }
                 } catch (Exception error) {
                     if (running) {
                         Diagnostics.record(this, "target", "relay presence disconnected", error);
+                        logPowerState();
                         status = "중계서버 재접속 대기 · " + (error instanceof IOException ? error.getMessage() : error.getClass().getSimpleName());
                     }
                 }
@@ -70,14 +115,11 @@ public final class ConnectionService extends Service {
     }
     @Override public void onDestroy() {
         running = false; active = false; status = "서버 연결 종료";
+        main.removeCallbacksAndMessages(null);
+        if (cpuLease != null && cpuLease.isHeld()) cpuLease.release();
         Diagnostics.record(this, "target", "relay presence service stopped", null);
         if (worker != null) worker.interrupt();
-        SSLSocket closingSocket = socket;
-        if (closingSocket != null) {
-            new Thread(() -> {
-                try { closingSocket.close(); } catch (IOException ignored) {}
-            }, "relay-presence-close").start();
-        }
+        closeSocket(socket);
         stopForeground(STOP_FOREGROUND_REMOVE); super.onDestroy();
     }
 }

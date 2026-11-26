@@ -11,7 +11,7 @@ import android.text.method.PasswordTransformationMethod;
 import java.io.IOException;
 
 public final class MainActivity extends Activity {
-    private TextView status, connectionStatus;
+    private TextView status, connectionStatus, batteryStatus;
     private CheckBox control;
     private Button start, connectServer;
     private EditText serverAddress, accessKey, deviceName;
@@ -24,6 +24,10 @@ public final class MainActivity extends Activity {
         public void run() {
             status.setText(CaptureService.status);
             connectionStatus.setText(ConnectionService.status);
+            PowerManager power = getSystemService(PowerManager.class);
+            boolean exempt = power != null && power.isIgnoringBatteryOptimizations(getPackageName());
+            batteryStatus.setText(exempt ? "장시간 대기: 배터리 최적화 제외됨"
+                    : "장시간 대기: 배터리 최적화 적용 중 · 화면이 꺼지면 연결이 제한될 수 있습니다.");
             connectServer.setEnabled(!ConnectionService.active);
             serverAddress.setEnabled(!ConnectionService.active && CaptureService.instance == null);
             accessKey.setEnabled(!ConnectionService.active && CaptureService.instance == null);
@@ -68,6 +72,18 @@ public final class MainActivity extends Activity {
         });
         Ui.text(this, page, "Host의 화면 켜짐 유지 옵션을 사용하면 화면 공유 연결 중 자동 화면 꺼짐을 방지합니다. 연결 종료 또는 유지 신호 중단 시 해제됩니다.");
         connectionStatus = Ui.text(this, page, ConnectionService.status);
+        batteryStatus = Ui.text(this, page, "");
+        Ui.button(this, page, "장시간 원격 대기 설정", v -> new AlertDialog.Builder(this)
+                .setTitle("배터리 최적화 제외")
+                .setMessage("설정에서 RemoteControl Target을 배터리 최적화 대상에서 제외하세요. 제외 후 서버 연결 중에는 화면을 켜지 않고 CPU를 유지하므로 배터리 사용량이 늘어납니다. 제조사의 절전 앱/자동 실행 제한도 확인하세요. 시스템이 화면 공유 권한을 회수한 경우에는 다시 공유를 승인해야 합니다.")
+                .setNegativeButton("취소", null)
+                .setPositiveButton("설정 열기", (dialog, which) -> {
+                    try { startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)); }
+                    catch (ActivityNotFoundException error) {
+                        startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                android.net.Uri.parse("package:" + getPackageName())));
+                    }
+                }).show());
         control = new CheckBox(this); control.setText("이번 세션에서 터치 제어 허용"); page.addView(control);
         Ui.button(this, page, "터치 제어 권한 설정", v -> new AlertDialog.Builder(this)
                 .setTitle("접근성 권한 안내")

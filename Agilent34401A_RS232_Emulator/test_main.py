@@ -12,6 +12,27 @@ from matplotlib.backend_bases import MouseEvent
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 
 
+class MeasurementIntervalTests(unittest.TestCase):
+    def test_components_are_combined_as_milliseconds(self):
+        self.assertEqual(main.measurement_interval_ms(0, 10, 0), 600_000)
+        self.assertEqual(main.measurement_interval_ms(1, 2, 30_000), 3_750_000)
+
+    def test_maximum_interval_is_supported(self):
+        self.assertEqual(
+            main.measurement_interval_ms(24, 60, 30_000),
+            90_030_000,
+        )
+
+    def test_zero_and_out_of_range_components_are_rejected(self):
+        with self.assertRaisesRegex(ValueError, "0보다 커야"):
+            main.measurement_interval_ms(0, 0, 0)
+
+        for values in ((25, 0, 1), (0, 61, 1), (0, 0, 30_001)):
+            with self.subTest(values=values):
+                with self.assertRaises(ValueError):
+                    main.measurement_interval_ms(*values)
+
+
 class FakeInstrument:
     def __init__(
         self, response, stop_event, stop_on_response=True, stop_response=None
@@ -186,6 +207,9 @@ class ConnectionControlTests(unittest.TestCase):
         app.worker = None
         app.diagnostic_worker = None
         app.stop_event = threading.Event()
+        app.measurement_started_at = None
+        app.measurement_stopped_at = None
+        app.elapsed_time_var = Mock()
         app.port_var = SimpleNamespace(get=lambda: "COM4")
         app.baud_var = SimpleNamespace(get=lambda: "9600")
         app.timeout_var = SimpleNamespace(get=lambda: "10")
@@ -413,10 +437,29 @@ class ChartUpdateTests(unittest.TestCase):
             app.update_measurement_statistics(voltage)
 
         app.current_voltage_var.set.assert_called_with("현재 전압: 1.88 V")
-        app.maximum_voltage_var.set.assert_called_with("Max: 2.35 V")
-        app.minimum_voltage_var.set.assert_called_with("Min: 1.23 V")
-        app.voltage_range_var.set.assert_called_with("Diff: 1.11 V")
-        app.average_voltage_var.set.assert_called_with("Avg: 1.82 V")
+        app.maximum_voltage_var.set.assert_called_with("(Max: 2.35 V)")
+        app.minimum_voltage_var.set.assert_called_with("(Min: 1.23 V)")
+        app.voltage_range_var.set.assert_called_with("(Diff: 1.11 V)")
+        app.average_voltage_var.set.assert_called_with("(Avg: 1.82 V)")
+
+    def test_elapsed_time_uses_hours_minutes_seconds_and_freezes_at_stop(self):
+        app = main.AgilentLogger.__new__(main.AgilentLogger)
+        app.measurement_started_at = 100.0
+        app.measurement_stopped_at = None
+        app.elapsed_time_var = Mock()
+
+        with patch.object(main.time, "monotonic", return_value=3761.9):
+            app.update_elapsed_time()
+        app.elapsed_time_var.set.assert_called_with(
+            "*Elapsed Time: 1 hour 1 min 1 sec"
+        )
+
+        app.measurement_stopped_at = 159.9
+        with patch.object(main.time, "monotonic", return_value=9000.0):
+            app.update_elapsed_time()
+        app.elapsed_time_var.set.assert_called_with(
+            "*Elapsed Time: 0 hour 0 min 59 sec"
+        )
 
     def test_hovering_a_point_shows_timestamp_and_voltage(self):
         first_time = datetime(2026, 11, 24, 13, 30, 0)
@@ -450,6 +493,9 @@ class ChartUpdateTests(unittest.TestCase):
         app.update_measurement_statistics = Mock()
         app.update_history_scrollbar = Mock()
         app.voltage_precision = 2
+        app.measurement_started_at = None
+        app.measurement_stopped_at = None
+        app.elapsed_time_var = Mock()
 
         app.process_events()
 

@@ -6,6 +6,7 @@ app.lock
 build/
 dist/
 bin/
+Agilent34401A_RS232_Emulator/*.spec
 !InstalledManagementVersion/bin/
 !InstalledManagementVersion/bin/set-password.php
 obj/

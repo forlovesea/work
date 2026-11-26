@@ -20,7 +20,7 @@ def validate_url(url):
         parsed = urlsplit(url)
         port = parsed.port
     except ValueError:
-        raise ValueError("서버 주소와 포트를 확인하세요. 예: https://blog.example.com") from None
+        raise ValueError("서버 주소와 포트를 확인하세요. 예: https://blog.example.com 또는 https://61.105.141.21:10443") from None
     if port == 0 or parsed.netloc.endswith(":"):
         raise ValueError("서버 포트는 1~65535 범위로 입력하세요.")
     if (parsed.username or parsed.password or parsed.query or parsed.fragment
@@ -29,7 +29,7 @@ def validate_url(url):
     if parsed.scheme != "https" and not (
         parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost", "::1"}
     ):
-        raise ValueError("원격 서버는 유효한 인증서의 HTTPS 주소가 필요합니다. Ubuntu에 Nginx/TLS를 설정하고 https://서버도메인을 입력하세요. HTTP는 같은 PC의 localhost/127.0.0.1/[::1]에서만 허용됩니다.")
+        raise ValueError("원격 서버는 유효한 인증서의 HTTPS 주소가 필요합니다. 인증서의 도메인 또는 IP와 일치하는 https://서버주소[:포트]를 입력하세요. HTTP는 같은 PC의 localhost/127.0.0.1/[::1]에서만 허용됩니다.")
     return url.rstrip("/")
 
 

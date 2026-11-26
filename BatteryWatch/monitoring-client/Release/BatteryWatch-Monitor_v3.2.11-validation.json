@@ -1,0 +1,16 @@
+{
+  "ok": true,
+  "frozen": true,
+  "version": "3.2.11",
+  "build_date": "2026-11-16",
+  "checks": [
+    "Qt profile dialog",
+    "icons and images",
+    "alarm audio resource",
+    "SNMP engine and dynamic MIB",
+    "Excel read/write",
+    "SQLite queue",
+    "TLS context",
+    "clean defaults"
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "version": "1.2.0",
+  "date": "2026-11-23",
+  "regression_tests_passed": 129,
+  "final_targeted_tests_passed": 49,
+  "frozen_exe_self_test": {
+    "passed": true,
+    "version": "1.2.0",
+    "checks": [
+      "encrypted ChatGPT credential roundtrip (test-only vault)",
+      "local automatic authoring without server",
+      "automatic image attachment and ZIP",
+      "Qt GUI initialization",
+      "Mock article/image",
+      "DOCX/ZIP/manifest",
+      "login recording",
+      "auto publish disabled"
+    ]
+  },
+  "live_public_oidc_discovery": "HTTP 200",
+  "not_tested": [
+    "user ChatGPT Plus OAuth approval",
+    "live ChatGPT plan inference",
+    "real blog publication"
+  ]
+}

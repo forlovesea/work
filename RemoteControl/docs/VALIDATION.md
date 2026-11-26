@@ -1,5 +1,12 @@
 # 검증 결과
 
+2026-11-06 · Host 연결 종료 개선
+
+- 연결 상태와 원격 화면을 먼저 정리하고 접속 화면을 복원한 뒤, 캡처한 이전 세션 소켓을 `host-close` 스레드에서 닫도록 변경했습니다. 목록 갱신/앱 종료의 소켓 정리도 메인 스레드 밖으로 이동했습니다.
+- `:app:assembleHostDebug :app:testHostDebugUnitTest :app:lintHostDebug` 성공. 기존 JVM 테스트 31개 통과, 실패/오류 0개. Lint 오류 0개, 경고 8개.
+- 확인용 APK: `dist/RemoteControl-host-disconnect-fix.apk` (버전 0.4.5 유지).
+- 연결된 Android 기기가 없어 실제 연결 종료/즉시 재접속/UI 복귀는 미검증입니다. 기존 JVM 테스트는 이 UI 수명 주기 동작을 직접 검증하지 않습니다. 실기 확인 항목은 `DEVICE_TESTS.md`에 추가했습니다.
+
 2026-10-04 · Windows 개발 환경
 
 | 검사 | 결과 |
@@ -23,3 +30,10 @@ APK는 `dist/`에 있으며 같은 폴더의 `SHA256SUMS.txt`에 해시가 기�
 v0.3.0에서는 응답 시간별 세분화 경계, 무응답 시 빨강 진하기, 진행 중 응답 대기에 따른 악화, 반복 지연 감지, 최근 10회 표본의 회복 및 재접속 초기화, 10개 색상 구분 테스트를 추가했습니다. 두 APK 빌드와 Lint 오류 0개를 확인했습니다. 실제 기기에서의 색상 가독성과 체감 제어 품질 비교는 미검증입니다.
 
 자동 검사는 Android 시스템 MediaProjection/Accessibility 및 실제 LTE 네트워크의 동작 검증을 대체하지 않습니다. [실기 체크리스트](DEVICE_TESTS.md)에 따라 추가 검증해야 합니다.
+
+## 2026-11-16 장시간 대기 개선 검증
+
+- 변경: 배터리 최적화 제외 안내/상태, 제외 상태의 연결 서비스 CPU 유지(60초 만료, 10초 갱신), 45초 무진행 소켓 감시, 연결 실패 시 절전 상태 진단 로그.
+- Host/Target Debug 빌드 및 기존 JVM 테스트 각각 31개 통과. Lint 오류 0개(Host 경고 8개, Target 경고 2개).
+- 실제 Android 절전/제조사 제한, 3~4일 대기, 네트워크 정지 후 감시 복구는 실기 미검증. 기존 JVM 테스트가 서비스 및 WakeLock 수명 주기를 검증하는 것은 아님.
+- 수정 APK는 dist/RemoteControl-target-debug.apk. 기존 릴리스 APK는 변경하지 않음.

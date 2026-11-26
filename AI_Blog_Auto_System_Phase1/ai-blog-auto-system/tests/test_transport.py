@@ -7,11 +7,11 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "windows-app"))
 from send_mock_event import validate_url
-from blog_gui.services import Services, safe_error
+from blog_gui.services import Services, ServiceError, safe_error
 from blog_gui.storage import Settings, Store
 
 
-@pytest.mark.parametrize("url", ["http://127.0.0.1:8000", "http://localhost:18000", "http://[::1]:8000", "https://blog.example.com", "https://blog.example.com:8443"])
+@pytest.mark.parametrize("url", ["http://127.0.0.1:8000", "http://localhost:18000", "http://[::1]:8000", "https://blog.example.com", "https://blog.example.com:8443", "https://61.105.141.21:10443"])
 def test_valid_origins(url):
     assert validate_url(" " + url + "/ ") == url
 
@@ -23,7 +23,7 @@ def test_invalid_origins(url):
     assert "SECRET" not in str(caught.value)
 
 
-@pytest.mark.parametrize("detail, expected", [("[SSL: WRONG_VERSION_NUMBER] SECRET", "HTTP 포트"), ("CERTIFICATE_VERIFY_FAILED SECRET", "인증서 검증"), ("Connection refused SECRET", "443")])
+@pytest.mark.parametrize("detail, expected", [("[SSL: WRONG_VERSION_NUMBER] SECRET", "HTTP 포트"), ("CERTIFICATE_VERIFY_FAILED SECRET", "인증서 검증"), ("Connection refused SECRET", "HTTPS 포트")])
 def test_connect_errors_are_actionable_and_redacted(detail, expected):
     error = httpx.ConnectError("connection failed SECRET")
     error.__cause__ = OSError(detail)
@@ -47,7 +47,7 @@ def test_connect_does_not_forward_token_on_redirect(tmp_path):
         requests.append(request)
         return httpx.Response(308, headers={"Location": "https://other.example.com"})
     service = Services(Store(tmp_path), lambda: httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=False))
-    with pytest.raises(httpx.HTTPStatusError):
+    with pytest.raises(ServiceError):
         service.connect(Settings(server_url="https://blog.example.com"), "SECRET")
     assert len(requests) == 1
     assert "X-Device-Token" not in requests[0].headers
@@ -102,10 +102,10 @@ def test_real_tls_connection_and_untrusted_certificate(tmp_path):
         trusted = ssl.create_default_context(cafile=str(cert))
         service = Services(store, lambda: httpx.Client(verify=trusted, trust_env=False, timeout=5))
         assert service.connect(settings, "tls-test-token") == []
-        with pytest.raises(httpx.HTTPStatusError):
+        with pytest.raises(ServiceError):
             service.connect(settings, "wrong-token")
         untrusted = Services(store, lambda: httpx.Client(trust_env=False, timeout=5))
-        with pytest.raises(httpx.ConnectError) as caught:
+        with pytest.raises(ServiceError) as caught:
             untrusted.connect(settings, "tls-test-token")
         assert "인증서 검증" in safe_error(caught.value)
     finally:

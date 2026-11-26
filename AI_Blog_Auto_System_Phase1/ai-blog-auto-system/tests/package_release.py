@@ -21,12 +21,12 @@ def main():
                 raise ValueError("Unexpected symlink in build output")
             if path.is_file():
                 archive.write(path, path.relative_to(desktop.parent))
+        archive.write(ROOT / "MANUAL.MD", "MANUAL.MD")
     shutil.copyfile(ROOT / "android-app/app/build/outputs/apk/debug/app-debug.apk", output / "AI-Blog-Monitor-debug.apk")
     sources = list((ROOT / "ubuntu-server/app").glob("*.py"))
     sources += list((ROOT / "ubuntu-server/deploy").glob("*"))
     sources += list((ROOT / "shared").glob("*.json"))
-    sources += list((ROOT / "docs").glob("*.md"))
-    sources += [ROOT / name for name in ("README.md", "ubuntu-server/requirements.txt", "ubuntu-server/requirements-fcm.txt",
+    sources += [ROOT / name for name in ("MANUAL.MD", "ubuntu-server/requirements.txt", "ubuntu-server/requirements-fcm.txt",
                 "ubuntu-server/backup_metadata.py", "ubuntu-server/backup-excludes.txt", "ubuntu-server/.env.example")]
     with tarfile.open(output / "AI-Blog-Ubuntu-source.tar.gz", "w:gz") as archive:
         for path in sorted(sources):

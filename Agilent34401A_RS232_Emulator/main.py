@@ -21,6 +21,22 @@ from measurement_store import MeasurementStore, PLOT_MAX_POINTS
 MAX_MEASUREMENT_RECOVERY_ATTEMPTS = 3
 MAX_ERROR_QUEUE_DRAIN = 32
 SERIAL_RECOVERY_SETTLE_SECONDS = 0.25
+APP_VERSION = "v1.0.0.2"
+RELEASE_DATE = "2026-11-26"
+
+
+def measurement_interval_ms(hours, minutes, milliseconds):
+    if not 0 <= hours <= 24:
+        raise ValueError("Hour는 0~24 범위로 설정하세요.")
+    if not 0 <= minutes <= 60:
+        raise ValueError("Min은 0~60 범위로 설정하세요.")
+    if not 0 <= milliseconds <= 30000:
+        raise ValueError("ms는 0~30000 범위로 설정하세요.")
+
+    interval_ms = hours * 3_600_000 + minutes * 60_000 + milliseconds
+    if interval_ms == 0:
+        raise ValueError("측정 간격은 0보다 커야 합니다.")
+    return interval_ms
 
 matplotlib.rcParams["font.family"] = "Malgun Gothic"
 matplotlib.rcParams["axes.unicode_minus"] = False
@@ -62,7 +78,9 @@ def serial_options_for(port, baudrate, handshake, parity, timeout_seconds):
 class AgilentLogger:
     def __init__(self, root):
         self.root = root
-        self.root.title("Agilent 34401A 실시간 전압 측정")
+        self.root.title(
+            f"Agilent 34401A 실시간 전압 측정 | {APP_VERSION} | {RELEASE_DATE}"
+        )
         icon_path = Path(__file__).resolve().parent / "assets" / "Agilent34401A.ico"
         self.root.iconbitmap(str(icon_path))
         self.root.geometry("1000x790")
@@ -83,6 +101,8 @@ class AgilentLogger:
         self.minimum_voltage = None
         self.maximum_voltage = None
         self.average_voltage = None
+        self.measurement_started_at = None
+        self.measurement_stopped_at = None
         self.voltage_precision = 3
         self.follow_live = True
         self.user_view_span = None
@@ -95,7 +115,9 @@ class AgilentLogger:
 
         self.port_var = tk.StringVar()
         self.baud_var = tk.StringVar(value="9600")
-        self.interval_var = tk.StringVar(value="1000")
+        self.interval_hours_var = tk.StringVar(value="0")
+        self.interval_minutes_var = tk.StringVar(value="0")
+        self.interval_milliseconds_var = tk.StringVar(value="1000")
         self.timeout_var = tk.StringVar(value="10")
         self.handshake_var = tk.StringVar(value="없음")
         self.parity_var = tk.StringVar(value="없음")
@@ -106,6 +128,9 @@ class AgilentLogger:
         self.minimum_voltage_var = tk.StringVar(value="Min: -- V")
         self.voltage_range_var = tk.StringVar(value="Diff: -- V")
         self.average_voltage_var = tk.StringVar(value="Avg: -- V")
+        self.elapsed_time_var = tk.StringVar(
+            value="*Elapsed Time: 0 hour 0 min 0 sec"
+        )
 
         self._build_ui()
         self.set_serial_settings_state(connected=False)
@@ -129,7 +154,18 @@ class AgilentLogger:
         self.baud_combo = ttk.Combobox(
             settings,
             textvariable=self.baud_var,
-            values=("300", "600", "1200", "2400", "4800", "9600"),
+            values=(
+                "300",
+                "600",
+                "1200",
+                "2400",
+                "4800",
+                "9600",
+                "19200",
+                "38400",
+                "57600",
+                "115200",
+            ),
             width=8,
             state="readonly",
         )
@@ -155,31 +191,43 @@ class AgilentLogger:
         )
         self.parity_combo.grid(row=0, column=8, sticky=tk.W, padx=4, pady=4)
 
-        ttk.Label(settings, text="측정 간격 (ms)").grid(
+        ttk.Label(settings, text="측정 간격").grid(
             row=1, column=0, sticky=tk.W, padx=4, pady=4
         )
-        ttk.Spinbox(
-            settings,
-            from_=1,
-            to=1000,
-            increment=1,
-            textvariable=self.interval_var,
-            width=10,
-        ).grid(row=1, column=1, sticky=tk.W, padx=4, pady=4)
+        interval_frame = ttk.Frame(settings)
+        interval_frame.grid(
+            row=1, column=1, columnspan=3, sticky=tk.W, padx=4, pady=4
+        )
+        for variable, maximum, width, label in (
+            (self.interval_hours_var, 24, 4, "Hour"),
+            (self.interval_minutes_var, 60, 4, "Min"),
+            (self.interval_milliseconds_var, 30000, 6, "ms"),
+        ):
+            ttk.Spinbox(
+                interval_frame,
+                from_=0,
+                to=maximum,
+                increment=1,
+                textvariable=variable,
+                width=width,
+            ).pack(side=tk.LEFT)
+            ttk.Label(interval_frame, text=label).pack(
+                side=tk.LEFT, padx=(2, 8)
+            )
 
         self.start_button = ttk.Button(
             settings, text="측정 시작", command=self.start, state=tk.DISABLED
         )
-        self.start_button.grid(row=1, column=2, sticky=tk.W, padx=4, pady=4)
+        self.start_button.grid(row=1, column=4, sticky=tk.W, padx=4, pady=4)
         self.stop_button = ttk.Button(settings, text="측정 중지", command=self.stop, state=tk.DISABLED)
-        self.stop_button.grid(row=1, column=3, sticky=tk.W, padx=4, pady=4)
+        self.stop_button.grid(row=1, column=5, sticky=tk.W, padx=4, pady=4)
         self.csv_button = ttk.Button(settings, text="CSV 저장", command=self.save_csv)
         self.csv_button.grid(
-            row=1, column=4, sticky=tk.W, padx=4, pady=4
+            row=2, column=4, sticky=tk.W, padx=4, pady=4
         )
         self.excel_button = ttk.Button(settings, text="Excel 저장", command=self.save_excel)
         self.excel_button.grid(
-            row=1, column=5, sticky=tk.W, padx=4, pady=4
+            row=2, column=5, sticky=tk.W, padx=4, pady=4
         )
         ttk.Label(settings, text="응답 대기 (초)").grid(
             row=1, column=6, sticky=tk.W, padx=(12, 4), pady=4
@@ -201,13 +249,27 @@ class AgilentLogger:
             settings,
             text="※ 실제 측정 속도는 계측기 응답 및 RS-232 통신 속도에 따라 설정 간격보다 느릴 수 있습니다. 응답 대기는 10초 이상을 권장합니다.",
             foreground="#8a4b08",
-        ).grid(row=2, column=0, columnspan=9, sticky=tk.W, padx=4, pady=(5, 0))
+        ).grid(row=3, column=0, columnspan=9, sticky=tk.W, padx=4, pady=(5, 0))
 
         chart_frame = ttk.Frame(self.root)
         chart_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
         readout_frame = ttk.Frame(chart_frame)
         readout_frame.pack(fill=tk.X, padx=8, pady=(0, 4))
+        ttk.Label(readout_frame, text="Y축 소수 자릿수").pack(
+            side=tk.LEFT, padx=(0, 4)
+        )
+        self.voltage_precision_combo = ttk.Combobox(
+            readout_frame,
+            textvariable=self.voltage_precision_var,
+            values=tuple(str(precision) for precision in range(7)),
+            width=3,
+            state="readonly",
+        )
+        self.voltage_precision_combo.pack(side=tk.LEFT, padx=(0, 12))
+        self.voltage_precision_combo.bind(
+            "<<ComboboxSelected>>", self.on_voltage_precision_change
+        )
         ttk.Label(
             readout_frame,
             textvariable=self.current_voltage_var,
@@ -226,18 +288,11 @@ class AgilentLogger:
                 font=("Segoe UI", 9, "bold"),
             ).pack(side=tk.LEFT, padx=(0, 8))
 
-        ttk.Label(readout_frame, text="Y축 소수 자릿수").pack(side=tk.RIGHT, padx=(4, 0))
-        self.voltage_precision_combo = ttk.Combobox(
+        ttk.Label(
             readout_frame,
-            textvariable=self.voltage_precision_var,
-            values=tuple(str(precision) for precision in range(7)),
-            width=3,
-            state="readonly",
-        )
-        self.voltage_precision_combo.pack(side=tk.RIGHT)
-        self.voltage_precision_combo.bind(
-            "<<ComboboxSelected>>", self.on_voltage_precision_change
-        )
+            textvariable=self.elapsed_time_var,
+            font=("Segoe UI", 9, "bold"),
+        ).pack(side=tk.RIGHT, padx=(8, 0))
 
         self.figure = Figure(figsize=(8, 5), dpi=100)
         self.axes = self.figure.add_subplot(111)
@@ -392,6 +447,7 @@ class AgilentLogger:
         if (self.worker and self.worker.is_alive()) or (
             self.diagnostic_worker and self.diagnostic_worker.is_alive()
         ):
+            self.freeze_elapsed_time()
             self.connection_button.configure(text="COM 해제 중...", state=tk.DISABLED)
             self.start_button.configure(state=tk.DISABLED)
             self.stop_button.configure(state=tk.DISABLED)
@@ -448,14 +504,20 @@ class AgilentLogger:
             return
 
         try:
-            interval_ms = int(self.interval_var.get())
+            interval_hours = int(self.interval_hours_var.get())
+            interval_minutes = int(self.interval_minutes_var.get())
+            interval_milliseconds = int(self.interval_milliseconds_var.get())
             baudrate = int(self.baud_var.get())
             timeout_seconds = int(self.timeout_var.get())
         except ValueError:
             messagebox.showerror("설정 오류", "측정 간격, 통신 속도, 응답 대기 시간을 확인하세요.")
             return
-        if not 1 <= interval_ms <= 1000:
-            messagebox.showerror("설정 오류", "측정 간격은 1~1000 ms로 설정하세요.")
+        try:
+            interval_ms = measurement_interval_ms(
+                interval_hours, interval_minutes, interval_milliseconds
+            )
+        except ValueError as error:
+            messagebox.showerror("설정 오류", str(error))
             return
         if timeout_seconds not in (3, 5, 10, 20):
             messagebox.showerror("설정 오류", "응답 대기 시간은 3, 5, 10, 20초 중에서 선택하세요.")
@@ -501,6 +563,9 @@ class AgilentLogger:
         self.error_query_button.configure(state=tk.DISABLED)
         self.status_var.set(f"{port} 연결 및 측정 준비 중... | 기록 파일: {self.store.path}")
 
+        self.measurement_started_at = time.monotonic()
+        self.measurement_stopped_at = None
+        self.update_elapsed_time()
         self.worker = threading.Thread(
             target=self.measure,
             args=(
@@ -699,6 +764,7 @@ class AgilentLogger:
         return response_bytes.decode("ascii", errors="replace").strip()
     def stop(self):
         self.stop_event.set()
+        self.freeze_elapsed_time()
         self.stop_button.configure(state=tk.DISABLED)
         self.status_var.set("측정 중지 중...")
 
@@ -742,6 +808,11 @@ class AgilentLogger:
                         self.status_var.set(f"오류: {payload}")
                         messagebox.showerror("계측기 통신 오류", payload)
                 elif event == "stopped":
+                    if (
+                        self.measurement_started_at is not None
+                        and self.measurement_stopped_at is None
+                    ):
+                        self.measurement_stopped_at = time.monotonic()
                     if self.store is not None:
                         try:
                             self.store.flush()
@@ -800,6 +871,7 @@ class AgilentLogger:
             self.update_chart()
         elif self.store is not None:
             self.update_history_scrollbar()
+        self.update_elapsed_time()
         self.root.after(100, self.process_events)
 
     def clear_raw_log(self):
@@ -839,6 +911,31 @@ class AgilentLogger:
     def format_voltage(self, voltage):
         return f"{voltage:.{self.voltage_precision}f}"
 
+    def update_elapsed_time(self):
+        if self.measurement_started_at is None:
+            elapsed_seconds = 0
+        else:
+            end_time = self.measurement_stopped_at
+            if end_time is None:
+                end_time = time.monotonic()
+            elapsed_seconds = max(
+                0, int(end_time - self.measurement_started_at)
+            )
+
+        hours, remainder = divmod(elapsed_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        self.elapsed_time_var.set(
+            f"*Elapsed Time: {hours} hour {minutes} min {seconds} sec"
+        )
+
+    def freeze_elapsed_time(self):
+        if (
+            self.measurement_started_at is not None
+            and self.measurement_stopped_at is None
+        ):
+            self.measurement_stopped_at = time.monotonic()
+        self.update_elapsed_time()
+
     def rounded_voltage(self, voltage):
         return round(voltage, self.voltage_precision)
 
@@ -851,23 +948,23 @@ class AgilentLogger:
             )
 
         if self.sample_count == 0:
-            self.maximum_voltage_var.set("Max: -- V")
-            self.minimum_voltage_var.set("Min: -- V")
-            self.voltage_range_var.set("Diff: -- V")
-            self.average_voltage_var.set("Avg: -- V")
+            self.maximum_voltage_var.set("(Max: -- V)")
+            self.minimum_voltage_var.set("(Min: -- V)")
+            self.voltage_range_var.set("(Diff: -- V)")
+            self.average_voltage_var.set("(Avg: -- V)")
             return
 
         self.maximum_voltage_var.set(
-            f"Max: {self.format_voltage(self.maximum_voltage)} V"
+            f"(Max: {self.format_voltage(self.maximum_voltage)} V)"
         )
         self.minimum_voltage_var.set(
-            f"Min: {self.format_voltage(self.minimum_voltage)} V"
+            f"(Min: {self.format_voltage(self.minimum_voltage)} V)"
         )
         self.voltage_range_var.set(
-            f"Diff: {self.format_voltage(self.maximum_voltage - self.minimum_voltage)} V"
+            f"(Diff: {self.format_voltage(self.maximum_voltage - self.minimum_voltage)} V)"
         )
         self.average_voltage_var.set(
-            f"Avg: {self.format_voltage(self.average_voltage)} V"
+            f"(Avg: {self.format_voltage(self.average_voltage)} V)"
         )
 
     def reset_measurement_statistics(self):

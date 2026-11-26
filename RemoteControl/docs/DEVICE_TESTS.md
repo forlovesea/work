@@ -52,6 +52,15 @@
 
 검증 시 OS/제조사/기기명/결과를 기록합니다. 접속 키나 개인 화면은 로그에 넣지 않습니다.
 
+## Host 연결 종료 개선 (실기기 검증 대기)
+
+- [ ] Target 연결 후 전체화면에서 연결 종료를 누르면 Host가 전면에 유지되고 서버 설정과 Target 목록이 다시 표시된다.
+- [ ] 맞춤/작게 보기에서도 연결 종료 후 원격 화면이 지워지고 재접속할 수 있다.
+- [ ] 연결 종료 직후 같은 Target 또는 다른 Target에 재접속해도 이전 소켓 정리가 새 연결을 끊지 않는다.
+- [ ] 네트워크가 느리거나 끊긴 상태에서 연결 종료를 눌러도 화면 복귀가 소켓 정리를 기다리지 않는다.
+- [ ] 연결 중 취소, 홈 이동, 프로그램 종료 및 서버 목록 새로고침에서 메인 스레드 네트워크 예외가 발생하지 않는다.
+- [ ] 종료 후 진단 로그에 `uncaught exception on main` / `NetworkOnMainThreadException`이 없고 Target의 세션도 해제된다.
+
 
 ## v0.4.3 TLS Keystore regression (device verification pending)
 
@@ -85,3 +94,14 @@ References: [Android key digest authorizations](https://developer.android.com/re
 - [ ] 네트워크 차단 시 마지막 신호로부터 15초 안에 화면 유지 잠금이 만료된다.
 - [ ] 전원 버튼 잠금을 강제로 해제하거나 화면을 다시 깨우지 않는다.
 - [ ] 재연결 시 이전 연결의 유지 잠금이 남지 않는다.
+
+## 장시간 대기 회귀 검사 (2026-11-16, 실기 미검증)
+
+- 배터리 최적화 적용/제외 후 앱으로 돌아와 상태 문구 갱신 확인.
+- 제외 후 서버 연결 및 화면 끄기: adb shell dumpsys power에서 RemoteControl:relayPresence 확인. 연결 종료 시 즉시 해제 확인.
+- 연결 중 최적화 제외를 해제하면 10초 이내 CPU 잠금 해제 확인.
+- PONG 차단 및 TCP 송수신 정지 후 시간 초과/감시 로그와 재등록 확인.
+- Wi-Fi/LTE 전환, 비행기 모드 5분 후 복구 및 재접속 확인.
+- 테스트 기기에서 adb shell dumpsys deviceidle force-idle로 Doze 진입, 최적화 적용/제외 각각 연결 비교. 종료 후 adb shell dumpsys deviceidle unforce 실행.
+- 3~4일 미접속 후 TeamViewer를 열기 전에 연결 시도 및 양쪽 진단 로그 보관. 목록 미표시/공유 승인 필요/TLS 실패/첫 화면 없음 구분.
+- 잠금으로 화면 공유가 회수된 경우 재승인 후 정상 연결 확인.

@@ -21,6 +21,7 @@ from .exports import Publication, atomic_write, import_image, MAX_IMAGES
 from .clipboard import copy_publication
 from .preview import HtmlPreview
 from .workflow import VERSION, author_locally
+from .diagnostics import settings_report
 
 
 def configure_font():
@@ -79,7 +80,7 @@ class SetupWizard(QWizard):
         page = QWizardPage()
         page.setTitle("로컬 작업 공간을 준비합니다")
         layout = QVBoxLayout(page)
-        info = QLabel("뉴스와 AI 초안을 만들고 예약 작업을 관리합니다.\nAPI 키가 없으면 Mock 모드로 시작할 수 있습니다.\n예약 작업은 초안 생성이며 네이버 자동 발행은 실행하지 않습니다.")
+        info = QLabel("뉴스와 AI 초안을 만들고 예약 작업을 관리합니다.\nChatGPT Plus 사용자는 마법사 완료 후 설정에서 ChatGPT로 로그인하세요.\n예약 작업은 초안 생성이며 네이버 자동 발행은 실행하지 않습니다.")
         info.setWordWrap(True)
         layout.addWidget(info)
         self.addPage(page)
@@ -87,7 +88,7 @@ class SetupWizard(QWizard):
         page.setTitle("서버 연결 · 나중에 설정 가능")
         form = QFormLayout(page)
         self.server = QLineEdit(config.server_url)
-        form.addRow(QLabel("원격: https://서버도메인 (Nginx TLS 설정 필요)\n같은 PC: http://127.0.0.1:8000\nUbuntu의 HTTP 8000 포트에 https://로 연결할 수 없습니다."))
+        form.addRow(QLabel("AI Blog 전용 HTTPS: https://61.105.141.21:8001\n같은 PC: http://127.0.0.1:8000\nChatGPT 글쓰기에는 서버 연결이 필요 없습니다."))
         self.device = QLineEdit(config.device_id)
         self.token = password_field("서버와 동일한 개발 토큰 (선택)")
         form.addRow("서버 주소", self.server)
@@ -102,7 +103,7 @@ class SetupWizard(QWizard):
         self.mock.setChecked(config.mock)
         form.addRow("OpenAI API 키", self.key)
         form.addRow(self.mock)
-        form.addRow(QLabel("키와 토큰은 Windows Credential Manager에 저장됩니다.\n실제 모드의 AI 요청에는 API 사용 요금이 발생할 수 있습니다.\n기본 예약: 08:00 / 12:30 / 19:00 / 23:30, 예약 실행 OFF"))
+        form.addRow(QLabel("ChatGPT 구독 사용자는 API 키를 비워 두세요.\n완료 후 설정 → Continue with ChatGPT → 모델 선택 → Mock 해제 → 설정 저장.\nAPI 방식을 별도로 선택한 경우만 API 요금이 발생합니다. 예약 기본값 OFF."))
         self.error = QLabel()
         self.error.setWordWrap(True)
         self.error.setStyleSheet("color:#b33d31")
@@ -136,6 +137,7 @@ class MainWindow(QMainWindow):
         configure_font()
         self.store, self.vault = store, vault
         self.services = services or Services(store)
+        self.services.chatgpt.vault = vault
         self.browser = browser or QDesktopServices.openUrl
         self.config = store.settings()
         self.pool = QThreadPool(self)
@@ -251,7 +253,7 @@ class MainWindow(QMainWindow):
         self.local_result.setWordWrap(True)
         self.local_result.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(self.local_result)
-        layout.addWidget(QLabel("1. Mock 점검 → 2. 설정에 API 키 저장·Mock 해제 → 3. 예약 주제 저장 → 자동 작성\n서버 없이 글·이미지·ZIP을 저장합니다. Ubuntu 전달은 콘텐츠 출력의 대기 업로드 재시도에서 실행합니다."))
+        layout.addWidget(QLabel("1. 설정에서 ChatGPT 로그인 → 2. 모델 선택·Mock 해제·설정 저장 → 3. 주제 입력 후 글 생성\n서버 없이 글·ZIP을 저장합니다. Ubuntu 전달은 콘텐츠 출력에서 별도로 실행합니다."))
         self.button(layout, "refresh", "상태 새로고침", self.refresh_all)
         layout.addStretch()
 
@@ -260,12 +262,36 @@ class MainWindow(QMainWindow):
         form = QFormLayout()
         layout.addLayout(form)
         self.server_url = QLineEdit(self.config.server_url)
-        form.addRow(QLabel("원격: https://서버도메인 · 같은 PC: http://127.0.0.1:8000\n원격 Ubuntu에는 Nginx HTTPS 설정이 필요합니다. /api/v1 경로는 제외하세요."))
+        form.addRow(QLabel("AI Blog 서버: https://61.105.141.21:8001 · 같은 PC: http://127.0.0.1:8000\n서버 주소에는 /api/v1 경로를 넣지 마세요. ChatGPT 글쓰기에는 서버 연결이 필요 없습니다."))
+        self.writer_provider = QComboBox()
+        self.writer_provider.addItem("ChatGPT 구독 (Plus 등)", "chatgpt")
+        self.writer_provider.addItem("OpenAI API (별도 과금)", "openai")
+        self.writer_provider.setCurrentIndex(self.writer_provider.findData(self.config.writer_provider))
+        form.addRow("글쓰기 연결", self.writer_provider)
+        self.chatgpt_accounts = QComboBox()
+        form.addRow("ChatGPT 계정", self.chatgpt_accounts)
+        self.chatgpt_model = QComboBox()
+        if self.config.chatgpt_model:
+            self.chatgpt_model.addItem(self.config.chatgpt_model, self.config.chatgpt_model)
+        form.addRow("ChatGPT 글 모델", self.chatgpt_model)
+        self.mock_mode = QCheckBox("Mock 모드 (테스트 글만 생성 · 실제 ChatGPT 글쓰기는 체크 해제)")
+        self.mock_mode.setChecked(self.config.mock)
+        form.addRow("실행 모드", self.mock_mode)
+        row = self.row(layout)
+        self.button(row, "chatgpt_login", "Continue with ChatGPT", self.login_chatgpt)
+        self.button(row, "chatgpt_models", "선택 계정 사용 · 모델 불러오기", self.load_chatgpt_models)
+        self.button(row, "chatgpt_logout", "ChatGPT 로그아웃", self.logout_chatgpt)
+        self.button(layout, "save_chatgpt_settings", "모델 선택 후 설정 저장", self.save_settings)
+        self.button(layout, "chatgpt_usage", "ChatGPT 사용량 · 앱 한도 확인", lambda: QDesktopServices.openUrl(QUrl("https://chatgpt.com/settings/usage")))
+        self.chatgpt_status = QLabel("로그인 시 브라우저에서 ChatGPT 구독 사용을 허용하세요. API 키 입력은 필요 없습니다.")
+        self.chatgpt_status.setWordWrap(True)
+        layout.addWidget(self.chatgpt_status)
+        self.refresh_chatgpt_accounts()
+        form = QFormLayout()
+        layout.addLayout(form)
         self.device_id = QLineEdit(self.config.device_id)
         self.server_token = password_field()
         self.api_key = password_field()
-        self.mock_mode = QCheckBox("Mock 모드 (뉴스/글/이미지 테스트 데이터)")
-        self.mock_mode.setChecked(self.config.mock)
         self.text_model = QLineEdit(self.config.text_model)
         self.image_model = QLineEdit(self.config.image_model)
         self.style = QLineEdit(self.config.style)
@@ -274,7 +300,7 @@ class MainWindow(QMainWindow):
         self.rss.setMaximumHeight(90)
         for label, widget in [("서버 주소", self.server_url), ("기기 ID", self.device_id),
                               ("서버 토큰", self.server_token), ("OpenAI API 키", self.api_key),
-                              ("실행 모드", self.mock_mode), ("글 모델", self.text_model),
+                              ("API 글 모델", self.text_model),
                               ("이미지 모델", self.image_model), ("글 스타일", self.style), ("뉴스 RSS", self.rss)]:
             form.addRow(label, widget)
         self.key_status = QLabel()
@@ -284,12 +310,83 @@ class MainWindow(QMainWindow):
         self.button(row, "delete_key", "API 키 삭제", lambda: self.delete_secret("openai"))
         self.button(row, "delete_token", "서버 토큰 삭제", lambda: self.delete_secret("server"))
         self.button(row, "wizard", "설정 마법사", self.open_wizard)
+        self.button(layout, "diagnose_settings", "현재 입력값 진단 (통신·비용 없음)", self.diagnose_settings)
+        self.button(layout, "use_shared_https", "AI Blog HTTPS 주소 입력 (8001)", self.use_shared_https)
+        self.settings_diagnosis = QPlainTextEdit()
+        self.settings_diagnosis.setReadOnly(True)
+        self.settings_diagnosis.setMinimumHeight(180)
+        layout.addWidget(self.settings_diagnosis)
+        def provider_changed():
+            is_api = self.writer_provider.currentData() == "openai"
+            for widget in (self.api_key, self.text_model, self.image_model):
+                widget.setEnabled(is_api)
+        self.writer_provider.currentIndexChanged.connect(provider_changed)
+        provider_changed()
         layout.addStretch()
+
+    def diagnose_settings(self):
+        self.settings_diagnosis.setPlainText(settings_report(
+            self.server_url.text(), self.mock_mode.isChecked(),
+            bool(self.api_key.text().strip() or self.vault.get("openai")),
+            bool(self.server_token.text().strip() or self.vault.get("server")),
+            self.writer_provider.currentData(), self.chatgpt_ready()))
+
+    def chatgpt_ready(self):
+        try:
+            return self.services.chatgpt.connected()
+        except Exception:
+            return False
+
+    def refresh_chatgpt_accounts(self):
+        self.chatgpt_accounts.clear()
+        self.chatgpt_accounts.addItem("새 ChatGPT 계정 연결", "")
+        try:
+            accounts, active = self.services.chatgpt.accounts()
+            for key, label in accounts:
+                self.chatgpt_accounts.addItem(label, key)
+            self.chatgpt_accounts.setCurrentIndex(max(0, self.chatgpt_accounts.findData(active)))
+        except Exception as exc:
+            self.chatgpt_status.setText(safe_error(exc))
+
+    def login_chatgpt(self):
+        selected = self.chatgpt_accounts.currentData() or ""
+        self.chatgpt_status.setText("브라우저에서 로그인하고 ChatGPT 구독 사용을 허용하세요. 최대 3분 기다립니다.")
+        def complete(message):
+            self.refresh_chatgpt_accounts()
+            self.chatgpt_status.setText(message)
+            self.writer_provider.setCurrentIndex(0)
+        self.run_task("ChatGPT 로그인", lambda: self.services.chatgpt.login(selected), complete,
+                      self.chatgpt_status.setText)
+
+    def load_chatgpt_models(self):
+        selected = self.chatgpt_accounts.currentData()
+        def operation():
+            self.services.chatgpt.select(selected)
+            return self.services.chatgpt.models()
+        def complete(models):
+            self.chatgpt_model.clear()
+            for slug, label in models:
+                self.chatgpt_model.addItem(label, slug)
+            index = self.chatgpt_model.findData(self.config.chatgpt_model)
+            self.chatgpt_model.setCurrentIndex(max(0, index))
+            self.chatgpt_status.setText("모델을 선택하고 Mock 모드를 해제한 뒤 설정 저장을 누르세요. 이미지 자동 생성은 해제하세요.")
+        self.run_task("ChatGPT 모델 조회", operation, complete, self.chatgpt_status.setText)
+
+    def logout_chatgpt(self):
+        self.run_task("ChatGPT 로그아웃", self.services.chatgpt.logout, self.chatgpt_status.setText,
+                      self.chatgpt_status.setText)
+
+    def use_shared_https(self):
+        self.server_url.setText("https://61.105.141.21:8001")
+        self.diagnose_settings()
+        self.notify("AI Blog 전용 HTTPS 주소를 입력했습니다. 설정 저장 → 서버 연결을 실행하세요.")
 
     def save_settings(self):
         config = copy.deepcopy(self.config)
         config.server_url, config.device_id = self.server_url.text().strip(), self.device_id.text().strip()
         config.mock = self.mock_mode.isChecked()
+        config.writer_provider = self.writer_provider.currentData()
+        config.chatgpt_model = self.chatgpt_model.currentData() or ""
         config.text_model, config.image_model = self.text_model.text().strip(), self.image_model.text().strip()
         config.style, config.rss_urls = self.style.text(), self.rss.toPlainText()
         config.validate()
@@ -324,6 +421,8 @@ class MainWindow(QMainWindow):
     def build_server(self):
         layout = self.page("서버 연결", "Phase 1 API를 사용합니다. Mock 모드도 서버 연결과 인증은 실제로 검사합니다.")
         self.connection = QLabel("확인 전")
+        self.connection.setWordWrap(True)
+        self.connection.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(self.connection)
         row = self.row(layout)
         self.button(row, "connect", "연결 / 이벤트 조회", self.connect_server)
@@ -337,7 +436,7 @@ class MainWindow(QMainWindow):
         config, token = copy.deepcopy(self.config), self.vault.get("server")
         self.connection.setText("연결 확인 중…")
         self.run_task("서버 연결", lambda: self.services.connect(config, token), self.connected,
-                      lambda: self.connection.setText("연결 실패 / 인증 또는 네트워크 확인 필요"))
+                      lambda message: self.connection.setText("연결 실패\n" + message))
 
     def connected(self, events):
         self.connection.setText("ONLINE · 인증된 API 연결 확인 · " + utcnow())
@@ -486,7 +585,10 @@ class MainWindow(QMainWindow):
         self.nav.setCurrentRow(5)
 
     def build_writer(self):
-        layout = self.page("AI 글쓰기", "제목 후보 3개, 본문, 태그, 출처를 생성합니다. 키가 없으면 자동으로 Mock 초안을 만듭니다.")
+        layout = self.page("AI 글쓰기", "ChatGPT 글쓰기: 설정에서 로그인 → 모델 선택 → Mock 해제 → 설정 저장. 서버 연결은 필요 없습니다.")
+        self.writer_status = QLabel()
+        self.writer_status.setWordWrap(True)
+        layout.addWidget(self.writer_status)
         self.topic = QLineEdit(self.config.topic)
         self.topic.setPlaceholderText("글의 주제")
         layout.addWidget(self.topic)
@@ -721,7 +823,7 @@ class MainWindow(QMainWindow):
             self.notify("초안 텍스트 저장 완료")
 
     def build_images(self):
-        layout = self.page("이미지 생성", "키가 없으면 Mock PNG를 만듭니다. 실제 모드는 AI 일러스트이며 뉴스 현장 사진이 아닙니다.")
+        layout = self.page("이미지 생성", "실제 생성에는 API 키가 필요합니다. Mock 모드는 테스트 PNG를 만듭니다. 서버 연결은 필요 없습니다.")
         self.image_prompt = QLineEdit("AI 기술과 일상생활을 설명하는 일러스트")
         layout.addWidget(self.image_prompt)
         self.image_size = QComboBox()
@@ -847,13 +949,17 @@ class MainWindow(QMainWindow):
             try:
                 completed(value)
                 self.notify(name + " 완료")
+                if name == "AI 글 생성":
+                    self.writer_status.setText("테스트 Mock 글 생성 완료 · 실제 AI 결과가 아닙니다." if value.get("mock") else "실제 AI 글 생성 완료")
             except Exception as exc:
                 self.notify(safe_error(exc), "ERROR")
             finally:
                 finish()
         def failure(message):
             if failed:
-                failed()
+                failed(message)
+            if name == "AI 글 생성":
+                self.writer_status.setText("글 생성 실패: " + message)
             self.notify(name + ": " + message, "ERROR")
             finish()
         task.signals.done.connect(success)
@@ -864,9 +970,11 @@ class MainWindow(QMainWindow):
     def refresh_summary(self):
         key = bool(self.vault.get("openai"))
         mode = "MOCK" if self.config.mock else ("실제 OpenAI API" if key else "자동 작성 준비 필요 · API 키 없음")
+        if not self.config.mock and self.config.writer_provider == "chatgpt":
+            mode = "ChatGPT 구독 · " + ("로그인됨" if self.chatgpt_ready() else "설정에서 로그인 필요")
         news = "MOCK" if self.config.mock else "실제 RSS"
         self.summary.setText(f"AI: {mode}  |  뉴스: {news}\n\n저장된 초안: {len(self.store.articles())}건\n예약: {'ON' if self.config.schedule_enabled else 'OFF'} · Asia/Seoul\n\n네이버 자동 발행: 미지원 · 모든 결과는 검토용 초안")
-        self.key_status.setText(f"OpenAI 키: {'저장됨' if key else '없음 · 실제 자동 작성 불가'} / 서버 토큰: {'저장됨' if self.vault.get('server') else '없음 · 로컬 작성 가능'}")
+        self.key_status.setText(f"글쓰기: {mode} / API 키: {'저장됨' if key else '없음 (ChatGPT 모드는 불필요)'} / 서버 토큰: {'저장됨' if self.vault.get('server') else '없음 · 로컬 작성 가능'}")
         result = self.store.get("last_authoring_run", {})
         mode_label = "Mock 점검" if result.get("mock") else "실제 AI"
         self.local_result.setText(
@@ -876,6 +984,11 @@ class MainWindow(QMainWindow):
 
     def refresh_all(self):
         self.refresh_summary()
+        self.diagnose_settings()
+        self.writer_status.setText("Mock 모드: 테스트 글만 생성합니다." if self.config.mock else
+                                   ("실제 AI 모드 준비됨 · 서버 연결 불필요" if self.vault.get("openai") else "API 키 없음: 설정에 키를 저장하세요."))
+        if not self.config.mock and self.config.writer_provider == "chatgpt":
+            self.writer_status.setText("ChatGPT 구독 글쓰기 · " + ("로그인됨" if self.chatgpt_ready() else "설정에서 ChatGPT 로그인 필요"))
         self.refresh_logs()
         self.refresh_history(self.article["id"] if self.article else None)
         if not self.article:

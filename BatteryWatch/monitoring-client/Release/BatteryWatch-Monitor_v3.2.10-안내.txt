@@ -1,0 +1,4 @@
+BatteryWatch-Monitor v3.2.10 / Windows x64
+TCP 업로드 오류 후 설정을 저장하면 재시도 대기 시간이 초기화되어 즉시 다시 연결을 시도합니다.
+12 automated tests and packaged application self-test passed. Live device validation was not performed.
+Run this EXE after closing the old version. Python/Qt installation is not required. Existing profiles may be copied beside the EXE.

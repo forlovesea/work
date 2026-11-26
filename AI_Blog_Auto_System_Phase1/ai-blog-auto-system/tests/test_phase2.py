@@ -44,7 +44,7 @@ def service_with_transport(store, handler):
 
 def test_mock_article_dedup_and_png_without_key(store):
     service = Services(store)
-    config = Settings(mock=False)
+    config = Settings(mock=True)
     article = service.write_article(config, "", "테스트 주제")
     again = service.write_article(config, "", "테스트 주제")
     assert article["mock"] and article["id"] == again["id"]
@@ -266,8 +266,48 @@ def test_dashboard_local_check_does_not_change_real_settings(qtbot, window, monk
     assert state["status"] == "completed" and Path(state["path"]).is_file()
     assert "completed" in window.local_result.text()
     click(qtbot, window, "author_now")
-    assert "API 키" in window.activity.text()
+    assert "ChatGPT" in window.activity.text()
     assert window.store.get("last_authoring_run")["status"] == "failed"
+
+
+def test_visible_connection_and_writer_failure(qtbot, window, monkeypatch):
+    def unavailable(request):
+        raise httpx.ConnectError("private details SECRET", request=request)
+    window.services.client_factory = lambda: httpx.Client(transport=httpx.MockTransport(unavailable))
+    window.config.server_url = "https://example.com:8001"
+    click(qtbot, window, "connect", 2)
+    assert "1/2" in window.connection.text() and "8001" in window.connection.text()
+    assert "SECRET" not in window.connection.text()
+    window.config.mock = False
+    click(qtbot, window, "write_article", 5)
+    assert "ChatGPT" in window.writer_status.text()
+    window.server_url.setText("https://example.com:8001")
+    click(qtbot, window, "diagnose_settings", 1)
+    assert "8001" in window.settings_diagnosis.toPlainText()
+
+
+def test_dedicated_https_preset_requires_explicit_save(qtbot, window):
+    original = window.config.server_url
+    click(qtbot, window, "use_shared_https", 1)
+    assert window.server_url.text() == "https://61.105.141.21:8001"
+    assert window.config.server_url == original
+    click(qtbot, window, "save_settings")
+    assert window.store.settings().server_url == "https://61.105.141.21:8001"
+
+
+def test_chatgpt_settings_model_selection_and_save(qtbot, window, monkeypatch):
+    monkeypatch.setattr(window.services.chatgpt, "select", lambda selected: None)
+    monkeypatch.setattr(window.services.chatgpt, "models", lambda: [("account-model", "Account Model")])
+    monkeypatch.setattr(window.services.chatgpt, "connected", lambda: True)
+    assert window.writer_provider.currentData() == "chatgpt"
+    click(qtbot, window, "chatgpt_models", 1)
+    assert window.chatgpt_model.currentText() == "Account Model"
+    window.mock_mode.setChecked(False)
+    click(qtbot, window, "save_settings")
+    assert window.store.settings().chatgpt_model == "account-model"
+    assert window.store.settings().writer_provider == "chatgpt"
+    assert "ChatGPT" in window.summary.text() and "로그인됨" in window.summary.text()
+    assert "API 키가 없습니다" not in window.settings_diagnosis.toPlainText()
 
 
 def test_gui_server_settings_schedule_account(qtbot, window, monkeypatch):

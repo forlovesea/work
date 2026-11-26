@@ -204,7 +204,7 @@ public final class MainActivity extends Activity {
     private void exitApplication() {
         browsing = false;
         browseGeneration++;
-        if (listing != null) try { listing.close(); } catch (IOException ignored) {}
+        closeInBackground(listing); listing = null;
         disconnect("프로그램 종료", false);
         finishAndRemoveTask();
     }
@@ -252,7 +252,7 @@ public final class MainActivity extends Activity {
             ServerSettings.save(this, serverAddress.getText().toString().trim(), key, "Host");
             disconnect("중계서버 연결 중…", false);
             browseGeneration++; loading = false;
-            if (listing != null) try { listing.close(); } catch (IOException ignored) {}
+            closeInBackground(listing); listing = null;
             deviceRows.removeAllViews();
             listHost = endpoint[0]; listPort = Integer.parseInt(endpoint[1]); listKey = key; browsing = true;
             ((android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(accessKey.getWindowToken(), 0);
@@ -534,13 +534,25 @@ public final class MainActivity extends Activity {
         healthBar.setTextColor(foreground); healthBar.setBackgroundColor(background);
     }
     private void disconnect(String message) { disconnect(message, true); }
+    private void closeInBackground(Socket... connections) {
+        new Thread(() -> {
+            for (Socket connection : connections) {
+                if (connection == null) continue;
+                try { connection.close(); }
+                catch (IOException | RuntimeException error) {
+                    Diagnostics.record(getApplicationContext(), "host", "connection cleanup failed", error);
+                }
+            }
+        }, "host-close").start();
+    }
     private synchronized void disconnect(String message, boolean error) {
         Diagnostics.record(this, "host", "application disconnect requested: " + message, null);
         if (error) Diagnostics.record(this, "host", "connection disconnected: " + message, null);
         generation++; controlAllowed = false; output = null; commands.getQueue().clear();
         health.disconnected(error); renderHealth();
-        try { if (socket != null) socket.close(); } catch (IOException ignored) {}
-        try { if (relay != null) relay.close(); } catch (IOException ignored) {}
+        // Detach this session before restoring the UI or allowing another connection.
+        // TLS close may perform network I/O and must never run on the UI thread.
+        SSLSocket closingSocket = socket, closingRelay = relay;
         relay = null;
         socket = null; touching = false;
         if (screen != null) screen.setImageDrawable(null);
@@ -548,6 +560,7 @@ public final class MainActivity extends Activity {
         if (status != null) status.setText(message);
         if (connect != null) connect.setEnabled(true);
         if (screen != null && healthBar != null) setViewMode(smallView ? 2 : 0);
+        if (closingSocket != null || closingRelay != null) closeInBackground(closingSocket, closingRelay);
     }
     @Override protected void onResume() { super.onResume(); main.removeCallbacks(healthTick); main.post(healthTick); main.removeCallbacks(listTick); main.post(listTick); }
     @Override protected void onPause() { main.removeCallbacks(healthTick); main.removeCallbacks(listTick); super.onPause(); }
@@ -555,5 +568,6 @@ public final class MainActivity extends Activity {
     @Override public void onBackPressed() { if (fullScreen) setViewMode(0); else super.onBackPressed(); }
     @Override protected void onDestroy() {
         browsing = false; browseGeneration++; main.removeCallbacks(listTick);
-        try { if (listing != null) listing.close(); } catch (IOException ignored) {} main.removeCallbacks(healthTick); disconnect("연결 종료", false); commands.shutdownNow(); super.onDestroy(); }
+        closeInBackground(listing); listing = null;
+        main.removeCallbacks(healthTick); disconnect("연결 종료", false); commands.shutdownNow(); super.onDestroy(); }
 }

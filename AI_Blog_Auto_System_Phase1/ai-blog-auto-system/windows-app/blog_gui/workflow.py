@@ -5,7 +5,7 @@ from .manual import ManualHandoff
 from .services import ServiceError
 from .storage import utcnow
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 
 
 def author_locally(services, config, api_key, progress=None):
@@ -21,7 +21,9 @@ def author_locally(services, config, api_key, progress=None):
         progress(message)
 
     try:
-        if not config.mock and not api_key:
+        if not config.mock and config.writer_provider == "chatgpt" and config.scheduled_image:
+            raise ServiceError("ChatGPT 구독으로 자동 작성하려면 예약 설정의 이미지 생성을 해제하세요. 이미지는 별도로 첨부할 수 있습니다.")
+        if not config.mock and config.writer_provider == "openai" and not api_key:
             raise ServiceError("실제 자동 작성에는 OpenAI API 키가 필요합니다. 설정에 키를 저장하거나 무료 Mock 점검을 사용하세요.")
         stage("글 생성")
         article = services.write_article(config, api_key, config.topic, run_id=run_id)

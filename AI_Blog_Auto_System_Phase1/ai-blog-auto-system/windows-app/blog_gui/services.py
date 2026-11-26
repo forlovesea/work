@@ -15,6 +15,7 @@ from PIL import Image, ImageDraw
 
 from send_mock_event import Outbox, mock_event, validate_url
 from .storage import utcnow
+from .chatgpt import ChatGPT, ChatGPTError
 
 
 class ServiceError(Exception):
@@ -22,9 +23,15 @@ class ServiceError(Exception):
 
 
 def safe_error(exc):
-    if isinstance(exc, ServiceError):
+    if isinstance(exc, (ServiceError, ChatGPTError)):
         return str(exc)
     if isinstance(exc, httpx.HTTPStatusError):
+        if exc.request.url.host == "api.openai.com":
+            hints = {401: "OpenAI API 키를 확인하고 다시 저장하세요.",
+                     403: "API 키의 프로젝트 및 모델 사용 권한을 확인하세요.",
+                     404: "설정한 모델 이름과 계정의 모델 사용 가능 여부를 확인하세요.",
+                     429: "사용량 한도 또는 요청 빈도를 확인하고 잠시 후 재시도하세요."}
+            return f"OpenAI API 응답 오류 HTTP {exc.response.status_code}. " + hints.get(exc.response.status_code, "모델 설정과 서비스 상태를 확인하세요.")
         if exc.response.status_code in {301, 302, 303, 307, 308}:
             return "서버가 다른 주소로 이동을 요구했습니다. 설정에 최종 HTTPS 서버 주소를 직접 입력하세요."
         if exc.response.status_code in {502, 503, 504}:
@@ -38,11 +45,11 @@ def safe_error(exc):
             seen.add(id(cause))
             detail = str(cause).upper()
             if isinstance(cause, ssl.SSLCertVerificationError) or "CERTIFICATE_VERIFY_FAILED" in detail:
-                return "TLS 인증서 검증에 실패했습니다. 접속 도메인, 인증서 만료·체인, PC 시간을 확인하세요."
+                return "TLS 인증서 검증에 실패했습니다. 접속 주소와 인증서의 도메인/IP SAN 일치 여부, 만료·체인, PC 시간을 확인하세요."
             if "WRONG_VERSION_NUMBER" in detail or "UNKNOWN_PROTOCOL" in detail:
-                return "HTTPS 요청이 HTTP 포트에 도착했습니다. 원격 서버는 Nginx HTTPS 주소(기본 443)를 사용하세요. Uvicorn 8000 포트는 기본적으로 HTTP입니다."
+                return "HTTPS 요청이 HTTP 포트에 도착했습니다. 원격 서버의 Nginx HTTPS 포트와 주소를 확인하세요. Uvicorn 포트는 기본적으로 HTTP입니다."
             cause = cause.__cause__ or cause.__context__
-        return "서버에 연결하지 못했습니다. 서버 주소, DNS, 방화벽, Nginx의 HTTPS 443 포트와 서비스 실행 상태를 확인하세요. 같은 PC 시험은 http://127.0.0.1:8000을 사용합니다."
+        return "서버에 연결하지 못했습니다. 서버 주소, DNS, 방화벽, 설정한 Nginx HTTPS 포트와 서비스 실행 상태를 확인하세요. 같은 PC 시험은 http://127.0.0.1:8000을 사용합니다."
     if isinstance(exc, httpx.HTTPError):
         return "네트워크 연결 또는 인증서 검증에 실패했습니다."
     return f"작업 실패 ({type(exc).__name__}). 입력값과 설정을 확인하세요."
@@ -62,19 +69,33 @@ class Services:
         self.store = store
         self.client_factory = client_factory or (lambda: httpx.Client(timeout=90, follow_redirects=False))
         self.outbox = Outbox(store.directory / "gui-outbox.sqlite3")
+        self.chatgpt = ChatGPT(store, client_factory=self.client_factory)
 
     def connect(self, config, token):
         if not token:
             raise ServiceError("서버 토큰을 설정하세요. Mock 모드도 서버 인증은 필요합니다.")
         url = validate_url(config.server_url)
-        with self.client_factory() as client:
-            health = client.get(url + "/api/v1/health", timeout=10)
-            health.raise_for_status()
-            events = client.get(url + "/api/v1/events", headers={"X-Device-Token": token}, timeout=10)
-            events.raise_for_status()
-            if health.json().get("status") != "ok" or not isinstance(events.json(), list):
-                raise ServiceError("서버 응답 형식이 올바르지 않습니다.")
-            return events.json()
+        stage = "1/2 서버 health 접속 (토큰 전송 전)"
+        try:
+            with self.client_factory() as client:
+                health = client.get(url + "/api/v1/health", timeout=10)
+                if health.status_code == 404:
+                    raise ServiceError("HTTPS/HTTP 서버에는 도달했지만 /api/v1/health 경로가 없습니다. 기존 WebConference HTTPS를 사용하는 경우 Nginx의 /api/v1/ 경로를 AI Blog 내부 8001로 연결하세요.")
+                health.raise_for_status()
+                if not isinstance(health.json(), dict) or health.json().get("status") != "ok":
+                    raise ServiceError("health 응답이 올바르지 않습니다. AI Blog 서버 주소인지 확인하세요.")
+                stage = "2/2 토큰 인증 · 이벤트 조회 (health 접속 성공)"
+                events = client.get(url + "/api/v1/events", headers={"X-Device-Token": token}, timeout=10)
+                events.raise_for_status()
+                if not isinstance(events.json(), list):
+                    raise ServiceError("이벤트 응답 형식이 올바르지 않습니다.")
+                return events.json()
+        except httpx.HTTPError as exc:
+            parsed = urlsplit(url)
+            port = parsed.port or (443 if parsed.scheme == "https" else 80)
+            raise ServiceError(f"{stage} 실패\n대상: {parsed.hostname}:{port} ({parsed.scheme.upper()})\n" + safe_error(exc)) from None
+        except ValueError:
+            raise ServiceError(stage + " 실패: JSON 응답이 아닙니다. 프록시/서버 주소를 확인하세요.") from None
 
     def send_mock(self, config, token, flush_only=False):
         if not token:
@@ -140,11 +161,14 @@ class Services:
         if not topic or len(topic) > 500:
             raise ServiceError("주제는 1~500자로 입력하세요.")
         sources = sources or []
-        mock = config.mock or not api_key
+        if not config.mock and config.writer_provider == "openai" and not api_key:
+            raise ServiceError("실제 AI 글쓰기에는 API 키가 필요합니다. 설정 → OpenAI API 키 입력 → 설정 저장을 완료하세요. 무료 시험은 Mock 모드를 사용하세요.")
+        mock = config.mock
         if not mock and any(s.get("mock") for s in sources):
             raise ServiceError("Mock 뉴스를 실제 AI 글쓰기의 출처로 사용할 수 없습니다.")
         evidence = [{k: source.get(k) for k in ("title", "url", "summary", "mock")} for source in sources]
-        signature = hashlib.sha256(json.dumps([topic, evidence, config.style, mock, config.text_model],
+        signature = hashlib.sha256(json.dumps([topic, evidence, config.style, mock, config.text_model,
+                                              config.writer_provider, config.chatgpt_model],
                                               sort_keys=True, ensure_ascii=False).encode()).hexdigest()
         if run_id is not None:
             signature = hashlib.sha256((signature + str(run_id)).encode()).hexdigest()
@@ -166,13 +190,16 @@ class Services:
                 "제공된 자료를 넘는 사실을 단정하지 말고 미확인 사항은 명시하세요. 원문 복제, 허위 체험담, "
                 "자극적인 허위 제목을 금지합니다. 출처가 없으면 최신 뉴스 사실을 주장하지 않는 일반 설명 초안을 만드세요."
             )
-            with self.client_factory() as client:
-                response = client.post("https://api.openai.com/v1/responses", headers={"Authorization": f"Bearer {api_key}"},
-                    json={"model": config.text_model, "instructions": instructions,
-                          "input": json.dumps({"topic": topic, "style": config.style, "sources": sources}, ensure_ascii=False),
-                          "text": {"format": {"type": "json_object"}}, "max_output_tokens": 3500, "store": False})
-                response.raise_for_status()
-                data = response.json()
+            prompt = json.dumps({"topic": topic, "style": config.style, "sources": sources}, ensure_ascii=False)
+            if config.writer_provider == "chatgpt":
+                data = self.chatgpt.respond(config.chatgpt_model, instructions, prompt)
+            else:
+                with self.client_factory() as client:
+                    response = client.post("https://api.openai.com/v1/responses", headers={"Authorization": f"Bearer {api_key}"},
+                        json={"model": config.text_model, "instructions": instructions, "input": prompt,
+                              "text": {"format": {"type": "json_object"}}, "max_output_tokens": 3500, "store": False})
+                    response.raise_for_status()
+                    data = response.json()
             if data.get("status") != "completed":
                 raise ServiceError("AI 응답이 완료되지 않았습니다. 모델과 출력 한도를 확인하세요.")
             raw = "".join(part.get("text", "") for output in data.get("output", [])
@@ -205,11 +232,15 @@ class Services:
             raise ServiceError("AI 본문 형식이 올바르지 않습니다.")
 
     def generate_image(self, config, api_key, prompt, size="1024x1024"):
+        if not config.mock and config.writer_provider == "chatgpt":
+            raise ServiceError("ChatGPT 구독 연결은 이미지 생성을 지원하지 않습니다. ChatGPT에서 만든 이미지를 저장한 후 글에 첨부하세요. API로 자동 전환하지 않습니다.")
         if not prompt.strip() or len(prompt) > 4000:
             raise ServiceError("이미지 설명은 1~4000자로 입력하세요.")
         if size not in {"1024x1024", "1536x1024", "1024x1536"}:
             raise ServiceError("지원하지 않는 이미지 크기입니다.")
-        mock = config.mock or not api_key
+        if not config.mock and not api_key:
+            raise ServiceError("실제 이미지 생성에는 API 키가 필요합니다. 설정에 OpenAI API 키를 저장하세요.")
+        mock = config.mock
         if mock:
             image = Image.new("RGB", tuple(map(int, size.split("x"))), "#15243b")
             draw = ImageDraw.Draw(image)

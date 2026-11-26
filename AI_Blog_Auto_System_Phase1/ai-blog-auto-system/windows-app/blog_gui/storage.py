@@ -25,6 +25,8 @@ class Settings:
     device_id: str = "WINDOWS-DESKTOP"
     mock: bool = True
     text_model: str = "gpt-4.1-mini"
+    writer_provider: str = "openai"
+    chatgpt_model: str = ""
     image_model: str = "gpt-image-1"
     style: str = "사실과 출처를 명확히 구분하는 친절한 한국어 설명"
     rss_urls: str = ""
@@ -36,6 +38,8 @@ class Settings:
     scheduled_image: bool = False
 
     def validate(self):
+        if self.writer_provider not in {"openai", "chatgpt"}:
+            raise ValueError("글쓰기 연결 방식을 선택하세요.")
         self.server_url = validate_url(self.server_url)
         if not re.fullmatch(r"[A-Za-z0-9_.-]{1,100}", self.device_id):
             raise ValueError("기기 ID는 영문, 숫자, 점, 밑줄, 하이픈 1~100자입니다.")
@@ -106,6 +110,9 @@ class Store:
 
     def settings(self):
         raw = self.get("config", {})
+        # Existing API configuration remains available, but the UI starts on the
+        # requested subscription path until the user explicitly saves a choice.
+        raw.setdefault("writer_provider", "chatgpt")
         return Settings(**{k: v for k, v in raw.items() if k in Settings.__dataclass_fields__})
 
     def save_settings(self, settings):

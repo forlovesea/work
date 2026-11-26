@@ -33,6 +33,115 @@ class MeasurementIntervalTests(unittest.TestCase):
                     main.measurement_interval_ms(*values)
 
 
+class DiskRecordingManagementTests(unittest.TestCase):
+    def make_app(self):
+        app = main.AgilentLogger.__new__(main.AgilentLogger)
+        app.worker = None
+        app.export_worker = None
+        app.store = None
+        app.root = Mock()
+        app.status_var = Mock()
+        app.disk_reset_button = Mock()
+        app.recording_usage_after = None
+        app.history_update_after = None
+        app.samples = []
+        app.reset_measurement_statistics = Mock()
+        app.measurement_started_at = None
+        app.measurement_stopped_at = None
+        app.update_elapsed_time = Mock()
+        app.follow_live = True
+        app.user_view_span = None
+        app.view_start = None
+        app.view_end = None
+        app.storage_error_reported = False
+        app.storage_error_message = None
+        app.update_chart = Mock()
+        app.process_events = Mock()
+        return app
+
+    def test_recording_files_only_includes_app_database_and_sidecars(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            expected = {
+                directory / "Agilent34401A_1.sqlite3",
+                directory / "Agilent34401A_1.sqlite3-wal",
+                directory / "Agilent34401A_1.sqlite3-shm",
+            }
+            for path in expected:
+                path.write_bytes(b"data")
+            (directory / "other.sqlite3").write_bytes(b"keep")
+            (directory / "Agilent34401A_notes.txt").write_bytes(b"keep")
+
+            self.assertEqual(set(main.recording_data_files(directory)), expected)
+            self.assertEqual(main.format_data_size(1023), "1023 B")
+            self.assertEqual(main.format_data_size(1024), "1.0 KB")
+
+    def test_reset_is_blocked_while_measurement_or_export_is_running(self):
+        for field in ("worker", "export_worker"):
+            with self.subTest(field=field):
+                app = self.make_app()
+                setattr(app, field, SimpleNamespace(is_alive=lambda: True))
+                with patch.object(main.messagebox, "showwarning") as showwarning:
+                    app.clear_disk_data()
+
+                showwarning.assert_called_once()
+                app.process_events.assert_not_called()
+
+    def test_canceling_reset_preserves_recording_files(self):
+        app = self.make_app()
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            recording = directory / "Agilent34401A_1.sqlite3"
+            recording.write_bytes(b"recording")
+            with (
+                patch.object(main, "get_recording_directory", return_value=directory),
+                patch.object(main.messagebox, "askyesno", return_value=False),
+            ):
+                app.clear_disk_data()
+
+            self.assertTrue(recording.exists())
+            app.update_chart.assert_not_called()
+
+    def test_confirmed_reset_deletes_only_app_recording_files(self):
+        app = self.make_app()
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            recording = directory / "Agilent34401A_1.sqlite3"
+            unrelated = directory / "customer_data.sqlite3"
+            recording.write_bytes(b"recording")
+            unrelated.write_bytes(b"keep")
+            with (
+                patch.object(main, "get_recording_directory", return_value=directory),
+                patch.object(main.messagebox, "askyesno", return_value=True),
+            ):
+                app.clear_disk_data()
+
+            self.assertFalse(recording.exists())
+            self.assertTrue(unrelated.exists())
+            app.reset_measurement_statistics.assert_called_once()
+            app.update_chart.assert_called_once()
+
+    def test_reset_refuses_sqlite_sidecars_from_another_instance(self):
+        app = self.make_app()
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            recording = directory / "Agilent34401A_1.sqlite3"
+            sidecar = directory / "Agilent34401A_1.sqlite3-wal"
+            recording.write_bytes(b"recording")
+            sidecar.write_bytes(b"active")
+            with (
+                patch.object(main, "get_recording_directory", return_value=directory),
+                patch.object(main.messagebox, "showwarning") as showwarning,
+                patch.object(main.messagebox, "askyesno") as askyesno,
+            ):
+                app.clear_disk_data()
+
+            self.assertTrue(recording.exists())
+            self.assertTrue(sidecar.exists())
+            showwarning.assert_called_once()
+            askyesno.assert_not_called()
+
+
 class FakeInstrument:
     def __init__(
         self, response, stop_event, stop_on_response=True, stop_response=None

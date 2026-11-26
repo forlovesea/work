@@ -21,8 +21,44 @@ from measurement_store import MeasurementStore, PLOT_MAX_POINTS
 MAX_MEASUREMENT_RECOVERY_ATTEMPTS = 3
 MAX_ERROR_QUEUE_DRAIN = 32
 SERIAL_RECOVERY_SETTLE_SECONDS = 0.25
+DISK_USAGE_REFRESH_MS = 30_000
 APP_VERSION = "v1.0.2"
 RELEASE_DATE = "2026-11-26"
+
+
+def get_recording_directory():
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if not local_app_data:
+        return None
+    return Path(local_app_data) / "Agilent34401A" / "Recordings"
+
+
+def recording_data_files(directory):
+    directory = Path(directory)
+    try:
+        return sorted(
+            path
+            for path in directory.iterdir()
+            if path.is_file()
+            and path.name.startswith("Agilent34401A_")
+            and path.name.endswith(
+                (".sqlite3", ".sqlite3-wal", ".sqlite3-shm")
+            )
+        )
+    except FileNotFoundError:
+        return []
+
+
+def format_data_size(size_bytes):
+    size = float(size_bytes)
+    if size < 0:
+        raise ValueError("size_bytes must be non-negative")
+    if size < 1024:
+        return f"{int(size)} B"
+    for unit in ("KB", "MB", "GB", "TB"):
+        size /= 1024
+        if size < 1024 or unit == "TB":
+            return f"{size:.1f} {unit}"
 
 
 def measurement_interval_ms(hours, minutes, milliseconds):
@@ -109,6 +145,7 @@ class AgilentLogger:
         self.view_start = None
         self.view_end = None
         self.history_update_after = None
+        self.recording_usage_after = None
         self.storage_error_reported = False
         self.storage_error_message = None
         self.chart_pointer = None
@@ -135,12 +172,22 @@ class AgilentLogger:
         self._build_ui()
         self.set_serial_settings_state(connected=False)
         self.refresh_ports()
+        self.refresh_recording_usage()
         self.root.after(100, self.process_events)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
 
     def _build_ui(self):
+        utility_bar = ttk.Frame(self.root)
+        utility_bar.pack(fill=tk.X, padx=10, pady=(10, 0))
+        self.disk_reset_button = ttk.Button(
+            utility_bar,
+            text="디스크 데이터 초기화 (확인 중...)",
+            command=self.clear_disk_data,
+        )
+        self.disk_reset_button.pack(side=tk.RIGHT)
+
         settings = ttk.LabelFrame(self.root, text="계측기 연결 및 측정 설정", padding=10)
-        settings.pack(fill=tk.X, padx=10, pady=(10, 5))
+        settings.pack(fill=tk.X, padx=10, pady=(4, 5))
 
         ttk.Label(settings, text="COM 포트").grid(row=0, column=0, sticky=tk.W, padx=4, pady=4)
         self.port_combo = ttk.Combobox(settings, textvariable=self.port_var, width=12, state="readonly")
@@ -383,6 +430,194 @@ class AgilentLogger:
             fill=tk.X, side=tk.BOTTOM
         )
 
+    def refresh_recording_usage(self):
+        self.recording_usage_after = None
+        directory = get_recording_directory()
+        if directory is None:
+            self.disk_reset_button.configure(
+                text="디스크 데이터 초기화 (경로 확인 불가)",
+                state=tk.DISABLED,
+            )
+        else:
+            try:
+                files = recording_data_files(directory)
+                total_size = sum(path.stat().st_size for path in files)
+            except OSError as error:
+                self.disk_reset_button.configure(
+                    text="디스크 데이터 초기화 (용량 확인 오류)",
+                    state=tk.DISABLED,
+                )
+                self.status_var.set(f"기록 용량 확인 오류: {error}")
+            else:
+                self.disk_reset_button.configure(
+                    text=f"디스크 데이터 초기화 ({format_data_size(total_size)})",
+                    state=tk.NORMAL,
+                )
+        self.recording_usage_after = self.root.after(
+            DISK_USAGE_REFRESH_MS, self.refresh_recording_usage
+        )
+
+    def clear_disk_data(self):
+        if (
+            self.worker and self.worker.is_alive()
+        ) or (
+            self.export_worker and self.export_worker.is_alive()
+        ):
+            messagebox.showwarning(
+                "초기화할 수 없음",
+                "측정 또는 파일 저장이 진행 중입니다. 작업이 끝난 뒤 다시 시도하세요.",
+                parent=self.root,
+            )
+            return
+
+        self.process_events()
+        directory = get_recording_directory()
+        if directory is None:
+            messagebox.showerror(
+                "기록 위치 확인 오류",
+                "Windows 로컬 앱 데이터 폴더를 찾을 수 없습니다.",
+                parent=self.root,
+            )
+            return
+        try:
+            files = recording_data_files(directory)
+            total_size = sum(path.stat().st_size for path in files)
+        except OSError as error:
+            messagebox.showerror(
+                "기록 확인 오류",
+                f"측정 기록 파일을 확인하지 못했습니다.\n{error}",
+                parent=self.root,
+            )
+            return
+
+        if not files:
+            self.status_var.set("초기화할 측정 기록이 없습니다.")
+            self._refresh_recording_usage_now()
+            return
+
+        sidecars = [
+            path
+            for path in files
+            if path.name.endswith((".sqlite3-wal", ".sqlite3-shm"))
+        ]
+        own_sidecars = set()
+        if self.store is not None and self.store.connection is not None:
+            own_sidecars = {
+                Path(f"{self.store.path}-wal"),
+                Path(f"{self.store.path}-shm"),
+            }
+        if any(path not in own_sidecars for path in sidecars):
+            messagebox.showwarning(
+                "초기화할 수 없음",
+                "다른 실행 인스턴스가 기록 중이거나 SQLite 보조 파일이 남아 있습니다. "
+                "다른 프로그램 인스턴스를 종료한 뒤 다시 시도하세요.",
+                parent=self.root,
+            )
+            return
+
+        database_count = sum(path.name.endswith(".sqlite3") for path in files)
+        if not messagebox.askyesno(
+            "디스크 데이터 초기화",
+            f"측정 기록 {database_count}개와 관련 파일 {len(files)}개"
+            f"({format_data_size(total_size)})를 모두 영구 삭제합니다.\n"
+            "필요한 기록을 Excel/CSV로 백업했는지 확인하세요. 계속할까요?",
+            parent=self.root,
+        ):
+            return
+
+        store_path = self.store.path if self.store is not None else None
+        if self.store is not None:
+            try:
+                self.store.close()
+            except (OSError, sqlite3.Error) as error:
+                messagebox.showerror(
+                    "기록 파일 닫기 오류",
+                    f"기록 파일을 안전하게 닫지 못해 삭제를 취소했습니다.\n{error}",
+                    parent=self.root,
+                )
+                return
+        try:
+            files = recording_data_files(directory)
+        except OSError as error:
+            messagebox.showerror(
+                "기록 확인 오류",
+                f"초기화 직전 측정 기록을 다시 확인하지 못했습니다.\n{error}",
+                parent=self.root,
+            )
+            self._restore_store_after_reset(store_path)
+            return
+        if any(
+            path.name.endswith((".sqlite3-wal", ".sqlite3-shm"))
+            for path in files
+        ):
+            messagebox.showwarning(
+                "초기화할 수 없음",
+                "SQLite 보조 파일이 사용 중이거나 남아 있어 초기화를 중단했습니다. "
+                "다른 실행 인스턴스를 종료한 뒤 다시 시도하세요.",
+                parent=self.root,
+            )
+            self._restore_store_after_reset(store_path)
+            return
+
+        deleted_count = 0
+        try:
+            for path in files:
+                path.unlink()
+                deleted_count += 1
+        except OSError as error:
+            self.status_var.set(
+                f"기록 일부 초기화됨 ({deleted_count}개 삭제): {error}"
+            )
+            messagebox.showerror(
+                "초기화 일부 완료",
+                f"{deleted_count}개 파일을 삭제했지만 나머지 파일 삭제에 실패했습니다.\n{error}",
+                parent=self.root,
+            )
+            self._restore_store_after_reset(store_path)
+        else:
+            self.store = None
+            if self.history_update_after is not None:
+                self.root.after_cancel(self.history_update_after)
+                self.history_update_after = None
+            self.samples.clear()
+            self.reset_measurement_statistics()
+            self.measurement_started_at = None
+            self.measurement_stopped_at = None
+            self.update_elapsed_time()
+            self.follow_live = True
+            self.user_view_span = None
+            self.view_start = None
+            self.view_end = None
+            self.storage_error_reported = False
+            self.storage_error_message = None
+            self.update_chart()
+            self.status_var.set(
+                f"디스크 데이터 초기화 완료 | {deleted_count}개 파일 삭제"
+            )
+        self._refresh_recording_usage_now()
+
+    def _restore_store_after_reset(self, store_path):
+        if store_path is None:
+            return
+        if not store_path.exists():
+            self.store = None
+            return
+        try:
+            self.store = MeasurementStore(store_path)
+        except (OSError, sqlite3.Error) as error:
+            self.store = None
+            messagebox.showerror(
+                "기록 다시 열기 오류",
+                f"초기화가 중단된 후 기존 기록을 다시 열지 못했습니다.\n{error}",
+                parent=self.root,
+            )
+
+    def _refresh_recording_usage_now(self):
+        if self.recording_usage_after is not None:
+            self.root.after_cancel(self.recording_usage_after)
+            self.recording_usage_after = None
+        self.refresh_recording_usage()
+
     def refresh_ports(self):
         ports = [port.device for port in list_ports.comports()]
         self.port_combo["values"] = ports
@@ -532,8 +767,8 @@ class AgilentLogger:
             messagebox.showerror("설정 오류", "응답 대기 시간은 3, 5, 10, 20초 중에서 선택하세요.")
             return
 
-        local_app_data = os.environ.get("LOCALAPPDATA")
-        if not local_app_data:
+        recording_directory = get_recording_directory()
+        if recording_directory is None:
             messagebox.showerror(
                 "기록 저장 오류", "Windows 로컬 앱 데이터 폴더를 찾을 수 없습니다."
             )
@@ -545,11 +780,9 @@ class AgilentLogger:
                 messagebox.showerror("기록 저장 오류", f"기존 측정 기록을 닫지 못했습니다.\n{error}")
                 return
 
-        recording_directory = Path(local_app_data) / "Agilent34401A" / "Recordings"
         recording_name = f"Agilent34401A_{datetime.now():%Y%m%d_%H%M%S_%f}.sqlite3"
         if self.history_update_after is not None:
             self.root.after_cancel(self.history_update_after)
-            self.history_update_after = None
         try:
             self.store = MeasurementStore(recording_directory / recording_name)
         except (OSError, sqlite3.Error) as error:
@@ -1311,6 +1544,10 @@ class AgilentLogger:
             return
         if self.history_update_after is not None:
             self.root.after_cancel(self.history_update_after)
+            self.history_update_after = None
+        if self.recording_usage_after is not None:
+            self.root.after_cancel(self.recording_usage_after)
+            self.recording_usage_after = None
         if self.instrument is not None:
             try:
                 self.instrument.close()

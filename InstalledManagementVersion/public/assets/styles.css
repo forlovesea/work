@@ -1905,3 +1905,31 @@ h2 {
     .module-map-canvas { max-width: 420px; margin: 0 auto; }
 }
 @media print { .module-map-panel { display: none; } }
+
+/* Keep mobile editing and status inspection readable without sideways scrolling. */
+@media screen and (max-width: 767px) {
+    .tab-panel { scroll-margin-top: 8px; }
+    .is-editing .bulk-import-panel { display: none; }
+    .module-map-option { min-height: 44px; margin: 4px 0 8px; font-size: 13px; }
+    .module-map-option input { width: 20px; height: 20px; }
+    .module-map-details summary, .module-map-unknown { min-height: 44px; padding-top: 12px; padding-bottom: 12px; }
+    #moduleMapAddresses { max-height: min(50dvh, 360px); overscroll-behavior-y: contain; }
+    #moduleMapAddresses .module-map-site-heading strong { font-size: 14px; }
+    #moduleMapAddresses span { font-size: 12px; }
+    #moduleMapAddresses .module-status-badge { font-size: 12px; padding: 4px 11px; }
+    .module-map-caption, .module-map-message { font-size: 12px; }
+    .record-edit-button { width: 100%; justify-self: stretch; font-size: 14px; }
+    .record-racks { width: 100%; }
+    .rack-total, .module-summary { font-size: 12px; }
+    .report-option { min-height: 48px; }
+    .popup-table-wrap table { min-width: 0; border-spacing: 0; }
+    .popup-table-wrap thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+    .popup-table-wrap tbody { display: grid; gap: 12px; }
+    .popup-table-wrap tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 6px; border: 1px solid #e0e7f0; border-radius: 14px; background: #f0f5fc; }
+    .popup-table-wrap tr:nth-child(even) { background: #f3f0fa; }
+    .popup-table-wrap tr:nth-child(3n) { background: #eef7f3; }
+    .popup-table-wrap td, .popup-table-wrap tr:nth-child(even) td, .popup-table-wrap tr:nth-child(3n) td { display: block; min-width: 0; padding: 10px; border-radius: 0; background: transparent; font-size: 13px; }
+    .popup-table-wrap td::before { content: attr(data-label); display: block; margin-bottom: 5px; color: #64748b; font-size: 11px; font-weight: 500; }
+    .popup-status { font-size: 12px; }
+    .popup-heading { position: sticky; top: 0; z-index: 1; background: #fff; }
+}

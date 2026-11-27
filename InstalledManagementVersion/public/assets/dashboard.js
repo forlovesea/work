@@ -339,6 +339,7 @@ async function openInstallationPopup(device, statusName) {
             const currentVersion = popupCurrentVersion(record);
             for (const [index, value] of [record.device_name, record.site_name || '미입력', record.work_status, currentVersion].entries()) {
                 const cell = document.createElement('td');
+                cell.setAttribute('data-label', ['장비명', '설치장소(국소명)', '작업상태', '현재 설치 버전'][index]);
                 if (index === 2) {
                     const badge = document.createElement('span');
                     badge.className = 'popup-status';

@@ -1811,6 +1811,7 @@ function setRecordActionMessage(message, isError = false) {
 function setEditMode(recordId = null) {
     editingRecordId = recordId;
     const isEditing = recordId !== null;
+    entryPanel.classList.toggle('is-editing', isEditing);
     formTitle.textContent = isEditing ? '설치 정보 수정' : '설치 정보 입력';
     saveButton.textContent = isEditing ? '수정 내용 저장' : '＋ 방문 기록 저장';
     cancelEditButton.hidden = !isEditing;
@@ -1837,7 +1838,7 @@ function startEditingRecord(record, returnToQuery = false) {
     fillAdditionalFields(record);
     setFormMessage(`${record.visit_date} ${record.device_name} 기록을 수정 중입니다.`);
     setActiveTab('entry');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    requestAnimationFrame(() => entryPanel.scrollIntoView({ block: 'start', behavior: 'smooth' }));
 }
 
 function restoreEditedRecordPosition(position) {

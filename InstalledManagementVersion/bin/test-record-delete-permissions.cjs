@@ -20,6 +20,7 @@ vm.runInContext(source.slice(source.indexOf('async function deleteRecords('), so
     for (const allowed of [false, true, false]) {
         context.selectedRecordIds.add(1);
         context.setRecordDeletePermission(allowed);
+        assert.equal(context.selectAllRecords.disabled, !allowed);
         assert.equal(context.deleteSelectedButton.disabled, !allowed);
         assert.equal(context.deleteFilteredButton.disabled, !allowed);
         const before = calls.length;

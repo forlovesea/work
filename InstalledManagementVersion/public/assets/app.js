@@ -1790,7 +1790,7 @@ function createRecordCard(record, index = 0) {
 
 function setRecordDeletePermission(allowed) {
     canDeleteRecords = allowed === true;
-    for (const button of [deleteSelectedButton, deleteFilteredButton]) {
+    for (const button of [selectAllRecords, deleteSelectedButton, deleteFilteredButton]) {
         button.title = canDeleteRecords ? '' : '설치 정보를 삭제할 권한이 없습니다.';
     }
     updateRecordActionControls();
@@ -1802,7 +1802,7 @@ function updateRecordActionControls() {
     selectedCount.textContent = `(${selectedVisibleCount})`;
     selectAllRecords.checked = visibleIds.length > 0 && selectedVisibleCount === visibleIds.length;
     selectAllRecords.indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < visibleIds.length;
-    selectAllRecords.disabled = isLoadingRecords || isMutatingRecords || visibleIds.length === 0;
+    selectAllRecords.disabled = !canDeleteRecords || isLoadingRecords || isMutatingRecords || visibleIds.length === 0;
     deleteSelectedButton.disabled = !canDeleteRecords || isLoadingRecords || isMutatingRecords || selectedVisibleCount === 0;
     deleteFilteredButton.disabled = !canDeleteRecords || isLoadingRecords || isMutatingRecords || visibleIds.length === 0;
 }

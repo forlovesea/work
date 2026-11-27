@@ -184,6 +184,7 @@ try {
                         <span>작업상태</span>
                         <select id="workStatus" name="work_status">
                             <option>방문예정</option>
+                            <option>작업중</option>
                             <option>작업완료</option>
                             <option>작업실패</option>
                             <option>작업보류</option>
@@ -386,6 +387,7 @@ try {
                         <select id="workStatusFilter">
                             <option value="">전체 상태</option>
                             <option>방문예정</option>
+                            <option>작업중</option>
                             <option>작업완료</option>
                             <option>작업실패</option>
                             <option>작업보류</option>

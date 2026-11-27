@@ -1,19 +1,20 @@
 const installationStatuses = [
     { name: '작업완료', color: '#a8dfcc', ink: '#205c4a' },
     { name: '방문예정', color: '#b8cef3', ink: '#2e4d7a' },
+    { name: '작업중', color: '#9bdde5', ink: '#205c67' },
     { name: '작업보류', color: '#f4dba5', ink: '#71551e' },
     { name: '작업실패', color: '#efbfc9', ink: '#793d4c' },
     { name: '기타', color: '#d5c7ed', ink: '#594379' },
 ];
 
 function installationDashboardData(rows, devices = []) {
-    const groups = new Map(devices.map(name => [name, { name, counts: [0, 0, 0, 0, 0], total: 0 }]));
+    const groups = new Map(devices.map(name => [name, { name, counts: installationStatuses.map(() => 0), total: 0 }]));
     for (const row of rows) {
-        if (!groups.has(row.device_name)) groups.set(row.device_name, { name: row.device_name, counts: [0, 0, 0, 0, 0], total: 0 });
+        if (!groups.has(row.device_name)) groups.set(row.device_name, { name: row.device_name, counts: installationStatuses.map(() => 0), total: 0 });
         const group = groups.get(row.device_name);
         const status = installationStatuses.findIndex(item => item.name === row.work_status);
         const count = Number(row.record_count) || 0;
-        group.counts[status < 0 ? 4 : status] += count;
+        group.counts[status < 0 ? installationStatuses.findIndex(item => item.name === '기타') : status] += count;
         group.total += count;
     }
     const result = [...groups.values()];

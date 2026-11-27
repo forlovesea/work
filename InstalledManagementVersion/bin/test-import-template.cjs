@@ -6,7 +6,7 @@ const source = fs.readFileSync(require('node:path').join(__dirname, '../public/a
 const options = (values) => ({ options: values.map(value => ({ value })) });
 const context = vm.createContext({
     deviceSelect: options(['SMU02C + Door LCD', 'Door LCD', 'iIoT Gateway', 'SMU02C', '새 장비 & 테스트', '__new__']),
-    workStatusInput: options(['방문예정', '작업완료', '작업실패', '작업보류', '기타']),
+    workStatusInput: options(['방문예정', '작업중', '작업완료', '작업실패', '작업보류', '기타']),
     document: { querySelector: () => options(['v0.0.0.8']) },
     createZip: files => files,
     downloadBlob: files => { context.files = files; },
@@ -198,3 +198,11 @@ assert.equal(parse(partialModules).errors.length, 0);
 assert.equal(parse(partialModules).records[0].module_counts.join(','), '10,10');
 assert.equal(parse(Object.assign([...combined], { 21: '', 22: '' })).records[0].door_upgrade_version, '미입력');
 console.log('PASS: missing required fields, partial contacts/modules, optional blanks, blank rows');
+for (const extended of [false, true]) {
+    const statusHeaders = extended ? context.importTemplateHeaders() : context.basicImportHeaders();
+    const row = statusHeaders.map(header => ({ '설치장소(국소)': '작업중 현장', '작업상태': '작업중' })[header] || '');
+    const imported = parse(row, false, statusHeaders);
+    assert.equal(imported.errors.length, 0);
+    assert.equal(imported.records[0].work_status, '작업중');
+}
+console.log('PASS: in-progress status in basic and extended Excel imports');

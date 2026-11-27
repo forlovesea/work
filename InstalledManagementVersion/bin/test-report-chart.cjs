@@ -61,7 +61,7 @@ Object.assign(context, {
     versionDisplay: (record, key) => record[key] || 'v1',
     moduleSummary: () => 'Rack 01 10개', additionalRecordDetails: () => [],
 });
-for (const statuses of [[], ['작업완료'], ['방문예정'], ['작업완료', '작업완료', '방문예정', '작업실패', '작업보류', '기타', '', '알 수 없는 상태']]) {
+for (const statuses of [[], ['작업완료'], ['방문예정'], ['작업완료', '작업완료', '방문예정', '작업중', '작업실패', '작업보류', '기타', '', '알 수 없는 상태']]) {
     context.displayedRecords = statuses.map(work_status => ({work_status, device_name: 'A', rack_count: 1, module_counts: [10]}));
     for (const reportMode of [false, true]) {
         context.buildPrintableReport(reportMode);
@@ -71,7 +71,7 @@ for (const statuses of [[], ['작업완료'], ['방문예정'], ['작업완료',
         assert.equal(values['작업 완료'], `${completed}건`);
         assert.equal(values['미완료'], `${statuses.length - completed}건`);
         assert.equal(values['완료율'], `${statuses.length ? (completed / statuses.length * 100).toFixed(1) : '0.0'}%`);
-        assert.equal(['방문예정', '작업실패', '작업보류', '기타'].reduce((sum, key) => sum + parseInt(values[key]), 0), statuses.length - completed);
+        assert.equal(['방문예정', '작업중', '작업실패', '작업보류', '기타'].reduce((sum, key) => sum + parseInt(values[key]), 0), statuses.length - completed);
         assert.equal(values['조회 기간'], undefined);
     }
 }

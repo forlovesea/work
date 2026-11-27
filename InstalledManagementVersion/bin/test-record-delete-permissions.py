@@ -45,6 +45,12 @@ with tempfile.TemporaryDirectory(prefix='record-permissions-') as temporary:
             record_id = client.call(payload=record, expected=201)['record_id']
             client.call(payload=dict(record, action='update_record', id=record_id, upgrade_version='3'))
             assert client.call('api.php?date_mode=all')['records'][0]['upgrade_version'] == '3'
+            client.call(payload=dict(record, action='update_record', id=record_id, work_status='작업중'))
+            from urllib.parse import quote
+            progress_query = 'work_status=' + quote('작업중')
+            assert len(client.call('api.php?date_mode=all&' + progress_query)['records']) == 1
+            assert client.call('api.php?date_mode=all')['records'][0]['work_status'] == '작업중'
+            assert len(client.call('api.php?action=dashboard_records&device=Door%20LCD&' + progress_query)['records']) == 1
             selected = dict(action='delete_selected', record_ids=[record_id])
             filtered = dict(action='delete_filtered', filters={'date_mode': 'all'})
             for payload in [selected, filtered]:

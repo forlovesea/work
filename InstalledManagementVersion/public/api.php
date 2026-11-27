@@ -318,7 +318,7 @@ function validatedFilters(array $source): array
     }
 
     $deviceLength = is_string($filters['device']) ? preg_match_all('/./us', $filters['device']) : false;
-    if (!is_string($filters['work_status']) || !in_array($filters['work_status'], ['', '방문예정', '작업완료', '작업실패', '작업보류', '기타'], true)) {
+    if (!is_string($filters['work_status']) || !in_array($filters['work_status'], ['', '방문예정', '작업중', '작업완료', '작업실패', '작업보류', '기타'], true)) {
         respond(422, ['error' => '작업 상태 필터를 확인해 주세요.']);
     }
     $versionLength = is_string($filters['version']) ? preg_match_all('/./us', $filters['version']) : false;
@@ -436,7 +436,7 @@ function validateAdditionalFields(array $input, bool $requireVersions = true): a
     }
 
     $workStatus = $input['work_status'] ?? '방문예정';
-    $allowedStatuses = ['방문예정', '작업완료', '작업실패', '작업보류', '기타'];
+    $allowedStatuses = ['방문예정', '작업중', '작업완료', '작업실패', '작업보류', '기타'];
     if (!is_string($workStatus) || !in_array($workStatus, $allowedStatuses, true)) {
         $errors[] = '작업상태를 목록에서 선택해 주세요.';
         $workStatus = '방문예정';

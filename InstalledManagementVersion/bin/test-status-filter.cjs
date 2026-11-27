@@ -5,7 +5,7 @@ const source = fs.readFileSync(require('node:path').join(__dirname, '../public/a
 const context = vm.createContext({ URLSearchParams, currentDateMode: () => 'range', filterStartDate: { value: '2026-10-01' }, filterEndDate: { value: '2026-10-31' }, deviceFilter: { value: 'SMU02C' }, versionFilter: { value: 'v1' }, workStatusFilter: { value: '' } });
 const start = source.indexOf('function buildQueryString(');
 vm.runInContext(source.slice(start, source.indexOf('\nasync function ', start)), context);
-for (const status of ['', '방문예정', '작업완료', '작업실패', '작업보류', '기타']) {
+for (const status of ['', '방문예정', '작업중', '작업완료', '작업실패', '작업보류', '기타']) {
     context.workStatusFilter.value = status;
     const query = context.buildQueryString();
     assert.equal(query.get('work_status'), status || null);

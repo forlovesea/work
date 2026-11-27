@@ -1172,7 +1172,7 @@ function parseBasicImportRows(rows, sharedStrings, includeLocation = false) {
         }
         if (Boolean(name) !== Boolean(phone)) fail('담당자 이름과 연락처를 함께 입력하세요.');
         if (!device || ['__new__', '+ 새 장치 추가'].includes(device)) fail('실제 장비명을 입력하세요.');
-        if (!['', '방문예정', '작업완료', '작업실패', '작업보류', '기타'].includes(status)) fail('작업상태를 목록에서 선택하세요.');
+        if (!['', '방문예정', '작업중', '작업완료', '작업실패', '작업보류', '기타'].includes(status)) fail('작업상태를 목록에서 선택하세요.');
         const parsed = /^\d{4}-\d{2}-\d{2}$/.test(date) ? new Date(`${date}T00:00:00Z`) : null;
         if (!parsed || Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) fail('현장방문날짜는 YYYY-MM-DD 형식의 실제 날짜여야 합니다.');
         records.push({
@@ -1293,7 +1293,7 @@ function parseImportRows(sheetXml, sharedStrings) {
         for (const [key, label, limit] of [['category', '구분', 100], ['region', '지역', 100], ['site_name', '설치장소', 100], ['address', '주소', 300], ['work_status_other', '기타 작업상태', 100], ['notes', '비고', 2000]]) {
             if ([...extra[key]].length > limit) fail(`${label}은(는) ${limit}자 이내로 입력하세요.`);
         }
-        if (!['방문예정', '작업완료', '작업실패', '작업보류', '기타'].includes(extra.work_status)) fail('작업상태를 목록에서 선택하세요.');
+        if (!['방문예정', '작업중', '작업완료', '작업실패', '작업보류', '기타'].includes(extra.work_status)) fail('작업상태를 목록에서 선택하세요.');
         if (extra.work_status === '기타') extra.work_status_other = importFallback(extra.work_status_other, '기타 작업상태', defaults);
         if (extra.work_status !== '기타') extra.work_status_other = '';
         for (let i = 0; i < contactCount; i += 1) {
@@ -1591,7 +1591,7 @@ function buildPrintableReport(isCustomerReport) {
     );
 
     const completedCount = displayedRecords.filter((record) => record.work_status === '작업완료').length;
-    const pendingStatuses = ['방문예정', '작업실패', '작업보류'];
+    const pendingStatuses = ['방문예정', '작업중', '작업실패', '작업보류'];
     const pendingCounts = pendingStatuses.map((status) => (
         displayedRecords.filter((record) => (record.work_status || '방문예정') === status).length
     ));
@@ -1611,7 +1611,7 @@ function buildPrintableReport(isCustomerReport) {
         addReportElement(item, 'strong', '', value);
     }
     addReportElement(printReport, 'p', 'print-status-caption',
-        '현재 조회·내보내기 대상 기록 기준입니다. 미완료는 방문예정·작업실패·작업보류·기타를 포함합니다.');
+        '현재 조회·내보내기 대상 기록 기준입니다. 미완료는 방문예정·작업중·작업실패·작업보류·기타를 포함합니다.');
 
     if (isCustomerReport) {
         addReportElement(printReport, 'h2', 'print-section-title', '작업 요약');

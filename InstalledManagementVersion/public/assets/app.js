@@ -246,6 +246,7 @@ let editingRecordId = null;
 let editReturnPosition = null;
 let csrfToken = '';
 let canDeleteActivity = false;
+let canDeleteRecords = false;
 let deletingActivity = false;
 let activityIds = [];
 const selectedActivityIds = new Set();
@@ -290,6 +291,7 @@ async function deleteActivityLog(all = false) {
 }
 
 function showLogin(message = '', isError = false) {
+    setRecordDeletePermission(false);
     clearInterval(sessionTimer);
     sessionRemaining.textContent = '--:--';
     sessionMessage.textContent = '';
@@ -349,6 +351,7 @@ async function bootstrapSession() {
         }
         csrfToken = result.csrf_token;
         setActivityPermission(result.can_delete_activity);
+        setRecordDeletePermission(result.can_delete_records);
         setContactPrivacy(result.contacts_restricted);
         loginPanel.hidden = true;
         appShell.hidden = false;
@@ -1781,6 +1784,14 @@ function createRecordCard(record, index = 0) {
     return article;
 }
 
+function setRecordDeletePermission(allowed) {
+    canDeleteRecords = allowed === true;
+    for (const button of [deleteSelectedButton, deleteFilteredButton]) {
+        button.title = canDeleteRecords ? '' : '설치 정보를 삭제할 권한이 없습니다.';
+    }
+    updateRecordActionControls();
+}
+
 function updateRecordActionControls() {
     const visibleIds = displayedRecords.map((record) => record.id);
     const selectedVisibleCount = visibleIds.filter((id) => selectedRecordIds.has(id)).length;
@@ -1788,8 +1799,8 @@ function updateRecordActionControls() {
     selectAllRecords.checked = visibleIds.length > 0 && selectedVisibleCount === visibleIds.length;
     selectAllRecords.indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < visibleIds.length;
     selectAllRecords.disabled = isLoadingRecords || isMutatingRecords || visibleIds.length === 0;
-    deleteSelectedButton.disabled = isLoadingRecords || isMutatingRecords || selectedVisibleCount === 0;
-    deleteFilteredButton.disabled = isLoadingRecords || isMutatingRecords || visibleIds.length === 0;
+    deleteSelectedButton.disabled = !canDeleteRecords || isLoadingRecords || isMutatingRecords || selectedVisibleCount === 0;
+    deleteFilteredButton.disabled = !canDeleteRecords || isLoadingRecords || isMutatingRecords || visibleIds.length === 0;
 }
 
 function setRecordActionMessage(message, isError = false) {
@@ -2124,6 +2135,10 @@ function setActiveTab(tab, refresh = true) {
 }
 
 async function deleteRecords(payload, confirmation, progressMessage) {
+    if (!canDeleteRecords) {
+        setRecordActionMessage('설치 정보를 삭제할 권한이 없습니다.', true);
+        return;
+    }
     if (!window.confirm(confirmation)) {
         return;
     }
@@ -2209,6 +2224,7 @@ loginForm.addEventListener('submit', async (event) => {
         }
         csrfToken = result.csrf_token;
         setActivityPermission(result.can_delete_activity);
+        setRecordDeletePermission(result.can_delete_records);
         setContactPrivacy(result.contacts_restricted);
         loginPasswordInput.value = '';
         loginMessage.textContent = '';

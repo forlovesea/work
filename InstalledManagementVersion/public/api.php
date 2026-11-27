@@ -559,6 +559,7 @@ try {
             'authenticated' => isAppAuthenticated(),
             'session_remaining' => appSessionRemaining(),
             'can_delete_activity' => canDeleteActivity(),
+            'can_delete_records' => canDeleteRecords(),
             'contacts_restricted' => contactsRestricted(),
             'csrf_token' => isAppAuthenticated() ? csrfToken() : null,
         ]);
@@ -582,7 +583,7 @@ try {
             unset($_SESSION['contact_approval_owner']);
             $_SESSION['can_delete_activity'] = password_verify($password, $passwordHash) && hash_equals(DEFAULT_APP_PASSWORD, $password);
             unset($_SESSION['app_csrf_token']);
-            respond(200, ['csrf_token' => csrfToken(), 'can_delete_activity' => canDeleteActivity(), 'contacts_restricted' => contactsRestricted(), 'session_remaining' => appSessionRemaining()]);
+            respond(200, ['csrf_token' => csrfToken(), 'can_delete_activity' => canDeleteActivity(), 'can_delete_records' => canDeleteRecords(), 'contacts_restricted' => contactsRestricted(), 'session_remaining' => appSessionRemaining()]);
         }
 
         if (!isAppAuthenticated()) {
@@ -644,6 +645,10 @@ try {
     }
 
     $input = $requestInput;
+
+    if (in_array($input['action'] ?? '', ['delete_selected', 'delete_filtered'], true) && !canDeleteRecords()) {
+        respond(403, ['error' => '설치 정보를 삭제할 권한이 없습니다.']);
+    }
 
     if (in_array($input['action'] ?? '', ['request_contact_approval', 'consume_contact_approval'], true)) {
         handleContactApproval($input);

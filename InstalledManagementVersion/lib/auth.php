@@ -97,6 +97,11 @@ function canDeleteActivity(): bool
     return isAppAuthenticated() && ($_SESSION['can_delete_activity'] ?? false) === true;
 }
 
+function canDeleteRecords(): bool
+{
+    return isAppAuthenticated() && ($_SESSION['account_role'] ?? '') === 'primary';
+}
+
 function csrfToken(): string
 {
     if (!isset($_SESSION['app_csrf_token']) || !is_string($_SESSION['app_csrf_token'])) {

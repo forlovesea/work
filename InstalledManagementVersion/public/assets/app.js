@@ -1560,7 +1560,6 @@ function addReportElement(parent, tagName, className, text) {
 }
 
 function buildPrintableReport(isCustomerReport) {
-    const filters = currentFilterSummary();
     const reportDate = new Intl.DateTimeFormat('ko-KR', { dateStyle: 'long' }).format(new Date());
     const devices = [...new Set(displayedRecords.map((record) => record.device_name))];
     const rackCount = displayedRecords.reduce((sum, record) => sum + record.rack_count, 0);
@@ -1588,18 +1587,28 @@ function buildPrintableReport(isCustomerReport) {
             : '설치 정보 조회 화면의 현재 필터 결과',
     );
 
+    const completedCount = displayedRecords.filter((record) => record.work_status === '작업완료').length;
+    const pendingStatuses = ['방문예정', '작업실패', '작업보류'];
+    const pendingCounts = pendingStatuses.map((status) => (
+        displayedRecords.filter((record) => (record.work_status || '방문예정') === status).length
+    ));
+    const incompleteCount = displayedRecords.length - completedCount;
+    addReportElement(printReport, 'h2', 'print-section-title', '작업 진행 현황');
     const meta = addReportElement(printReport, 'div', 'print-meta');
     for (const [label, value] of [
-        ['조회 기간', filters.date],
-        ['장비명', filters.device],
-        ['현재 설치 버전', filters.version],
-        ['작업 상태', filters.workStatus],
-        ['작성일', reportDate],
+        ['전체 작업', `${displayedRecords.length}건`],
+        ['작업 완료', `${completedCount}건`],
+        ['미완료', `${incompleteCount}건`],
+        ['완료율', `${displayedRecords.length ? (completedCount / displayedRecords.length * 100).toFixed(1) : '0.0'}%`],
+        ...pendingStatuses.map((status, index) => [status, `${pendingCounts[index]}건`]),
+        ['기타', `${incompleteCount - pendingCounts.reduce((sum, count) => sum + count, 0)}건`],
     ]) {
         const item = addReportElement(meta, 'div', 'print-meta-item');
         addReportElement(item, 'span', 'print-meta-label', label);
         addReportElement(item, 'strong', '', value);
     }
+    addReportElement(printReport, 'p', 'print-status-caption',
+        '현재 조회·내보내기 대상 기록 기준입니다. 미완료는 방문예정·작업실패·작업보류·기타를 포함합니다.');
 
     if (isCustomerReport) {
         addReportElement(printReport, 'h2', 'print-section-title', '작업 요약');

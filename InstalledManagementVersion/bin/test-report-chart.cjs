@@ -52,3 +52,27 @@ context.appendInstallationReportChart(empty);
 assert.equal(empty.querySelectorAll('.device-column').length, 0);
 assert.ok(empty.querySelectorAll('p').some(node => node.textContent === '표시할 작업 현황이 없습니다.'));
 console.log('PASS: print chart matches dashboard, device filter, page-width grouping, static labels and unchanged live chart');
+
+const appSource = fs.readFileSync(path.join(__dirname, '../public/assets/app.js'), 'utf8');
+new vm.Script(appSource);
+vm.runInContext(appSource.slice(appSource.indexOf('function addReportElement('), appSource.indexOf('function showExportMessage(')), context);
+Object.assign(context, {
+    printReport: new Node(), displayedFilterParams: {},
+    versionDisplay: (record, key) => record[key] || 'v1',
+    moduleSummary: () => 'Rack 01 10개', additionalRecordDetails: () => [],
+});
+for (const statuses of [[], ['작업완료'], ['방문예정'], ['작업완료', '작업완료', '방문예정', '작업실패', '작업보류', '기타', '', '알 수 없는 상태']]) {
+    context.displayedRecords = statuses.map(work_status => ({work_status, device_name: 'A', rack_count: 1, module_counts: [10]}));
+    for (const reportMode of [false, true]) {
+        context.buildPrintableReport(reportMode);
+        const values = Object.fromEntries(context.printReport.querySelectorAll('.print-meta-item').map(item => item.children.map(child => child.textContent)));
+        const completed = statuses.filter(status => status === '작업완료').length;
+        assert.equal(values['전체 작업'], `${statuses.length}건`);
+        assert.equal(values['작업 완료'], `${completed}건`);
+        assert.equal(values['미완료'], `${statuses.length - completed}건`);
+        assert.equal(values['완료율'], `${statuses.length ? (completed / statuses.length * 100).toFixed(1) : '0.0'}%`);
+        assert.equal(['방문예정', '작업실패', '작업보류', '기타'].reduce((sum, key) => sum + parseInt(values[key]), 0), statuses.length - completed);
+        assert.equal(values['조회 기간'], undefined);
+    }
+}
+console.log('PASS: report work totals, completion rate, incomplete breakdown, empty data and both PDF modes');

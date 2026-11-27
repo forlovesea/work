@@ -1601,6 +1601,10 @@ h2 {
 }
 
 @media print {
+    :root {
+        background: #fff;
+    }
+
     html,
     body {
         width: 100%;
@@ -1613,18 +1617,12 @@ h2 {
         -webkit-print-color-adjust: exact;
     }
 
-    body * {
-        visibility: hidden !important;
-    }
-
-    .print-report,
-    .print-report * {
-        visibility: visible !important;
+    body > :not(#printReport) {
+        display: none !important;
     }
 
     .print-report {
-        position: absolute;
-        inset: 0;
+        position: static;
         display: block;
         width: 100%;
         color: #26334a;
@@ -1668,7 +1666,8 @@ h2 {
 
     .print-meta {
         display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        break-inside: avoid;
         gap: 4mm 8mm;
         margin-bottom: 8mm;
         padding: 5mm;
@@ -1695,6 +1694,7 @@ h2 {
     }
 
     .print-section-title {
+        break-after: avoid;
         margin: 8mm 0 4mm;
         padding-bottom: 2mm;
         border-bottom: 1px solid #dfe5ef;
@@ -1703,6 +1703,7 @@ h2 {
     }
 
     .print-summary-grid {
+        break-inside: avoid;
         display: grid;
         grid-template-columns: repeat(4, minmax(0, 1fr));
         gap: 3mm;
@@ -1730,6 +1731,7 @@ h2 {
     }
 
     .print-overview {
+        break-inside: avoid;
         margin: 0 0 4mm;
         padding: 4mm;
         border-left: 2mm solid #5274d2;

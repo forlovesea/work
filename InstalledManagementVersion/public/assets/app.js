@@ -2302,12 +2302,13 @@ historyList.addEventListener('click', (event) => {
         startEditingRecord(record, true);
     }
 });
-exportFormat.addEventListener('change', () => {
+function updateExportOptions() {
     reportOption.hidden = exportFormat.value !== 'pdf';
     showExportMessage(exportFormat.value === 'pdf'
         ? 'PDF 저장을 선택하면 CSV 파일도 함께 다운로드됩니다.'
         : '현재 조회된 목록을 선택한 파일 형식으로 내보냅니다.');
-});
+}
+exportFormat.addEventListener('change', updateExportOptions);
 exportButton.addEventListener('click', exportResults);
 cancelEditButton.addEventListener('click', () => {
     resetEntryForm();
@@ -2503,6 +2504,7 @@ visitDateInput.value = today();
 filterDate.value = today();
 filterStartDate.value = today();
 filterEndDate.value = today();
+updateExportOptions();
 updateDateFields();
 renderRackModules(1);
 fillAdditionalFields();

@@ -416,12 +416,12 @@ try {
                             <option value="excel">Excel 통합 문서 (.xlsx)</option>
                         </select>
                     </label>
-                    <label id="reportOption" class="report-option" hidden>
+                    <label id="reportOption" class="report-option">
                         <input id="reportFormat" type="checkbox">
                         <span class="report-check" aria-hidden="true"></span>
                         <span class="report-copy">
                             <strong>보고서 형식</strong>
-                            <small>고객 전달용 요약과 상세 내역을 포함합니다</small>
+                            <small>작업 집계·버전 변경 요약·참고 사항을 추가합니다</small>
                         </span>
                     </label>
                     <button id="exportButton" class="primary-button export-button" type="button" disabled>
@@ -429,7 +429,7 @@ try {
                     </button>
                 </div>
                 <p id="exportMessage" class="export-message" role="status" aria-live="polite">
-                    현재 조회된 목록을 내보냅니다. PDF 선택 시 CSV 파일도 함께 다운로드됩니다.
+                    PDF 저장을 선택하면 CSV 파일도 함께 다운로드됩니다.
                 </p>
             </div>
 

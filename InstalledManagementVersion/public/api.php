@@ -242,7 +242,7 @@ function loadData(PDO $database, array $filters): array
          FROM records GROUP BY device_name, work_status'
     )->fetchAll();
     $moduleMapRecords = $database->query(
-        'SELECT address, site_name, rack_count, rack_names, module_counts, stored_module_count FROM records'
+        'SELECT address, site_name, work_status, rack_count, rack_names, module_counts, stored_module_count FROM records'
     )->fetchAll();
     foreach ($moduleMapRecords as &$mapRecord) {
         $mapRecord['module_counts'] = json_decode($mapRecord['module_counts'], true, 512, JSON_THROW_ON_ERROR);

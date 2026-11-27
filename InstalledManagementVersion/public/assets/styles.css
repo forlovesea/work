@@ -1871,6 +1871,21 @@ h2 {
 #moduleMapAddresses p { margin: 0; padding: 9px 0; border-bottom: 1px solid #e8eee9; }
 #moduleMapAddresses strong, #moduleMapAddresses span { display: block; line-height: 1.6; }
 #moduleMapAddresses span { color: #63776f; font-size: 11px; }
+.module-map-canvas circle.is-in-progress { fill: #f58220; fill-opacity: 1; animation: module-map-dot-pulse 1.8s ease-in-out infinite; }
+.module-map-region.is-in-progress, .module-map-unknown.is-in-progress { color: #9b400a; border-color: #f49a47; background: #fff0df; animation: module-map-progress-pulse 1.8s ease-in-out infinite; }
+.module-map-region.is-in-progress:hover, .module-map-region.is-in-progress[aria-pressed="true"] { outline: 2px solid #df711e; outline-offset: 2px; }
+#moduleMapAddresses .module-map-site-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 7px; margin-bottom: 3px; }
+#moduleMapAddresses .module-map-site-heading strong { color: #263b32; font-size: 12px; }
+#moduleMapAddresses .module-status-badge { display: inline-flex; align-items: center; flex-shrink: 0; padding: 3px 10px; border-radius: 3px; clip-path: polygon(6px 0, calc(100% - 6px) 0, 100% 6px, 100% calc(100% - 6px), calc(100% - 6px) 100%, 6px 100%, 0 calc(100% - 6px), 0 6px); font-size: 10px; font-weight: 700; line-height: 1.5; white-space: nowrap; }
+#moduleMapAddresses .module-status-badge.is-in-progress { background: #ffd5a6; color: #8b3908; box-shadow: inset 0 0 0 1px #efa05b; }
+#moduleMapAddresses .module-status-badge.is-planned { background: #e1ecfc; color: #385d8c; }
+#moduleMapAddresses .module-status-badge.is-complete { background: #dcefe5; color: #286247; }
+#moduleMapAddresses .module-status-badge.is-on-hold { background: #fbefce; color: #7a6029; }
+#moduleMapAddresses .module-status-badge.is-failed { background: #f8e1e7; color: #91485c; }
+#moduleMapAddresses .module-status-badge.is-other { background: #ece5f5; color: #685384; }
+@keyframes module-map-progress-pulse { 0%, 100% { background-color: #fff0df; box-shadow: 0 0 0 0 #f5822000; } 50% { background-color: #ffd3a3; box-shadow: 0 0 0 4px #f5822026; } }
+@keyframes module-map-dot-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .module-map-canvas circle.is-in-progress, .module-map-region.is-in-progress, .module-map-unknown.is-in-progress { animation: none; } }
 @media screen and (min-width: 1024px) {
     .page-header { display: grid; grid-template-columns: 100px minmax(0, 1fr) 360px; gap: 18px 24px; align-items: center; }
     .page-header > .brand-mark { grid-column: 1; grid-row: 1; }

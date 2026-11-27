@@ -24,9 +24,14 @@ function moduleMapRegion(address) {
     return moduleMapRegions.find(region => region[1].includes(first))?.[0] || '주소 미분류';
 }
 
+const moduleMapStatuses = [
+    ['작업중', 'in-progress'], ['방문예정', 'planned'], ['작업완료', 'complete'],
+    ['작업보류', 'on-hold'], ['작업실패', 'failed'], ['기타', 'other'],
+];
+
 function moduleMapData(records) {
     const groups = new Map([...moduleMapRegions.map(region => region[0]), '주소 미분류']
-        .map(name => [name, { name, installed: 0, stored: 0, total: 0, records: 0, addresses: new Map() }]));
+        .map(name => [name, { name, installed: 0, stored: 0, total: 0, records: 0, inProgress: 0, addresses: new Map() }]));
     for (const record of records) {
         const address = String(record.address || '').trim() || '주소 미입력';
         const group = groups.get(moduleMapRegion(address));
@@ -36,9 +41,13 @@ function moduleMapData(records) {
         group.stored += stored;
         group.total += installed + stored;
         group.records += 1;
+        const rawStatus = String(record.work_status || '방문예정').replace(/\s+/g, '');
+        const status = moduleMapStatuses.some(([name]) => name === rawStatus) ? rawStatus : '기타';
+        if (status === '작업중') group.inProgress += 1;
         const siteName = String(record.site_name || '').trim() || '국소명 미입력';
         const key = JSON.stringify([address, siteName]);
-        const item = group.addresses.get(key) || { address, siteName, racks: new Map(), installed: 0, stored: 0, total: 0, records: 0 };
+        const item = group.addresses.get(key) || { address, siteName, racks: new Map(), statuses: new Map(), installed: 0, stored: 0, total: 0, records: 0 };
+        item.statuses.set(status, (item.statuses.get(status) || 0) + 1);
         (record.module_counts || []).forEach((count, index) => {
             const rackName = record.rack_names?.[index] || `Rack ${String(index + 1).padStart(2, '0')}`;
             item.racks.set(rackName, (item.racks.get(rackName) || 0) + Math.max(0, Number(count) || 0));
@@ -66,6 +75,7 @@ function renderModuleMap(records) {
     canvas.replaceChildren();
     details.hidden = true;
     get('moduleMapUnknown').hidden = true;
+    get('moduleMapUnknown').className = 'module-map-unknown';
     get('moduleMapAddresses').replaceChildren();
     if (!Array.isArray(records)) {
         get('moduleMapTotal').textContent = '— 개';
@@ -75,7 +85,7 @@ function renderModuleMap(records) {
     const groups = moduleMapData(records);
     const format = value => value.toLocaleString('ko-KR');
     get('moduleMapTotal').textContent = `${format([...groups.values()].reduce((sum, group) => sum + group.total, 0))}개`;
-    get('moduleMapMessage').textContent = records.length ? '지역을 누르면 주소별 수량을 볼 수 있습니다.' : '등록된 설치 기록이 없습니다.';
+    get('moduleMapMessage').textContent = records.length ? '지역을 누르면 설치장소별 수량과 작업상태를 볼 수 있습니다. 오렌지색 점멸은 작업중인 기록이 있는 지역입니다.' : '등록된 설치 기록이 없습니다.';
     const show = (name, open = true) => {
         const group = groups.get(name);
         details.dataset.region = name;
@@ -86,13 +96,25 @@ function renderModuleMap(records) {
         list.replaceChildren();
         for (const item of [...group.addresses.values()].sort((a, b) => b.total - a.total || a.address.localeCompare(b.address, 'ko'))) {
             const row = document.createElement('p');
+            const heading = document.createElement('span');
+            heading.className = 'module-map-site-heading';
             const site = document.createElement('strong');
             site.textContent = item.siteName;
+            heading.append(site);
+            for (const [status, className] of moduleMapStatuses) {
+                const statusCount = item.statuses.get(status);
+                if (!statusCount) continue;
+                const badge = document.createElement('span');
+                badge.className = `module-status-badge is-${className}`;
+                badge.textContent = `${status}${item.statuses.size > 1 ? ` ${statusCount}건` : ''}`;
+                badge.title = `${status} ${statusCount}건`;
+                heading.append(badge);
+            }
             const address = document.createElement('span');
             address.textContent = item.address;
             const count = document.createElement('span');
             count.textContent = moduleMapItemSummary(item);
-            row.append(site, address, count);
+            row.append(heading, address, count);
             list.append(row);
         }
         if (!group.records) list.textContent = '이 지역에 등록된 기록이 없습니다.';
@@ -115,17 +137,18 @@ function renderModuleMap(records) {
         dot.setAttribute('cx', px);
         dot.setAttribute('cy', py);
         dot.setAttribute('r', group.total ? 3 + Math.sqrt(group.total / max) * 6 : 2);
-        dot.setAttribute('class', group.total ? 'has-modules' : 'no-modules');
+        dot.setAttribute('class', `${group.total ? 'has-modules' : 'no-modules'}${group.inProgress ? ' is-in-progress' : ''}`);
         lines.append(dot);
         const button = document.createElement('button');
         button.type = 'button';
-        button.className = `module-map-region${group.total ? ' has-modules' : ''}`;
+        button.className = `module-map-region${group.total ? ' has-modules' : ''}${group.inProgress ? ' is-in-progress' : ''}`;
         button.style.left = `${x / 420 * 100}%`;
         button.style.top = `${y / 450 * 100}%`;
         button.dataset.region = name;
         button.setAttribute('aria-pressed', 'false');
         button.setAttribute('aria-controls', 'moduleMapDetails');
-        button.setAttribute('aria-label', `${name} 총 ${format(group.total)}개, 설치 ${format(group.installed)}개, 보관 ${format(group.stored)}개. 주소별 상세 보기`);
+        button.setAttribute('aria-label', `${name} 총 ${format(group.total)}개, 설치 ${format(group.installed)}개, 보관 ${format(group.stored)}개${group.inProgress ? `, 작업중 ${group.inProgress}건` : ''}. 주소별 상세 보기`);
+        button.title = group.inProgress ? `작업중 ${group.inProgress}건 · 설치장소별 상세 보기` : '설치장소별 상세 보기';
         const label = document.createElement('span');
         label.textContent = name;
         const count = document.createElement('strong');
@@ -138,7 +161,8 @@ function renderModuleMap(records) {
     if (unknown.records) {
         const button = get('moduleMapUnknown');
         button.hidden = false;
-        button.textContent = `주소 미분류 ${format(unknown.total)}개 · ${unknown.records}건 ›`;
+        button.className = `module-map-unknown${unknown.inProgress ? ' is-in-progress' : ''}`;
+        button.textContent = `주소 미분류 ${format(unknown.total)}개 · ${unknown.records}건${unknown.inProgress ? ` · 작업중 ${unknown.inProgress}건` : ''} ›`;
         button.onclick = () => show('주소 미분류');
     }
     if (previous && groups.has(previous)) show(previous, details.open);

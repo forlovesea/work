@@ -43,3 +43,41 @@ const repeatedItem = [...repeated.get('주소 미분류').addresses.values()][0]
 assert.equal(repeatedItem.siteName, '국소명 미입력');
 assert.equal(context.moduleMapItemSummary(repeatedItem), '총 20개 (Rack 01 15대, Rack 외 보관 모듈 수: 5대)');
 console.log('PASS: site separation, rack names, rack totals, stored totals and missing site/name fallbacks');
+class Node {
+    constructor(tag) { this.tag = tag; this.children = []; this.dataset = {}; this.style = {}; this.attributes = {}; }
+    append(...nodes) { this.children.push(...nodes); }
+    replaceChildren() { this.children = []; }
+    setAttribute(key, value) { this.attributes[key] = value; }
+    addEventListener(name, handler) { this[name] = handler; }
+    querySelectorAll(tag) { return this.children.flatMap(child => [...(child.tag === tag ? [child] : []), ...child.querySelectorAll(tag)]); }
+}
+const nodes = new Map();
+context.document = {
+    getElementById(id) { if (!nodes.has(id)) nodes.set(id, new Node('div')); return nodes.get(id); },
+    createElement: tag => new Node(tag), createElementNS: (_, tag) => new Node(tag),
+};
+const records = [
+    { address: '서울 강남구', site_name: '<국소>', work_status: '작업중', installed: 0 },
+    { address: '서울 강남구', site_name: '<국소>', work_status: '작업완료', installed: 10 },
+    { address: '부산 해운대구', site_name: '부산국소', work_status: '작업완료', installed: 20 },
+    { address: '', site_name: '미분류국소', work_status: '작업 중', installed: 0 },
+];
+const progress = context.moduleMapData(records);
+assert.equal(progress.get('서울').inProgress, 1);
+assert.equal(progress.get('주소 미분류').inProgress, 1);
+assert.equal([...progress.get('서울').addresses.values()][0].statuses.size, 2);
+context.renderModuleMap(records);
+const buttons = nodes.get('moduleMapCanvas').querySelectorAll('button');
+assert.match(buttons.find(button => button.dataset.region === '서울').className, /is-in-progress/);
+assert.doesNotMatch(buttons.find(button => button.dataset.region === '부산').className, /is-in-progress/);
+assert.match(nodes.get('moduleMapUnknown').className, /is-in-progress/);
+buttons.find(button => button.dataset.region === '서울').click();
+const heading = nodes.get('moduleMapAddresses').children[0].children[0];
+assert.equal(heading.children[0].textContent, '<국소>');
+assert.equal(heading.children[1].textContent, '작업중 1건');
+assert.equal(heading.children[2].textContent, '작업완료 1건');
+context.renderModuleMap(records.map(record => ({ ...record, work_status: '작업완료' })));
+assert.ok(nodes.get('moduleMapCanvas').querySelectorAll('button').every(button => !button.className.includes('is-in-progress')));
+assert.doesNotMatch(nodes.get('moduleMapUnknown').className, /is-in-progress/);
+assert.equal(nodes.get('moduleMapAddresses').children[0].children[0].children[1].textContent, '작업완료');
+console.log('PASS: progress regions, zero modules, mixed site statuses, safe text badges and refresh cleanup');

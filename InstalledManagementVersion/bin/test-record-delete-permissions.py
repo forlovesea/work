@@ -50,6 +50,7 @@ with tempfile.TemporaryDirectory(prefix='record-permissions-') as temporary:
             progress_query = 'work_status=' + quote('작업중')
             assert len(client.call('api.php?date_mode=all&' + progress_query)['records']) == 1
             assert client.call('api.php?date_mode=all')['records'][0]['work_status'] == '작업중'
+            assert client.call('api.php?date_mode=all')['module_map_records'][0]['work_status'] == '작업중'
             assert len(client.call('api.php?action=dashboard_records&device=Door%20LCD&' + progress_query)['records']) == 1
             selected = dict(action='delete_selected', record_ids=[record_id])
             filtered = dict(action='delete_filtered', filters={'date_mode': 'all'})

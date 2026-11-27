@@ -1598,6 +1598,7 @@ function buildPrintableReport(isCustomerReport) {
     const incompleteCount = displayedRecords.length - completedCount;
     addReportElement(printReport, 'h2', 'print-section-title', '작업 진행 현황');
     const meta = addReportElement(printReport, 'div', 'print-meta');
+    addReportElement(meta, 'h3', 'print-meta-heading', '전체 작업 요약');
     for (const [label, value] of [
         ['전체 작업', `${displayedRecords.length}건`],
         ['작업 완료', `${completedCount}건`],
@@ -1606,6 +1607,9 @@ function buildPrintableReport(isCustomerReport) {
         ...pendingStatuses.map((status, index) => [status, `${pendingCounts[index]}건`]),
         ['기타', `${incompleteCount - pendingCounts.reduce((sum, count) => sum + count, 0)}건`],
     ]) {
+        if (label === pendingStatuses[0]) {
+            addReportElement(meta, 'h3', 'print-meta-heading print-meta-divider', '미완료 작업 상세');
+        }
         const item = addReportElement(meta, 'div', 'print-meta-item');
         addReportElement(item, 'span', 'print-meta-label', label);
         addReportElement(item, 'strong', '', value);

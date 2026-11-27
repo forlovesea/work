@@ -72,6 +72,7 @@ try {
             <section class="module-map-panel" aria-labelledby="moduleMapTitle">
                 <div class="module-map-heading"><h2 id="moduleMapTitle">전국 모듈 현황</h2><strong id="moduleMapTotal">— 개</strong></div>
                 <p class="module-map-caption">설치 + 보관 · 전체 등록 기록 · 주소의 시·도 기준</p>
+                <label class="module-map-option"><input id="moduleMapHideZero" type="checkbox" checked> 모듈 0개 지역 숨기기</label>
                 <div id="moduleMapCanvas" class="module-map-canvas" role="group" aria-label="남한 지역별 모듈 수, 지역을 선택하면 주소별 수량 표시"></div>
                 <p id="moduleMapMessage" class="module-map-message" role="status">불러오는 중…</p>
                 <button id="moduleMapUnknown" class="module-map-unknown" type="button" hidden></button>

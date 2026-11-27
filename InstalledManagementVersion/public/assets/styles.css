@@ -1853,6 +1853,8 @@ h2 {
 .module-map-heading h2 { margin: 0; font-size: 16px; }
 .module-map-heading > strong { font-size: 21px; color: #205c4a; font-variant-numeric: tabular-nums; }
 .module-map-caption, .module-map-message { font-size: 11px; color: #63776f; line-height: 1.6; margin: 8px 0; }
+.module-map-option { display: flex; align-items: center; gap: 6px; width: fit-content; margin: 8px 0 12px; color: #466459; font-size: 12px; cursor: pointer; }
+.module-map-option input { width: 16px; height: 16px; margin: 0; accent-color: #278566; }
 .module-map-canvas { position: relative; width: 100%; aspect-ratio: 420 / 450; background: url('korea-outline.svg') center / contain no-repeat; }
 .module-map-canvas > svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
 .module-map-canvas path { fill: none; stroke: #98b5aa; stroke-width: .8; }

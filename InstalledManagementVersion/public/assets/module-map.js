@@ -72,6 +72,9 @@ function renderModuleMap(records) {
     const canvas = get('moduleMapCanvas');
     const details = get('moduleMapDetails');
     const previous = details.dataset.region;
+    const hideZeroControl = get('moduleMapHideZero');
+    const hideZero = hideZeroControl.checked !== false;
+    hideZeroControl.onchange = () => renderModuleMap(records);
     canvas.replaceChildren();
     details.hidden = true;
     get('moduleMapUnknown').hidden = true;
@@ -83,6 +86,7 @@ function renderModuleMap(records) {
         return;
     }
     const groups = moduleMapData(records);
+    const isVisible = group => !hideZero || group.total > 0;
     const format = value => value.toLocaleString('ko-KR');
     get('moduleMapTotal').textContent = `${format([...groups.values()].reduce((sum, group) => sum + group.total, 0))}개`;
     get('moduleMapMessage').textContent = records.length ? '지역을 누르면 설치장소별 수량과 작업상태를 볼 수 있습니다. 오렌지색 점멸은 작업중인 기록이 있는 지역입니다.' : '등록된 설치 기록이 없습니다.';
@@ -128,6 +132,7 @@ function renderModuleMap(records) {
     const max = Math.max(1, ...[...groups.values()].map(group => group.total));
     for (const [name, , lon, lat, x, y] of moduleMapRegions) {
         const group = groups.get(name);
+        if (!isVisible(group)) continue;
         const px = 110 + (lon - 125) * 48;
         const py = 25 + (38.7 - lat) * 68;
         const line = document.createElementNS(ns, 'path');
@@ -158,12 +163,12 @@ function renderModuleMap(records) {
         canvas.append(button);
     }
     const unknown = groups.get('주소 미분류');
-    if (unknown.records) {
+    if (unknown.records && isVisible(unknown)) {
         const button = get('moduleMapUnknown');
         button.hidden = false;
         button.className = `module-map-unknown${unknown.inProgress ? ' is-in-progress' : ''}`;
         button.textContent = `주소 미분류 ${format(unknown.total)}개 · ${unknown.records}건${unknown.inProgress ? ` · 작업중 ${unknown.inProgress}건` : ''} ›`;
         button.onclick = () => show('주소 미분류');
     }
-    if (previous && groups.has(previous)) show(previous, details.open);
+    if (previous && groups.has(previous) && isVisible(groups.get(previous))) show(previous, details.open);
 }
